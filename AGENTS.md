@@ -9,17 +9,16 @@
   - `scripts/` dev/ops helpers (dev.sh, smoke, stack snapshot/rollback, port sync).
   - `tests/` unit, integration, parity, and Playwright suites plus fixtures.
   - `docs/` schema exports and runbooks (read only when relevant to the task).
-  - `external/` vendored references (e.g., `external/codex/` has its own AGENTS.md).
+  - `external/` optional local reference clones (ignored by git; see `external/README.md`).
   - `.codev/` (dev Codex HOME) and `.codex-api/` (prod Codex HOME) are gitignored; never commit secrets inside.
 
 ## Modules / subprojects
 
-| Module            | Type         | Path              | What it owns                              | How to run                                                             | Tests                                                                    | Docs                          | AGENTS                     |
-| ----------------- | ------------ | ----------------- | ----------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------ | ----------------------------- | -------------------------- |
-| Proxy API         | node/express | `.`               | OpenAI-compatible proxy, workers, scripts | `npm run dev` (live reload + app-server supervisor) or `npm run start` | `npm run test:unit`, `npm run test:integration`, `npm test` (Playwright) | README.md                     | `src/AGENTS.md`            |
-| ForwardAuth       | node/http    | `auth/`           | Traefik bearer auth gate                  | `PROXY_API_KEY=... node auth/server.mjs`                               | curl `/verify`                                                           | README.md (ForwardAuth notes) | `auth/AGENTS.md`           |
-| Docs              | docs         | `docs/`           | Schema exports, runbooks                  | n/a (static)                                                           | `npm run lint:runbooks` if editing                                       | docs/                         | (none)                     |
-| External codex-rs | rust         | `external/codex/` | Upstream codex-rs reference               | see per-dir instructions                                               | see per-dir instructions                                                 | upstream docs                 | `external/codex/AGENTS.md` |
+| Module      | Type         | Path    | What it owns                              | How to run                                                             | Tests                                                                    | Docs                          | AGENTS           |
+| ----------- | ------------ | ------- | ----------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------ | ----------------------------- | ---------------- |
+| Proxy API   | node/express | `.`     | OpenAI-compatible proxy, workers, scripts | `npm run dev` (live reload + app-server supervisor) or `npm run start` | `npm run test:unit`, `npm run test:integration`, `npm test` (Playwright) | README.md                     | `src/AGENTS.md`  |
+| ForwardAuth | node/http    | `auth/` | Traefik bearer auth gate                  | `PROXY_API_KEY=... node auth/server.mjs`                               | curl `/verify`                                                           | README.md (ForwardAuth notes) | `auth/AGENTS.md` |
+| Docs        | docs         | `docs/` | Schema exports, runbooks                  | n/a (static)                                                           | `npm run lint:runbooks` if editing                                       | docs/                         | (none)           |
 
 ## Cross-domain workflows
 
@@ -124,4 +123,3 @@
 
 - `src/AGENTS.md`
 - `auth/AGENTS.md`
-- `external/codex/AGENTS.md`

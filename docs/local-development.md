@@ -30,6 +30,17 @@ This document focuses on running the proxy locally for development and debugging
   npm run dev:stack:down
   ```
 
+## External references (optional)
+
+Compatibility checks sometimes refer to upstream Codex or Obsidian Copilot behavior. If you want
+local reference copies, populate `external/` (ignored by git) via:
+
+```bash
+scripts/fetch-external.sh
+```
+
+See [`../external/README.md`](../external/README.md) for details.
+
 ## Useful checks
 
 ```bash

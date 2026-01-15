@@ -82,6 +82,17 @@ For production requirements (Traefik, Codex HOME, auth), see [docs/deployment/pr
 
 Full configuration and defaults: [docs/configuration.md](docs/configuration.md).
 
+## Optional external references
+
+If you want local copies of upstream Codex or Obsidian Copilot for compatibility checks,
+populate the ignored `external/` directory via:
+
+```bash
+scripts/fetch-external.sh
+```
+
+See [external/README.md](external/README.md) for details.
+
 ## Documentation map
 
 - [docs/README.md](docs/README.md) - doc index
