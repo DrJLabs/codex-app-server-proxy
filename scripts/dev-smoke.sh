@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 # Usage:
-#   DEV_DOMAIN=codex-dev.onemainarmy.com [KEY=sk-dev-...] bash scripts/dev-smoke.sh
+#   DEV_DOMAIN=codex-dev.example.com [KEY=sk-dev-...] bash scripts/dev-smoke.sh
 # Optional:
 #   ORIGIN_HOST=127.0.0.1    # where Traefik listens (host loopback), default 127.0.0.1
 #   SKIP_ORIGIN=1            # only test via public domain

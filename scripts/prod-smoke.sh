@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 # Prod smoke test for the Codex API behind Traefik/Cloudflare
 # Usage:
-#   DOMAIN=codex-api.onemainarmy.com [KEY=sk-...] bash scripts/prod-smoke.sh
+#   DOMAIN=codex-api.example.com [KEY=sk-...] bash scripts/prod-smoke.sh
 # Optional:
 #   ORIGIN_HOST=127.0.0.1   # IP/host where Traefik listens (default 127.0.0.1)
 #   SKIP_ORIGIN=1            # only test via public domain

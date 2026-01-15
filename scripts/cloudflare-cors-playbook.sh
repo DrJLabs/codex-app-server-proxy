@@ -4,7 +4,7 @@
 # Purpose
 # - Manage the zone-level http_response_headers_transform ruleset used to set
 #   CORS response headers (ACAO/Allow-Methods/Allow-Headers/Max-Age) for
-#   codex-api.onemainarmy.com, including adding/removing request headers from
+#   your production domain (set via HOST), including adding/removing request headers from
 #   Access-Control-Allow-Headers when client SDKs change (e.g., Stainless/Obsidian).
 #
 # Usage
@@ -23,7 +23,7 @@
 # Notes
 # - This script never prints your token. It uses it only for Authorization.
 # - The rule is identified by ref "cors_set_headers". Safe to re-run anytime.
-# - Host/path/method expression is scoped to codex-api.onemainarmy.com and /v1/*.
+# - Host/path/method expression is scoped to $HOST and /v1/*.
 #
 set -euo pipefail
 
@@ -32,11 +32,16 @@ require curl; require jq; require sed; require awk
 
 CF_API_TOKEN=${CLOUDFLARE_API_TOKEN:-${CF_API_TOKEN:-}}
 ZONE_ID=${ZONE_ID:-}
-HOST=${HOST:-codex-api.onemainarmy.com}
+HOST=${HOST:-${DOMAIN:-}}
 PATH_PREFIX=${PATH_PREFIX:-/v1/}
 
 if [[ -z "$CF_API_TOKEN" || -z "$ZONE_ID" ]]; then
   echo "Set CLOUDFLARE_API_TOKEN (or CF_API_TOKEN) and ZONE_ID env vars." >&2
+  exit 2
+fi
+
+if [[ -z "$HOST" ]]; then
+  echo "Set HOST (or DOMAIN) env var for the target hostname." >&2
   exit 2
 fi
 
@@ -178,4 +183,3 @@ case "$cmd" in
     echo "Usage: $0 {verify|show|upsert-default|add-header NAME|remove-header NAME|set-acao VALUE|set-methods VALUE|set-max-age SECONDS}" >&2
     exit 64 ;;
 esac
-
