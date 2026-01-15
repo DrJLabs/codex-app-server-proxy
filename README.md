@@ -78,7 +78,7 @@ For production requirements (Traefik, Codex HOME, auth), see [docs/deployment/pr
 | ----------------------------- | -------------------- | ----------------------------------------------------------------------- |
 | `PROXY_API_KEY`               | `codex-local-secret` | Bearer token for protected routes                                       |
 | `PORT`                        | `11435`              | Listen port for `node server.js`/compose (dev script defaults to 18000) |
-| `PROXY_ENV`                   | _(empty)_            | Model advertising mode (`dev` -> `codev-*`)                             |
+| `PROXY_ENV`                   | `_(empty)_`          | Model advertising mode (`dev` -> `codev-*`)                             |
 | `PROXY_ENABLE_RESPONSES`      | `true`               | Enable `/v1/responses`                                                  |
 | `PROXY_OUTPUT_MODE`           | `obsidian-xml`       | Default output mode for `/v1/chat/completions`                          |
 | `PROXY_RESPONSES_OUTPUT_MODE` | `openai-json`        | Default output mode for `/v1/responses`                                 |

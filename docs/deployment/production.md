@@ -1,6 +1,6 @@
 # Production Deployment (docker-compose.yml)
 
-[`../docker-compose.yml`](../docker-compose.yml) in this repository is the source of truth for production routing labels and runtime expectations.
+[`../../docker-compose.yml`](../../docker-compose.yml) in this repository is the source of truth for production routing labels and runtime expectations.
 
 ## Assumptions
 
@@ -39,7 +39,7 @@ http:
 docker compose up -d --pull always --force-recreate
 ```
 
-If you need a local build instead of GHCR, set `IMAGE` explicitly or use the local compose example ([`../infra/compose/docker-compose.local.example.yml`](../infra/compose/docker-compose.local.example.yml)).
+If you need a local build instead of GHCR, set `IMAGE` explicitly or use the local compose example ([`../../infra/compose/docker-compose.local.example.yml`](../../infra/compose/docker-compose.local.example.yml)).
 
 ## Verify
 
