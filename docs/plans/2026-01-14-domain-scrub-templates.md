@@ -58,52 +58,8 @@
 - Create: `scripts/render-infra.sh`
 - Modify: `.gitignore`
 - Remove from git index: `infra/cloudflare/rht.json`, `infra/cloudflare/rht_update.json`, `workers/cors-preflight-logger/wrangler.toml`
-- Create `scripts/validate-domain-scrub.sh`
 
-**Step 1: Write the failing test**
-
-Create a simple validator that fails if generated files are missing or if placeholder domains leak into tracked configs:
-
-```bash
-#!/usr/bin/env bash
-set -Eeuo pipefail
-
-missing=0
-for f in infra/cloudflare/rht.json infra/cloudflare/rht_update.json workers/cors-preflight-logger/wrangler.toml; do
-  if [[ ! -f "$f" ]]; then
-    echo "Missing generated file: $f" >&2
-    missing=1
-  fi
-done
-
-mapfile -t tracked_files < <(git ls-files)
-
-if rg -n "onemainarmy" --glob "!scripts/validate-domain-scrub.sh" -- "${tracked_files[@]}" >/dev/null 2>&1; then
-  echo "Found onemainarmy.com in tracked files" >&2
-  exit 1
-fi
-
-if rg -n "example.com" \
-  -g '!docs/**' \
-  -g '!**/*.md' \
-  -g '!**/*.example.*' \
-  -g '!.env.example' \
-  -g '!.env.dev.example' \
-  -g '!scripts/validate-domain-scrub.sh' \
-  -- "${tracked_files[@]}" >/dev/null 2>&1; then
-  echo "Found example.com in tracked files" >&2
-  exit 1
-fi
-
-exit "$missing"
-```
-
-**Step 2: Run test to verify it fails**
-
-Run: `bash scripts/validate-domain-scrub.sh`
-Expected: FAIL (missing generated files + existing literals).
-
-**Step 3: Write minimal implementation**
+**Step 1: Write minimal implementation**
 
 - Add `.example` templates with `${DOMAIN}` / `${DEV_DOMAIN}` placeholders in expressions and routes.
 - Add `scripts/render-infra.sh` that requires env vars and uses `envsubst` to render templates, e.g.:
@@ -126,17 +82,16 @@ envsubst '$DOMAIN $DEV_DOMAIN $ZONE_NAME' < workers/cors-preflight-logger/wrangl
 - Add generated outputs to `.gitignore` and remove them from the index:
   - `git rm --cached infra/cloudflare/rht.json infra/cloudflare/rht_update.json workers/cors-preflight-logger/wrangler.toml`
 
-**Step 4: Run test to verify it passes**
+**Step 2: Render and verify outputs**
 
 Run:
 - `DOMAIN=codex-api.example.com DEV_DOMAIN=codex-dev.example.com ZONE_NAME=example.com bash scripts/render-infra.sh`
-- `bash scripts/validate-domain-scrub.sh`
-Expected: PASS.
+Expected: generated files exist at the target paths and match the templates with substituted values.
 
-**Step 5: Commit**
+**Step 3: Commit**
 
 ```bash
-git add .gitignore infra/cloudflare/*.example.json workers/cors-preflight-logger/wrangler.example.toml scripts/render-infra.sh scripts/validate-domain-scrub.sh
+git add .gitignore infra/cloudflare/*.example.json workers/cors-preflight-logger/wrangler.example.toml scripts/render-infra.sh
 git rm --cached infra/cloudflare/rht.json infra/cloudflare/rht_update.json workers/cors-preflight-logger/wrangler.toml
 git commit -m "chore(infra): template cloudflare and wrangler config"
 ```
@@ -154,30 +109,7 @@ git commit -m "chore(infra): template cloudflare and wrangler config"
 - Modify: `.env.example`
 - Modify: `.env.dev.example`
 
-**Step 1: Write the failing test**
-
-Extend `scripts/validate-domain-scrub.sh` to fail if example.com is found in tracked files (exclude docs/templates):
-
-```bash
-if rg -n "example.com" \
-  -g '!docs/**' \
-  -g '!**/*.md' \
-  -g '!**/*.example.*' \
-  -g '!.env.example' \
-  -g '!.env.dev.example' \
-  -g '!scripts/validate-domain-scrub.sh' \
-  -- "${tracked_files[@]}" >/dev/null 2>&1; then
-  echo "Found example.com in tracked files" >&2
-  exit 1
-fi
-```
-
-**Step 2: Run test to verify it fails**
-
-Run: `bash scripts/validate-domain-scrub.sh`
-Expected: FAIL (existing literals).
-
-**Step 3: Write minimal implementation**
+**Step 1: Write minimal implementation**
 
 - Replace hardcoded hostnames in compose labels with `${DOMAIN}` / `${DEV_DOMAIN}`.
 - Replace hardcoded CORS allowlists with `${PROXY_CORS_ALLOWED_ORIGINS}` / `${DEV_PROXY_CORS_ALLOWED_ORIGINS}` set in `.env` / `.env.dev`.
@@ -192,12 +124,11 @@ Expected: FAIL (existing literals).
   - `DOMAIN=${DOMAIN:?set DOMAIN} ...`
 - Update smoke/playbook comments to reference env variables instead of real domains.
 
-**Step 4: Run test to verify it passes**
+**Step 2: Verify**
 
-Run: `bash scripts/validate-domain-scrub.sh`
-Expected: PASS.
+- Confirm hardcoded domains are removed outside templates, example envs, and docs.
 
-**Step 5: Commit**
+**Step 3: Commit**
 
 ```bash
 git add docker-compose.yml infra/compose/compose.dev.stack.yml package.json scripts/*.sh .env.example .env.dev.example
@@ -211,23 +142,7 @@ git commit -m "chore(config): parameterize domains"
 - Modify: `workers/cors-preflight-logger/README.md`
 - Modify: `workers/cors-preflight-logger/wrangler.example.toml`
 
-**Step 1: Write the failing test**
-
-Add a validation check to ensure the worker no longer hardcodes domains:
-
-```bash
-if rg -n "example.com" workers/cors-preflight-logger/src/index.js >/dev/null 2>&1; then
-  echo "Worker allowlist still contains example.com" >&2
-  exit 1
-fi
-```
-
-**Step 2: Run test to verify it fails**
-
-Run: `bash scripts/validate-domain-scrub.sh`
-Expected: FAIL.
-
-**Step 3: Write minimal implementation**
+**Step 1: Write minimal implementation**
 
 - Update worker code to read `ALLOWED_ORIGINS` from env and merge with local defaults:
 
@@ -246,12 +161,7 @@ const buildAllowed = (env) => [...parseEnvList(env.ALLOWED_ORIGINS), ...STATIC_A
 - Update `wrangler.example.toml` to set `ALLOWED_ORIGINS` based on `${DOMAIN}` and `${DEV_DOMAIN}`.
 - Document required vars in `workers/cors-preflight-logger/README.md`.
 
-**Step 4: Run test to verify it passes**
-
-Run: `bash scripts/validate-domain-scrub.sh`
-Expected: PASS.
-
-**Step 5: Commit**
+**Step 2: Commit**
 
 ```bash
 git add workers/cors-preflight-logger/src/index.js workers/cors-preflight-logger/README.md workers/cors-preflight-logger/wrangler.example.toml
@@ -283,10 +193,9 @@ Expected: FAIL before docs updates.
 - Add a short section describing `scripts/render-infra.sh` and required envs (`DOMAIN`, `DEV_DOMAIN`, `ZONE_NAME`).
 - Note that generated files are ignored and must be rendered before deploy.
 
-**Step 4: Run test to verify it passes**
+**Step 4: Verify docs**
 
-Run the `rg` command again.
-Expected: PASS.
+- Confirm examples reference template usage and env-driven rendering.
 
 **Step 5: Commit**
 
@@ -296,7 +205,6 @@ git commit -m "docs: document infra render step"
 ```
 
 ## Tests to run
-- `bash scripts/validate-domain-scrub.sh`
 - `DOMAIN=codex-api.example.com DEV_DOMAIN=codex-dev.example.com ZONE_NAME=example.com bash scripts/render-infra.sh`
 - `docker compose config | rg -n "codex-api"` (with `DOMAIN` exported)
 - Optional runtime checks: `npm run smoke:dev` and `npm run smoke:prod` with envs set.

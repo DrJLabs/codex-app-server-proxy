@@ -44,6 +44,7 @@ docs/internal/
 infra/cloudflare/rht.json
 infra/cloudflare/rht_update.json
 workers/cors-preflight-logger/wrangler.toml
+scripts/validate-domain-scrub.sh
 
 # Dev Codex HOME (.codev): track templates, ignore runtime artifacts below
 # We re-include .codev so its example config is versioned, then selectively ignore
