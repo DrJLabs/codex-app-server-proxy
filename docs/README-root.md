@@ -59,7 +59,7 @@ npm run dev:shim
 
   ```bash
   cp infra/compose/docker-compose.local.example.yml docker-compose.local.yml
-  docker compose -f docker-compose.local.yml up --build
+  PROXY_API_KEY=codex-local-secret docker compose -f docker-compose.local.yml up --build
   ```
 
 For production requirements (Traefik, Codex HOME, auth), see [docs/deployment/production.md](docs/deployment/production.md).
@@ -71,14 +71,14 @@ For production requirements (Traefik, Codex HOME, auth), see [docs/deployment/pr
 
 ## Minimal configuration
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `PROXY_API_KEY` | `codex-local-secret` | Bearer token for protected routes |
-| `PORT` | `11435` | Listen port |
-| `PROXY_ENV` | *(empty)* | Model advertising mode (`dev` -> `codev-*`) |
-| `PROXY_ENABLE_RESPONSES` | `true` | Enable `/v1/responses` |
-| `PROXY_OUTPUT_MODE` | `obsidian-xml` | Default output mode for `/v1/chat/completions` |
-| `PROXY_RESPONSES_OUTPUT_MODE` | `openai-json` | Default output mode for `/v1/responses` |
+| Variable                      | Default              | Purpose                                        |
+| ----------------------------- | -------------------- | ---------------------------------------------- |
+| `PROXY_API_KEY`               | `codex-local-secret` | Bearer token for protected routes              |
+| `PORT`                        | `11435`              | Listen port                                    |
+| `PROXY_ENV`                   | _(empty)_            | Model advertising mode (`dev` -> `codev-*`)    |
+| `PROXY_ENABLE_RESPONSES`      | `true`               | Enable `/v1/responses`                         |
+| `PROXY_OUTPUT_MODE`           | `obsidian-xml`       | Default output mode for `/v1/chat/completions` |
+| `PROXY_RESPONSES_OUTPUT_MODE` | `openai-json`        | Default output mode for `/v1/responses`        |
 
 Full configuration and defaults: [docs/configuration.md](docs/configuration.md).
 

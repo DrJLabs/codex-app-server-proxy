@@ -59,7 +59,7 @@ npm run dev:shim
 
   ```bash
   cp infra/compose/docker-compose.local.example.yml docker-compose.local.yml
-  docker compose -f docker-compose.local.yml up --build
+  PROXY_API_KEY=codex-local-secret docker compose -f docker-compose.local.yml up --build
   ```
 
 For production requirements (Traefik, Codex HOME, auth), see [docs/deployment/production.md](docs/deployment/production.md).
