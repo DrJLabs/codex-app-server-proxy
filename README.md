@@ -268,6 +268,7 @@ DOMAIN=codex-api.example.com DEV_DOMAIN=codex-dev.example.com ZONE_NAME=example.
 ```
 
 Generated files:
+
 - `infra/cloudflare/rht.json`
 - `infra/cloudflare/rht_update.json`
 - `workers/cors-preflight-logger/wrangler.toml`
