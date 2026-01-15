@@ -144,12 +144,12 @@ Next steps to deploy on production host:
    docker compose up -d --build --force-recreate
 
 2) Smoke test via Cloudflare (set your domain and optional KEY):
-   DOMAIN=codex-api.onemainarmy.com npm run smoke:prod
+   DOMAIN=codex-api.example.com npm run smoke:prod
    # With auth for chat tests:
-   DOMAIN=codex-api.onemainarmy.com KEY=sk-... npm run smoke:prod
+   DOMAIN=codex-api.example.com KEY=sk-... npm run smoke:prod
 
 3) Optional live E2E (requires KEY in .env or environment):
-   LIVE_BASE_URL=https://codex-api.onemainarmy.com npm run test:live
+   LIVE_BASE_URL=https://codex-api.example.com npm run test:live
 
 4) If issues arise, inspect logs:
    docker compose logs -f

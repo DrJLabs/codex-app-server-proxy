@@ -9,7 +9,7 @@
       "ref": "cors_set_headers",
       "description": "CORS for codex-api",
       "enabled": true,
-      "expression": "(http.host eq \"codex-api.onemainarmy.com\") and starts_with(http.request.uri.path, \"/v1\") and http.request.headers[\"origin\"][0] ne \"\"",
+      "expression": "(http.host eq \"${DOMAIN}\") and starts_with(http.request.uri.path, \"/v1\") and http.request.headers[\"origin\"][0] ne \"\"",
       "action": "rewrite",
       "action_parameters": {
         "headers": {
@@ -45,7 +45,7 @@
       "ref": "668ac192415d4e0ba36952ebc266abd0",
       "description": "CORS for codex-dev",
       "enabled": true,
-      "expression": "(http.host eq \"codex-dev.onemainarmy.com\") and starts_with(http.request.uri.path, \"/v1\") and http.request.headers[\"origin\"][0] ne \"\"",
+      "expression": "(http.host eq \"${DEV_DOMAIN}\") and starts_with(http.request.uri.path, \"/v1\") and http.request.headers[\"origin\"][0] ne \"\"",
       "action": "rewrite",
       "action_parameters": {
         "headers": {
