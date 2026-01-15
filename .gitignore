@@ -25,9 +25,6 @@ bmad-bak/
 .serena/
 .worktrees/
 external/*
-!external/codex
-!external/codex/
-!external/codex/**
 tmp/
 # Playwright artifacts
 test-results/*
