@@ -84,6 +84,20 @@ const buildNormalizedAllowList = (env) =>
     normalizeOrigin(value)
   );
 
+let cachedAllowList = null;
+let cachedAllowListKey = null;
+
+const getNormalizedAllowList = (env) => {
+  const nextKey = env?.ALLOWED_ORIGINS ?? "";
+  if (cachedAllowList && cachedAllowListKey === nextKey) {
+    return cachedAllowList;
+  }
+
+  cachedAllowListKey = nextKey;
+  cachedAllowList = buildNormalizedAllowList(env);
+  return cachedAllowList;
+};
+
 function mergeAllowedHeaders(rawRequested = "") {
   const seen = new Map(DEFAULT_ALLOWED_HEADERS.map((header) => [header.toLowerCase(), header]));
   const requested = rawRequested
@@ -146,7 +160,7 @@ function logRequest(request) {
 
 export default {
   async fetch(request, env) {
-    const normalizedAllowList = buildNormalizedAllowList(env);
+    const normalizedAllowList = getNormalizedAllowList(env);
     logRequest(request);
 
     if (request.method === "OPTIONS") {
