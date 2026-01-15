@@ -254,9 +254,23 @@ See docs/README.md for documentation pointers. Use `docs/private/` for local-onl
 - ForwardAuth MUST use host loopback:
   - `traefik.http.middlewares.codex-forwardauth.forwardauth.address=http://127.0.0.1:18080/verify`
 - App attaches to Docker network `traefik` and is discovered via labels.
-- Edge is Cloudflare for `codex-api.onemainarmy.com`.
+- Edge is Cloudflare for `codex-api.example.com`.
 - Standard OpenAI host uses `RESPONSES_DOMAIN` (defaults to `openai-json` output mode).
 - Backend mode: production sets `PROXY_USE_APP_SERVER=true` and keeps a long-lived app-server worker alive. Ensure `.codex-api/auth.json` is present; if Codex is already logged in on the host, copy `~/.codex/auth.json` as a fallback.
+
+#### Rendered infra config
+
+Some infra config is generated from templates and gitignored. Render these files before deploying Cloudflare/Wrangler changes:
+
+```bash
+DOMAIN=codex-api.example.com DEV_DOMAIN=codex-dev.example.com ZONE_NAME=example.com \
+  bash scripts/render-infra.sh
+```
+
+Generated files:
+- `infra/cloudflare/rht.json`
+- `infra/cloudflare/rht_update.json`
+- `workers/cors-preflight-logger/wrangler.toml`
 
 Codex HOME (production):
 
@@ -326,17 +340,17 @@ Examples
 
 ```bash
 # Prod (non-stream)
-curl -s https://codex-api.onemainarmy.com/v1/chat/completions \
+curl -s https://codex-api.example.com/v1/chat/completions \
   -H "Authorization: Bearer $PROD_KEY" -H 'Content-Type: application/json' \
   -d '{"model":"codex-5-low","stream":false,"messages":[{"role":"user","content":"Say hello."}]}' | jq '.choices[0].message.content'
 
 # Dev (non-stream)
-curl -s https://codex-dev.onemainarmy.com/v1/chat/completions \
+curl -s https://codex-dev.example.com/v1/chat/completions \
   -H "Authorization: Bearer $DEV_KEY" -H 'Content-Type: application/json' \
   -d '{"model":"codev-5-low","stream":false,"messages":[{"role":"user","content":"Say hello."}]}' | jq '.choices[0].message.content'
 
 # Prefix-agnostic alternative (works in both, set BASE and KEY first)
-# e.g. BASE=codex-dev.onemainarmy.com KEY=$DEV_KEY
+# e.g. BASE=codex-dev.example.com KEY=$DEV_KEY
 curl -s https://$BASE/v1/chat/completions \
   -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
   -d '{"model":"gpt-5.2","reasoning":{"effort":"low"},"stream":false,"messages":[{"role":"user","content":"Say hello."}]}' | jq '.choices[0].message.content'
@@ -353,11 +367,11 @@ Dev stack (public behind Traefik):
   - If local port 18010 is in use, override:
     - `DEV_PORT=19010 docker compose -p codex-dev -f infra/compose/compose.dev.stack.yml --env-file .env.dev up -d --build`
   - Uses the baked-in Codex CLI by default (`CODEX_BIN=/usr/local/lib/codex-cli/bin/codex.js`). To use the host CLI instead, set `CODEX_BIN=codex` and add a volume mount for `~/.cargo/bin/codex` to `/usr/local/bin/codex`.
-- Domain: create a DNS record for `codex-dev.onemainarmy.com` to your Traefik host (Cloudflare). The dev host now loads its routers/middlewares from `/etc/traefik/dynamic/codex-dev.yml`, so keep that file in sync with the compose labels if you tweak origins/CORS.
+- Domain: create a DNS record for `codex-dev.example.com` to your Traefik host (Cloudflare). The dev host now loads its routers/middlewares from `/etc/traefik/dynamic/codex-dev.yml`, so keep that file in sync with the compose labels if you tweak origins/CORS.
 - ForwardAuth (dev) uses a dedicated dev auth service at `http://127.0.0.1:18081/verify`, backed by `auth-dev` in `infra/compose/compose.dev.stack.yml` and the dev key from `.env.dev`. Prod continues to use `http://127.0.0.1:18080/verify`.
 - Dev key: set in `.env.dev` (see `.env.dev.example`) and pass to smoke/tests via `KEY`.
-- Smoke: `DEV_DOMAIN=codex-dev.onemainarmy.com KEY=$DEV_KEY npm run smoke:dev`
-- Live tests (real Codex): `DEV_DOMAIN=codex-dev.onemainarmy.com KEY=$DEV_KEY npm run test:live:dev`
+- Smoke: `DEV_DOMAIN=codex-dev.example.com KEY=$DEV_KEY npm run smoke:dev`
+- Live tests (real Codex): `DEV_DOMAIN=codex-dev.example.com KEY=$DEV_KEY npm run test:live:dev`
 
 Model IDs in dev vs prod:
 
@@ -376,13 +390,13 @@ Notes:
 
 - Change only dev inputs first: `.codev/*`, `infra/compose/compose.dev.stack.yml`.
 - Validate locally (Node or container) and behind Traefik on `codex-dev…`:
-  - Smoke: `DEV_DOMAIN=codex-dev.onemainarmy.com KEY=$DEV_KEY npm run smoke:dev`
-  - Live E2E (real Codex): `DEV_DOMAIN=codex-dev.onemainarmy.com KEY=$DEV_KEY npm run test:live:dev`
+  - Smoke: `DEV_DOMAIN=codex-dev.example.com KEY=$DEV_KEY npm run smoke:dev`
+  - Live E2E (real Codex): `DEV_DOMAIN=codex-dev.example.com KEY=$DEV_KEY npm run test:live:dev`
 - When green, open a PR with the minimal prod diffs (e.g., `docker-compose.yml`).
 - After merge, rebuild prod and validate:
   - `docker compose up -d --build --force-recreate`
-  - `DOMAIN=codex-api.onemainarmy.com KEY=$PROXY_API_KEY npm run smoke:prod`
-  - Optional live E2E: `LIVE_BASE_URL=https://codex-api.onemainarmy.com KEY=$PROXY_API_KEY npm run test:live`
+  - `DOMAIN=codex-api.example.com KEY=$PROXY_API_KEY npm run smoke:prod`
+  - Optional live E2E: `LIVE_BASE_URL=https://codex-api.example.com KEY=$PROXY_API_KEY npm run test:live`
 
 Operational guarantees:
 
@@ -419,7 +433,7 @@ Build context hygiene:
 Run a minimal end‑to‑end check of origin (Traefik) and edge (Cloudflare):
 
 ```
-DOMAIN=codex-api.onemainarmy.com KEY=$PROXY_API_KEY npm run smoke:prod
+DOMAIN=codex-api.example.com KEY=$PROXY_API_KEY npm run smoke:prod
 ```
 
 Behavior:
@@ -545,7 +559,7 @@ Environment variables:
 - `PROXY_CODEX_WORKDIR` (default: `/tmp/codex-work`) — working directory for the Codex child process. This isolates any file writes from the app code and remains ephemeral in containers.
 - `CODEX_FORCE_PROVIDER` (optional) — if set (e.g., `chatgpt`), the proxy passes `--config model_provider="<value>"` to Codex to force a provider instead of letting Codex auto-select (which may fall back to OpenAI API otherwise).
 - `PROXY_ENABLE_CORS` (default: `true`) — when `true`, Express emits CORS headers. Set to `false` if the edge fully manages CORS.
-- `PROXY_CORS_ALLOWED_ORIGINS` (default: `*`) — comma-separated allowlist used when app CORS is enabled. Include each trusted origin (e.g., `https://codex-api.onemainarmy.com,https://obsidian.md,app://obsidian.md,capacitor://localhost,http://localhost,https://localhost`).
+- `PROXY_CORS_ALLOWED_ORIGINS` (default: `*`) — comma-separated allowlist used when app CORS is enabled. Include each trusted origin (e.g., `https://codex-api.example.com,https://obsidian.md,app://obsidian.md,capacitor://localhost,http://localhost,https://localhost`).
 - `PROXY_PROTECT_MODELS` (default: `false`) — set to `true` to require auth on `/v1/models`.
 - `PROXY_TIMEOUT_MS` (default: `300000`) — overall request timeout (5 minutes).
 - `PROXY_IDLE_TIMEOUT_MS` (default: `15000`) — non‑stream idle timeout while waiting for backend output.
@@ -642,7 +656,7 @@ Both commands serve at `http://127.0.0.1:18000/v1`.
 Use the production smoke script to verify the edge (Cloudflare) and the origin (Traefik) without relying on any IDE:
 
 ```
-DOMAIN=codex-api.onemainarmy.com KEY=$PROXY_API_KEY npm run smoke:prod
+DOMAIN=codex-api.example.com KEY=$PROXY_API_KEY npm run smoke:prod
 ```
 
 Behavior:
@@ -747,7 +761,7 @@ Prerequisites
 
 - Traefik v3 running as a host service with Docker provider enabled and an external Docker network named `traefik`.
 - Entrypoint `websecure` is active in Traefik. Certificates are handled by your cloudflared tunnel + Traefik; no ACME changes required.
-- Domain: `codex-api.onemainarmy.com` is routed via cloudflared to Traefik.
+- Domain: `codex-api.example.com` is routed via cloudflared to Traefik.
 - Docker Compose v2.
 
 Files in this repo
@@ -787,29 +801,29 @@ Configuration
 Traefik labels overview (see [docker-compose.yml](docker-compose.yml))
 
 - Protected API:
-  - Router: `Host('codex-api.onemainarmy.com') && PathPrefix('/v1')`
+  - Router: `Host('codex-api.example.com') && PathPrefix('/v1')`
   - EntryPoints: `websecure`, `tls=true`
   - Middleware: `codex-forwardauth` pointing to `http://127.0.0.1:18080/verify`
   - Service port: `11435`
 - Public health:
-  - Router: `Host('codex-api.onemainarmy.com') && Path('/healthz')`
+  - Router: `Host('codex-api.example.com') && Path('/healthz')`
   - EntryPoints: `websecure`, `tls=true`
   - Service: same as API service
 
 Smoke tests
 
 - Health (public):
-  - `curl -i https://codex-api.onemainarmy.com/healthz`
+  - `curl -i https://codex-api.example.com/healthz`
 - Protected route (no token → 401):
-  - `curl -i https://codex-api.onemainarmy.com/v1/models`
+  - `curl -i https://codex-api.example.com/v1/models`
 - Wrong token → 401:
-  - `curl -i -H 'Authorization: Bearer wrong' https://codex-api.onemainarmy.com/v1/models`
+  - `curl -i -H 'Authorization: Bearer wrong' https://codex-api.example.com/v1/models`
 - Correct token → 200 (replace VALUE):
-  - `curl -i -H 'Authorization: Bearer VALUE' https://codex-api.onemainarmy.com/v1/models`
+  - `curl -i -H 'Authorization: Bearer VALUE' https://codex-api.example.com/v1/models`
 - SSE streaming sanity:
   - `curl -N -H 'Authorization: Bearer VALUE' -H 'Content-Type: application/json' \\`
   - `  -d '{"model":"gpt-5.2","stream":true,"messages":[{"role":"user","content":"ping"}]}' \\`
-  - `  https://codex-api.onemainarmy.com/v1/chat/completions`
+  - `  https://codex-api.example.com/v1/chat/completions`
 
 Notes
 
@@ -846,7 +860,7 @@ Optional Transform Rule (only if Workers unavailable)
 Preflight smoke test
 
 ```bash
-curl -i -X OPTIONS 'https://codex-api.onemainarmy.com/v1/chat/completions' \
+curl -i -X OPTIONS 'https://codex-api.example.com/v1/chat/completions' \
   -H 'Origin: app://obsidian.md' \
   -H 'Access-Control-Request-Method: POST' \
   -H 'Access-Control-Request-Headers: authorization, content-type, x-stainless-os'
