@@ -25,9 +25,8 @@ bmad-bak/
 .serena/
 .worktrees/
 external/*
-!external/codex
-!external/codex/
-!external/codex/**
+!external/README.md
+!external/manifest.json
 tmp/
 # Playwright artifacts
 test-results/*

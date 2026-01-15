@@ -1,0 +1,14 @@
+{
+  "repos": [
+    {
+      "name": "codex",
+      "url": "https://github.com/openai/codex.git",
+      "branch": "main"
+    },
+    {
+      "name": "obsidian-copilot",
+      "url": "https://github.com/logancyang/obsidian-copilot.git",
+      "branch": "main"
+    }
+  ]
+}

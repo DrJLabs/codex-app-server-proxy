@@ -4,38 +4,40 @@ This folder is the canonical index for repository documentation. Update this fil
 
 ## Start here
 
-- `../README.md` — overview + quickstart
-- `README-root.md` — snapshot of the repository README for doc-local reference
-- `getting-started.md` — first-run walkthrough
-- `configuration.md` — environment variables and defaults (authoritative)
-- `architecture.md` — architecture entry point (canonical links)
+- [`../README.md`](../README.md) — overview + quickstart
+- [`README-root.md`](README-root.md) — snapshot of the repository README for doc-local reference
+- [`getting-started.md`](getting-started.md) — first-run walkthrough
+- [`configuration.md`](configuration.md) — environment variables and defaults (authoritative)
+- [`architecture.md`](architecture.md) — architecture entry point (canonical links)
 
 ## Development
 
-- `local-development.md` — Node vs shim vs Docker workflows
-- `api/overview.md` — endpoint overview + runnable curl examples
-- `troubleshooting.md` — common errors and fixes
+- [`local-development.md`](local-development.md) — Node vs shim vs Docker workflows
+- [`api/overview.md`](api/overview.md) — endpoint overview + runnable curl examples
+- [`api/responses.md`](api/responses.md) — `/v1/responses` usage notes
+- [`api/chat-completions.md`](api/chat-completions.md) — `/v1/chat/completions` usage notes
+- [`troubleshooting.md`](troubleshooting.md) — common errors and fixes
 
 ## Deployment and ops
 
-- `deployment/dev-stack.md` — dev stack (`infra/compose/compose.dev.stack.yml`)
-- `deployment/production.md` — production compose (`docker-compose.yml`)
-- `ops/runbooks.md` — snapshot/rollback/backup/smoke workflows
+- [`deployment/dev-stack.md`](deployment/dev-stack.md) — dev stack (`infra/compose/compose.dev.stack.yml`)
+- [`deployment/production.md`](deployment/production.md) — production compose (`docker-compose.yml`)
+- [`ops/runbooks.md`](ops/runbooks.md) — snapshot/rollback/backup/smoke workflows
 
 ## Observability
 
-- `observability.md` — logs, request IDs, metrics, tracing
-- `reference/config-matrix.md` — environment/mount matrix + ForwardAuth notes
+- [`observability.md`](observability.md) — logs, request IDs, metrics, tracing
+- [`reference/config-matrix.md`](reference/config-matrix.md) — environment/mount matrix + ForwardAuth notes
 
 ## API contracts (canonical)
 
-- `openai-endpoint-golden-parity.md` — golden transcript contract for `/v1/chat/completions` and `/v1/responses`
-- `responses-endpoint/overview.md` — `/v1/responses` implementation notes
+- [`openai-endpoint-golden-parity.md`](openai-endpoint-golden-parity.md) — golden transcript contract for `/v1/chat/completions` and `/v1/responses`
+- [`responses-endpoint/overview.md`](responses-endpoint/overview.md) — `/v1/responses` implementation notes
 
 ## Deep dives and backlogs
 
-- `app-server-migration/` — JSON-RPC schema exports and migration notes
-- `logging-gaps/README.md` — observability gap tracker
+- [`app-server-migration/`](app-server-migration/) — JSON-RPC schema exports and migration notes
+- [`logging-gaps/README.md`](logging-gaps/README.md) — observability gap tracker
 
 ## Internal docs (not published)
 

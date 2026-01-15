@@ -1,4 +1,4 @@
-# Dev Stack (infra/compose/compose.dev.stack.yml)
+# Dev Stack ([../../infra/compose/compose.dev.stack.yml](../../infra/compose/compose.dev.stack.yml))
 
 The dev stack mirrors production behind Traefik and a ForwardAuth service, but runs as a local compose project.
 

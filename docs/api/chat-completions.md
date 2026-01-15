@@ -2,6 +2,12 @@
 
 This endpoint aims to match the OpenAI Chat Completions API closely.
 
+## Intended clients
+
+- Obsidian Copilot uses this endpoint only when the selected model is a chat-completions model (for gpt-5*, it uses `/v1/responses`).
+- Standard Responses clients should prefer `/v1/responses` (see [`responses.md`](responses.md)).
+- Output mode defaults to `obsidian-xml`, which keeps `<use_tool>` blocks as text for Copilot.
+
 ## Auth
 
 Bearer token is required:
@@ -35,4 +41,4 @@ The proxy supports “stop-after-tools” controls for clients that expect the s
 
 ## Contract reference
 
-See `../openai-endpoint-golden-parity.md` for the canonical streaming transcript and error envelope definitions.
+See [`../openai-endpoint-golden-parity.md`](../openai-endpoint-golden-parity.md) for the canonical streaming transcript and error envelope definitions.

@@ -15,6 +15,11 @@ This proxy exposes an OpenAI-compatible API surface intended to be a drop-in for
 | `/v1/usage` | `GET` | bearer* | *Unless `PROXY_USAGE_ALLOW_UNAUTH=true` |
 | `/v1/usage/raw` | `GET` | bearer* | *Unless `PROXY_USAGE_ALLOW_UNAUTH=true` |
 
+## Choose your client path
+
+- **Standard Responses clients**: use `/v1/responses` and keep the default `openai-json` output mode (or set `x-proxy-output-mode: openai-json` explicitly). See [`responses.md`](responses.md) for payload examples and streaming event notes.
+- **Obsidian Copilot (model-selects path)**: Copilot picks the endpoint based on the model. With gpt-5* (current ChatGPT-login Codex support), it uses `/v1/responses`. If you select a chat-completions model, it uses `/v1/chat/completions` with streaming enabled and expects `obsidian-xml` tool blocks. See [`chat-completions.md`](chat-completions.md) for request shape and tool-stream controls.
+
 ## Authentication
 
 Set a key and pass it as a bearer token:
@@ -22,6 +27,10 @@ Set a key and pass it as a bearer token:
 ```bash
 KEY="<your-key>"
 ```
+
+## Model IDs
+
+Use the model IDs returned by `GET /v1/models` for your environment (dev advertises `codev-*`, prod advertises `codex-*`). The proxy accepts both prefixes but some clients validate strictly against the advertised list.
 
 ## Runnable curl examples
 
@@ -57,4 +66,4 @@ curl -s http://127.0.0.1:18000/v1/responses \
 
 ## Canonical contract
 
-For byte-level envelope expectations (streaming order, `[DONE]`, typed responses events, etc.), see `../openai-endpoint-golden-parity.md`.
+For byte-level envelope expectations (streaming order, `[DONE]`, typed responses events, etc.), see [`../openai-endpoint-golden-parity.md`](../openai-endpoint-golden-parity.md).

@@ -9,17 +9,16 @@
   - `scripts/` dev/ops helpers (dev.sh, smoke, stack snapshot/rollback, port sync).
   - `tests/` unit, integration, parity, and Playwright suites plus fixtures.
   - `docs/` schema exports and runbooks (read only when relevant to the task).
-  - `external/` vendored references (e.g., `external/codex/` has its own AGENTS.md).
+  - `external/` optional local reference clones (ignored by git; see `external/README.md`).
   - `.codev/` (dev Codex HOME) and `.codex-api/` (prod Codex HOME) are gitignored; never commit secrets inside.
 
 ## Modules / subprojects
 
-| Module            | Type         | Path              | What it owns                              | How to run                                                             | Tests                                                                    | Docs                          | AGENTS                     |
-| ----------------- | ------------ | ----------------- | ----------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------ | ----------------------------- | -------------------------- |
-| Proxy API         | node/express | `.`               | OpenAI-compatible proxy, workers, scripts | `npm run dev` (live reload + app-server supervisor) or `npm run start` | `npm run test:unit`, `npm run test:integration`, `npm test` (Playwright) | README.md                     | `src/AGENTS.md`            |
-| ForwardAuth       | node/http    | `auth/`           | Traefik bearer auth gate                  | `PROXY_API_KEY=... node auth/server.mjs`                               | curl `/verify`                                                           | README.md (ForwardAuth notes) | `auth/AGENTS.md`           |
-| Docs              | docs         | `docs/`           | Schema exports, runbooks                  | n/a (static)                                                           | `npm run lint:runbooks` if editing                                       | docs/                         | (none)                     |
-| External codex-rs | rust         | `external/codex/` | Upstream codex-rs reference               | see per-dir instructions                                               | see per-dir instructions                                                 | upstream docs                 | `external/codex/AGENTS.md` |
+| Module      | Type         | Path    | What it owns                              | How to run                                                             | Tests                                                                    | Docs                          | AGENTS           |
+| ----------- | ------------ | ------- | ----------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------ | ----------------------------- | ---------------- |
+| Proxy API   | node/express | `.`     | OpenAI-compatible proxy, workers, scripts | `npm run dev` (live reload + app-server supervisor) or `npm run start` | `npm run test:unit`, `npm run test:integration`, `npm test` (Playwright) | README.md                     | `src/AGENTS.md`  |
+| ForwardAuth | node/http    | `auth/` | Traefik bearer auth gate                  | `PROXY_API_KEY=... node auth/server.mjs`                               | curl `/verify`                                                           | README.md (ForwardAuth notes) | `auth/AGENTS.md` |
+| Docs        | docs         | `docs/` | Schema exports, runbooks                  | n/a (static)                                                           | `npm run lint:runbooks` if editing                                       | docs/                         | (none)           |
 
 ## Cross-domain workflows
 
@@ -49,6 +48,21 @@
 ## Docs usage
 
 - Do not open `docs/` unless requested or the task requires it; keep detailed changes in `docs/` rather than this file.
+- When behavior or setup changes, update `README.md` plus the affected doc pages and keep `docs/README.md` (index) and `docs/README-root.md` (content snapshot, doc-relative links) in sync.
+
+## Docs layout (canonical entrypoints)
+
+- `docs/README.md` — documentation index (update when adding/removing docs).
+- `docs/getting-started.md` — first-run walkthroughs.
+- `docs/local-development.md` — local workflows (Node vs shim vs compose).
+- `docs/api/overview.md` — endpoint overview + runnable curl examples.
+- `docs/api/responses.md` — `/v1/responses` usage notes.
+- `docs/api/chat-completions.md` — `/v1/chat/completions` usage notes.
+- `docs/configuration.md` — env vars and defaults (source of truth: `src/config/index.js`).
+- `docs/deployment/production.md` — production compose + Traefik.
+- `docs/ops/runbooks.md` — smoke/snapshot/rollback/backup workflows.
+- `docs/observability.md` — logs, metrics, tracing.
+- `docs/troubleshooting.md` — common issues and fixes.
 
 ## Logging and tracing
 
@@ -109,4 +123,3 @@
 
 - `src/AGENTS.md`
 - `auth/AGENTS.md`
-- `external/codex/AGENTS.md`

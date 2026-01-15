@@ -1,6 +1,6 @@
 # Configuration
 
-This proxy is configured via environment variables. Defaults live in `src/config/index.js` (source of truth).
+This proxy is configured via environment variables. Defaults live in [`../src/config/index.js`](../src/config/index.js) (source of truth).
 
 ## Where config is loaded from
 
@@ -21,7 +21,7 @@ This proxy is configured via environment variables. Defaults live in `src/config
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `PROXY_USE_APP_SERVER` | auto | `true` uses app-server JSON-RPC; `false` disables the backend (returns `app_server_disabled`) |
+| `PROXY_USE_APP_SERVER` | `true` | `true` uses app-server JSON-RPC; `false` disables the backend (returns `app_server_disabled`) |
 | `CODEX_BIN` | `codex` | Codex CLI binary (or shim path) |
 | `CODEX_HOME` | `$PROJECT/.codex-api` | Codex home/config directory |
 | `CODEX_MODEL` | `gpt-5.2` | Default effective model (proxy also accepts `codex-5*` / `codev-5*`) |
@@ -60,10 +60,10 @@ Codex CLI reads `config.toml` and `AGENTS.md` from `CODEX_HOME`.
 
 ## Metrics and tracing
 
-- Metrics: set `PROXY_ENABLE_METRICS=true` to expose `/metrics` (access is restricted by default; see `src/routes/metrics.js`).
-- Tracing: set `PROXY_ENABLE_OTEL=true` and `PROXY_OTEL_EXPORTER_URL` (or `OTEL_EXPORTER_OTLP_ENDPOINT`) to emit spans (see `src/services/tracing.js`).
+- Metrics: set `PROXY_ENABLE_METRICS=true` to expose `/metrics` (access is restricted by default; see [`../src/routes/metrics.js`](../src/routes/metrics.js)).
+- Tracing: set `PROXY_ENABLE_OTEL=true` and `PROXY_OTEL_EXPORTER_URL` (or `OTEL_EXPORTER_OTLP_ENDPOINT`) to emit spans (see [`../src/services/tracing.js`](../src/services/tracing.js)).
 
 ## Further reference
 
-- Config/mount matrix by environment: `reference/config-matrix.md`
-- API contract: `openai-endpoint-golden-parity.md`
+- Config/mount matrix by environment: [`reference/config-matrix.md`](reference/config-matrix.md)
+- API contract: [`openai-endpoint-golden-parity.md`](openai-endpoint-golden-parity.md)
