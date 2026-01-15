@@ -9,7 +9,7 @@ To avoid interfering with other tooling that relies on your primary
 `CLOUDFLARE_API_TOKEN`, create a separate token with the following permissions:
 
 - **Account → Workers Scripts:** Edit
-- **Zone → Workers Routes:** Edit (for `onemainarmy.com`)
+- **Zone → Workers Routes:** Edit (for `example.com`)
 - Optional but helpful: Workers Tail (Read) so you can stream logs.
 
 Then export it under a different environment variable, e.g.:
@@ -17,6 +17,18 @@ Then export it under a different environment variable, e.g.:
 ```bash
 export WORKER_CLOUDFLARE_API_TOKEN=cf_api_token_for_workers
 ```
+
+## Render the Wrangler config
+
+This repo tracks `wrangler.example.toml`. Generate the real `wrangler.toml`
+before deploy so routes and allowed origins are set from your env:
+
+```bash
+DOMAIN=codex-api.example.com DEV_DOMAIN=codex-dev.example.com ZONE_NAME=example.com \
+  bash ../../scripts/render-infra.sh
+```
+
+`ALLOWED_ORIGINS` is set in `wrangler.toml` and read by the worker at runtime.
 
 Deploy using the helper script:
 

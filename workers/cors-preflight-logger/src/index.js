@@ -1,6 +1,4 @@
-const ALLOWED = [
-  "https://codex-dev.onemainarmy.com",
-  "https://codex-api.onemainarmy.com",
+const STATIC_ALLOWED = [
   "app://obsidian.md",
   "capacitor://localhost",
   "http://localhost",
@@ -75,7 +73,16 @@ function normalizeOrigin(origin) {
   }
 }
 
-const NORMALIZED = ALLOWED.map((value) => normalizeOrigin(value));
+const parseAllowedOrigins = (value) =>
+  String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const buildNormalizedAllowList = (env) =>
+  [...parseAllowedOrigins(env?.ALLOWED_ORIGINS), ...STATIC_ALLOWED].map((value) =>
+    normalizeOrigin(value)
+  );
 
 function mergeAllowedHeaders(rawRequested = "") {
   const seen = new Map(DEFAULT_ALLOWED_HEADERS.map((header) => [header.toLowerCase(), header]));
@@ -94,10 +101,10 @@ function mergeAllowedHeaders(rawRequested = "") {
   return Array.from(seen.values()).join(", ");
 }
 
-function buildCorsHeaders(request) {
+function buildCorsHeaders(request, normalizedAllowList) {
   const origin = request.headers.get("Origin") ?? "";
   const normalized = normalizeOrigin(origin);
-  const allow = normalized && NORMALIZED.includes(normalized) ? origin : "";
+  const allow = normalized && normalizedAllowList.includes(normalized) ? origin : "";
   const requestedHeaders = request.headers.get("Access-Control-Request-Headers") ?? "";
 
   const headers = {
@@ -138,15 +145,19 @@ function logRequest(request) {
 }
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
+    const normalizedAllowList = buildNormalizedAllowList(env);
     logRequest(request);
 
     if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: buildCorsHeaders(request) });
+      return new Response(null, {
+        status: 204,
+        headers: buildCorsHeaders(request, normalizedAllowList),
+      });
     }
 
     const response = await fetch(request);
-    const corsHeaders = buildCorsHeaders(request);
+    const corsHeaders = buildCorsHeaders(request, normalizedAllowList);
     const newHeaders = new Headers(response.headers);
 
     for (const [key, value] of Object.entries(corsHeaders)) {
