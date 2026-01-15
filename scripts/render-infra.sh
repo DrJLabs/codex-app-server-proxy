@@ -10,9 +10,9 @@ require envsubst
 
 export DOMAIN DEV_DOMAIN ZONE_NAME
 
-envsubst < infra/cloudflare/rht.example.json > infra/cloudflare/rht.json
-envsubst < infra/cloudflare/rht_update.example.json > infra/cloudflare/rht_update.json
-envsubst < workers/cors-preflight-logger/wrangler.example.toml > workers/cors-preflight-logger/wrangler.toml
+envsubst '$DOMAIN $DEV_DOMAIN $ZONE_NAME' < infra/cloudflare/rht.example.json > infra/cloudflare/rht.json
+envsubst '$DOMAIN $DEV_DOMAIN $ZONE_NAME' < infra/cloudflare/rht_update.example.json > infra/cloudflare/rht_update.json
+envsubst '$DOMAIN $DEV_DOMAIN $ZONE_NAME' < workers/cors-preflight-logger/wrangler.example.toml > workers/cors-preflight-logger/wrangler.toml
 
 echo "Rendered infra/cloudflare/rht.json"
 echo "Rendered infra/cloudflare/rht_update.json"

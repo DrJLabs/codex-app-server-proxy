@@ -830,8 +830,8 @@ Smoke tests
   - `curl -i -H 'Authorization: Bearer VALUE' https://codex-api.example.com/v1/models`
 - SSE streaming sanity:
   - `curl -N -H 'Authorization: Bearer VALUE' -H 'Content-Type: application/json' \\`
-  - `  -d '{"model":"gpt-5.2","stream":true,"messages":[{"role":"user","content":"ping"}]}' \\`
-  - `  https://codex-api.example.com/v1/chat/completions`
+  - `-d '{"model":"gpt-5.2","stream":true,"messages":[{"role":"user","content":"ping"}]}' \\`
+  - `https://codex-api.example.com/v1/chat/completions`
 
 Notes
 

@@ -58,11 +58,11 @@
 - Create: `scripts/render-infra.sh`
 - Modify: `.gitignore`
 - Remove from git index: `infra/cloudflare/rht.json`, `infra/cloudflare/rht_update.json`, `workers/cors-preflight-logger/wrangler.toml`
-- Optional: Create `scripts/validate-domain-scrub.sh`
+- Create `scripts/validate-domain-scrub.sh`
 
 **Step 1: Write the failing test**
 
-Create a simple validator that fails if generated files are missing or if example.com still appears:
+Create a simple validator that fails if generated files are missing or if placeholder domains leak into tracked configs:
 
 ```bash
 #!/usr/bin/env bash
@@ -76,8 +76,22 @@ for f in infra/cloudflare/rht.json infra/cloudflare/rht_update.json workers/cors
   fi
 done
 
-if rg -n "example.com" >/dev/null 2>&1; then
-  echo "Found example.com in repo" >&2
+mapfile -t tracked_files < <(git ls-files)
+
+if rg -n "onemainarmy" --glob "!scripts/validate-domain-scrub.sh" -- "${tracked_files[@]}" >/dev/null 2>&1; then
+  echo "Found onemainarmy.com in tracked files" >&2
+  exit 1
+fi
+
+if rg -n "example.com" \
+  -g '!docs/**' \
+  -g '!**/*.md' \
+  -g '!**/*.example.*' \
+  -g '!.env.example' \
+  -g '!.env.dev.example' \
+  -g '!scripts/validate-domain-scrub.sh' \
+  -- "${tracked_files[@]}" >/dev/null 2>&1; then
+  echo "Found example.com in tracked files" >&2
   exit 1
 fi
 
@@ -98,15 +112,15 @@ Expected: FAIL (missing generated files + existing literals).
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-: "${DOMAIN:?set DOMAIN}";
-: "${DEV_DOMAIN:?set DEV_DOMAIN}";
-: "${ZONE_NAME:?set ZONE_NAME}";
+: "${DOMAIN:?set DOMAIN}"
+: "${DEV_DOMAIN:?set DEV_DOMAIN}"
+: "${ZONE_NAME:?set ZONE_NAME}"
 
 export DOMAIN DEV_DOMAIN ZONE_NAME
 
-envsubst < infra/cloudflare/rht.example.json > infra/cloudflare/rht.json
-envsubst < infra/cloudflare/rht_update.example.json > infra/cloudflare/rht_update.json
-envsubst < workers/cors-preflight-logger/wrangler.example.toml > workers/cors-preflight-logger/wrangler.toml
+envsubst '$DOMAIN $DEV_DOMAIN $ZONE_NAME' < infra/cloudflare/rht.example.json > infra/cloudflare/rht.json
+envsubst '$DOMAIN $DEV_DOMAIN $ZONE_NAME' < infra/cloudflare/rht_update.example.json > infra/cloudflare/rht_update.json
+envsubst '$DOMAIN $DEV_DOMAIN $ZONE_NAME' < workers/cors-preflight-logger/wrangler.example.toml > workers/cors-preflight-logger/wrangler.toml
 ```
 
 - Add generated outputs to `.gitignore` and remove them from the index:
@@ -142,10 +156,17 @@ git commit -m "chore(infra): template cloudflare and wrangler config"
 
 **Step 1: Write the failing test**
 
-Extend `scripts/validate-domain-scrub.sh` to fail if example.com is found in tracked files:
+Extend `scripts/validate-domain-scrub.sh` to fail if example.com is found in tracked files (exclude docs/templates):
 
 ```bash
-if rg -n "example.com" >/dev/null 2>&1; then
+if rg -n "example.com" \
+  -g '!docs/**' \
+  -g '!**/*.md' \
+  -g '!**/*.example.*' \
+  -g '!.env.example' \
+  -g '!.env.dev.example' \
+  -g '!scripts/validate-domain-scrub.sh' \
+  -- "${tracked_files[@]}" >/dev/null 2>&1; then
   echo "Found example.com in tracked files" >&2
   exit 1
 fi
