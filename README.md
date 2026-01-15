@@ -28,7 +28,7 @@ Goal: let any OpenAI Responses client (SDKs, IDEs, curl) talk to Codex CLI as if
 
    Update `PROXY_API_KEY` in `.env` to a value you will use for local auth.
 
-3. Start the dev server (port 18000 by default):
+3. Start the dev server (defaults to port 18000 in dev mode; `PORT` below applies to `node server.js` and compose):
 
    ```bash
    npm run dev
@@ -49,10 +49,13 @@ npm run dev:shim
 
 ## Quick start (Docker Compose)
 
-- Production-style (pulls GHCR image):
+- Production-style (pulls GHCR image, requires `DOMAIN` and `PROXY_CORS_ALLOWED_ORIGINS`):
 
   ```bash
-  PROXY_API_KEY=codex-local-secret docker compose up -d
+  DOMAIN=example.com \
+  PROXY_CORS_ALLOWED_ORIGINS=https://example.com \
+  PROXY_API_KEY=codex-local-secret \
+  docker compose up -d
   ```
 
 - Local build:
@@ -71,14 +74,14 @@ For production requirements (Traefik, Codex HOME, auth), see [docs/deployment/pr
 
 ## Minimal configuration
 
-| Variable                      | Default              | Purpose                                        |
-| ----------------------------- | -------------------- | ---------------------------------------------- |
-| `PROXY_API_KEY`               | `codex-local-secret` | Bearer token for protected routes              |
-| `PORT`                        | `11435`              | Listen port                                    |
-| `PROXY_ENV`                   | _(empty)_            | Model advertising mode (`dev` -> `codev-*`)    |
-| `PROXY_ENABLE_RESPONSES`      | `true`               | Enable `/v1/responses`                         |
-| `PROXY_OUTPUT_MODE`           | `obsidian-xml`       | Default output mode for `/v1/chat/completions` |
-| `PROXY_RESPONSES_OUTPUT_MODE` | `openai-json`        | Default output mode for `/v1/responses`        |
+| Variable                      | Default              | Purpose                                                                 |
+| ----------------------------- | -------------------- | ----------------------------------------------------------------------- |
+| `PROXY_API_KEY`               | `codex-local-secret` | Bearer token for protected routes                                       |
+| `PORT`                        | `11435`              | Listen port for `node server.js`/compose (dev script defaults to 18000) |
+| `PROXY_ENV`                   | _(empty)_            | Model advertising mode (`dev` -> `codev-*`)                             |
+| `PROXY_ENABLE_RESPONSES`      | `true`               | Enable `/v1/responses`                                                  |
+| `PROXY_OUTPUT_MODE`           | `obsidian-xml`       | Default output mode for `/v1/chat/completions`                          |
+| `PROXY_RESPONSES_OUTPUT_MODE` | `openai-json`        | Default output mode for `/v1/responses`                                 |
 
 Full configuration and defaults: [docs/configuration.md](docs/configuration.md).
 
