@@ -276,7 +276,7 @@ Generated files:
 Template usage flow:
 
 1. Set your real domains in `.env` and `.env.dev` (use `.env.example` / `.env.dev.example` as a starting point).
-2. Run `scripts/render-infra.sh` with `DOMAIN`, `DEV_DOMAIN`, and `ZONE_NAME` to generate the rendered files.
+2. Run `scripts/render-infra.sh` with `DOMAIN`, `DEV_DOMAIN`, and `ZONE_NAME` to generate the rendered files. The script does not source `.env` files, so export or prefix the variables.
 3. Apply the rendered Cloudflare JSON and deploy the worker using `wrangler.toml`.
 4. Keep the rendered files out of Git (they are gitignored).
 

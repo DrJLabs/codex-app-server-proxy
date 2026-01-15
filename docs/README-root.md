@@ -262,7 +262,7 @@ See docs/README.md for documentation pointers. Keep public docs under `docs/` an
 Some infra config is generated from templates and gitignored. Render these files before deploying Cloudflare/Wrangler changes:
 
 ```bash
-DOMAIN=codex-api.example.com DEV_DOMAIN=codex-dev.example.com ZONE_NAME=example.com \
+DOMAIN=your-prod-domain.com DEV_DOMAIN=your-dev-domain.com ZONE_NAME=your-zone.com \
   bash scripts/render-infra.sh
 ```
 
@@ -270,6 +270,13 @@ Generated files:
 - `infra/cloudflare/rht.json`
 - `infra/cloudflare/rht_update.json`
 - `workers/cors-preflight-logger/wrangler.toml`
+
+Template usage flow:
+
+1. Set your real domains in `.env` and `.env.dev` (use `.env.example` / `.env.dev.example` as a starting point).
+2. Run `scripts/render-infra.sh` with `DOMAIN`, `DEV_DOMAIN`, and `ZONE_NAME` to generate the rendered files. The script does not source `.env` files, so export or prefix the variables.
+3. Apply the rendered Cloudflare JSON and deploy the worker using `wrangler.toml`.
+4. Keep the rendered files out of Git (they are gitignored).
 
 Codex HOME (production):
 
