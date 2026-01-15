@@ -65,12 +65,12 @@ npm run dev:shim
   PROXY_API_KEY=codex-local-secret docker compose -f docker-compose.local.yml up --build
   ```
 
-For production requirements (Traefik, Codex HOME, auth), see [docs/deployment/production.md](docs/deployment/production.md).
+For production requirements (Traefik, Codex HOME, auth), see [docs/deployment/production.md](deployment/production.md).
 
 ## Choose your client path
 
-- Standard Responses clients: use `/v1/responses` and keep the default `openai-json` output mode. See [docs/api/responses.md](docs/api/responses.md) and [docs/api/overview.md](docs/api/overview.md).
-- Obsidian Copilot: Copilot chooses the endpoint based on the selected model. With current ChatGPT-login Codex support (gpt-5*), it uses `/v1/responses`. If you select a chat-completions model, it uses `/v1/chat/completions` with streaming enabled and expects tool blocks as text (`obsidian-xml`). See [docs/api/chat-completions.md](docs/api/chat-completions.md) and [docs/getting-started.md](docs/getting-started.md).
+- Standard Responses clients: use `/v1/responses` and keep the default `openai-json` output mode. See [docs/api/responses.md](api/responses.md) and [docs/api/overview.md](api/overview.md).
+- Obsidian Copilot: Copilot chooses the endpoint based on the selected model. With current ChatGPT-login Codex support (gpt-5*), it uses `/v1/responses`. If you select a chat-completions model, it uses `/v1/chat/completions` with streaming enabled and expects tool blocks as text (`obsidian-xml`). See [docs/api/chat-completions.md](api/chat-completions.md) and [docs/getting-started.md](getting-started.md).
 
 ## Minimal configuration
 
@@ -83,7 +83,7 @@ For production requirements (Traefik, Codex HOME, auth), see [docs/deployment/pr
 | `PROXY_OUTPUT_MODE`           | `obsidian-xml`       | Default output mode for `/v1/chat/completions`                          |
 | `PROXY_RESPONSES_OUTPUT_MODE` | `openai-json`        | Default output mode for `/v1/responses`                                 |
 
-Full configuration and defaults: [docs/configuration.md](docs/configuration.md).
+Full configuration and defaults: [docs/configuration.md](configuration.md).
 
 ## Optional external references
 
@@ -94,19 +94,19 @@ populate the ignored `external/` directory via (requires `jq`):
 scripts/fetch-external.sh
 ```
 
-See [external/README.md](external/README.md) for details.
+See [external/README.md](../external/README.md) for details.
 
 ## Documentation map
 
-- [docs/README.md](docs/README.md) - doc index
-- [docs/getting-started.md](docs/getting-started.md) - first run walkthroughs
-- [docs/local-development.md](docs/local-development.md) - local workflows (Node vs shim vs compose)
-- [docs/api/overview.md](docs/api/overview.md) - endpoint overview + curl examples
-- [docs/configuration.md](docs/configuration.md) - environment variables and defaults
-- [docs/deployment/production.md](docs/deployment/production.md) - production compose + Traefik
-- [docs/ops/runbooks.md](docs/ops/runbooks.md) - smoke, snapshot, rollback, backup
-- [docs/observability.md](docs/observability.md) - logs, metrics, tracing
-- [docs/troubleshooting.md](docs/troubleshooting.md) - common issues
+- [docs/README.md](README.md) - doc index
+- [docs/getting-started.md](getting-started.md) - first run walkthroughs
+- [docs/local-development.md](local-development.md) - local workflows (Node vs shim vs compose)
+- [docs/api/overview.md](api/overview.md) - endpoint overview + curl examples
+- [docs/configuration.md](configuration.md) - environment variables and defaults
+- [docs/deployment/production.md](deployment/production.md) - production compose + Traefik
+- [docs/ops/runbooks.md](ops/runbooks.md) - smoke, snapshot, rollback, backup
+- [docs/observability.md](observability.md) - logs, metrics, tracing
+- [docs/troubleshooting.md](troubleshooting.md) - common issues
 
 ## Contributing
 

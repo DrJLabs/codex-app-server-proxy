@@ -48,7 +48,7 @@
 ## Docs usage
 
 - Do not open `docs/` unless requested or the task requires it; keep detailed changes in `docs/` rather than this file.
-- When behavior or setup changes, update `README.md` plus the affected doc pages and keep `docs/README.md` (index) and `docs/README-root.md` (snapshot) in sync.
+- When behavior or setup changes, update `README.md` plus the affected doc pages and keep `docs/README.md` (index) and `docs/README-root.md` (content snapshot, doc-relative links) in sync.
 
 ## Docs layout (canonical entrypoints)
 
