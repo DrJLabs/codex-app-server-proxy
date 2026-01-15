@@ -88,7 +88,7 @@ Full configuration and defaults: [docs/configuration.md](docs/configuration.md).
 ## Optional external references
 
 If you want local copies of upstream Codex or Obsidian Copilot for compatibility checks,
-populate the ignored `external/` directory via:
+populate the ignored `external/` directory via (requires `jq`):
 
 ```bash
 scripts/fetch-external.sh

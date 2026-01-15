@@ -33,7 +33,7 @@ This document focuses on running the proxy locally for development and debugging
 ## External references (optional)
 
 Compatibility checks sometimes refer to upstream Codex or Obsidian Copilot behavior. If you want
-local reference copies, populate `external/` (ignored by git) via:
+local reference copies, populate `external/` (ignored by git) via (requires `jq`):
 
 ```bash
 scripts/fetch-external.sh
