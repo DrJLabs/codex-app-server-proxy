@@ -15,7 +15,7 @@ This proxy is designed to be debuggable in production-like environments without 
 ## Metrics
 
 - Enable Prometheus metrics with `PROXY_ENABLE_METRICS=true`.
-- `/metrics` access is restricted by default (loopback and/or bearer), see `src/routes/metrics.js`.
+- `/metrics` access is restricted by default (loopback and/or bearer), see [`../src/routes/metrics.js`](../src/routes/metrics.js).
 
 ## Tracing (optional)
 
@@ -26,7 +26,7 @@ PROXY_ENABLE_OTEL=true
 PROXY_OTEL_EXPORTER_URL=http://localhost:4318/v1/traces
 ```
 
-Spans are emitted for HTTP ingress and backend invocation (see `src/services/tracing.js`).
+Spans are emitted for HTTP ingress and backend invocation (see [`../src/services/tracing.js`](../src/services/tracing.js)).
 
 ## Runbook
 

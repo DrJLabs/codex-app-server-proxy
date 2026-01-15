@@ -7,10 +7,10 @@ This document focuses on running the proxy locally for development and debugging
 | Mode | Command | Default port | Requires Codex install | Notes |
 | --- | --- | ---:| --- | --- |
 | Dev (recommended) | `npm run dev` | 18000 | Yes | Loads `.env`, seeds `.codev` config into `CODEX_HOME` |
-| Dev shim | `npm run dev:shim` | 18000 | No | Uses `scripts/fake-codex-jsonrpc.js` |
+| Dev shim | `npm run dev:shim` | 18000 | No | Uses [`../scripts/fake-codex-jsonrpc.js`](../scripts/fake-codex-jsonrpc.js) |
 | Minimal start | `node server.js` | 11435 | Yes | Uses `.codex-api/` as default `CODEX_HOME` |
 | Start with `.codev` | `npm run start:codev` | 18000 | Yes | Sets `CODEX_HOME=.codev` |
-| Start `.codev` shim | `npm run start:codev:shim` | 18000 | No | Uses `scripts/fake-codex-jsonrpc.js` |
+| Start `.codev` shim | `npm run start:codev:shim` | 18000 | No | Uses [`../scripts/fake-codex-jsonrpc.js`](../scripts/fake-codex-jsonrpc.js) |
 
 ## Environment and model IDs
 
@@ -21,8 +21,8 @@ This document focuses on running the proxy locally for development and debugging
 
 ## Docker workflows
 
-- Local compose example: `infra/compose/docker-compose.local.example.yml` (copy to `docker-compose.local.yml`)
-- Dev stack: `infra/compose/compose.dev.stack.yml` via:
+- Local compose example: [`../infra/compose/docker-compose.local.example.yml`](../infra/compose/docker-compose.local.example.yml) (copy to `docker-compose.local.yml`)
+- Dev stack: [`../infra/compose/compose.dev.stack.yml`](../infra/compose/compose.dev.stack.yml) via:
 
   ```bash
   npm run dev:stack:up
@@ -48,7 +48,7 @@ curl -s http://127.0.0.1:18000/v1/chat/completions \
 
 ## Where to look
 
-- Routing/middleware: `src/app.js`
-- Env defaults: `src/config/index.js`
-- Health probes: `src/routes/health.js`
-- Streaming/non-stream handlers: `src/handlers/**`
+- Routing/middleware: [`../src/app.js`](../src/app.js)
+- Env defaults: [`../src/config/index.js`](../src/config/index.js)
+- Health probes: [`../src/routes/health.js`](../src/routes/health.js)
+- Streaming/non-stream handlers: [`../src/handlers/`](../src/handlers/)

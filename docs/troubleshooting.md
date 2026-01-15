@@ -21,7 +21,7 @@
 
 ## `/metrics` returns 403
 
-- Metrics are restricted by default. Enable loopback access or provide a metrics bearer token (see `src/routes/metrics.js`).
+- Metrics are restricted by default. Enable loopback access or provide a metrics bearer token (see [`../src/routes/metrics.js`](../src/routes/metrics.js)).
 
 ## Cloudflare 524 / long non-stream requests
 
@@ -30,4 +30,4 @@
 
 ## Need the canonical contract?
 
-- See `openai-endpoint-golden-parity.md` for the byte-level streaming and envelope definitions.
+- See [`openai-endpoint-golden-parity.md`](openai-endpoint-golden-parity.md) for the byte-level streaming and envelope definitions.

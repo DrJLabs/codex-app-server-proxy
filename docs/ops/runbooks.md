@@ -6,7 +6,7 @@ This repo includes scripts for common operator workflows (snapshot, rollback, ba
 
 - Dev: `npm run smoke:dev`
 - Prod: `DOMAIN=<domain> KEY=<key> npm run smoke:prod`
-- Tool-call smoke defaults to `/v1/responses` with textual `<use_tool>` output; override with `TOOL_SMOKE_ENDPOINT=chat TOOL_SMOKE_MODES=structured` to assert structured tool_calls on chat completions.
+- Tool-call smoke defaults to `/v1/responses`; dev smoke uses `TOOL_SMOKE_MODES=textual` while prod smoke defaults to `TOOL_SMOKE_MODES=structured`. Override with `TOOL_SMOKE_ENDPOINT=chat TOOL_SMOKE_MODES=structured` to assert structured tool_calls on chat completions.
 - If `PROXY_ENABLE_METRICS=true`, set `PROXY_METRICS_TOKEN` in `.env`/`.env.dev` (or pass `METRICS_TOKEN=...` when running smoke) to avoid 403s from `/metrics`.
 
 ## Snapshot (release bundle)
@@ -58,7 +58,7 @@ This intentionally does not copy secrets such as `auth.json`.
 
 ## Cloud/CI bootstrap
 
-For ephemeral environments (CI runners, cloud VMs), `scripts/setup-codex-cloud.sh` installs deps, prepares writable Codex homes, and can optionally run tests:
+For ephemeral environments (CI runners, cloud VMs), [`../scripts/setup-codex-cloud.sh`](../scripts/setup-codex-cloud.sh) installs deps, prepares writable Codex homes, and can optionally run tests:
 
 ```bash
 ./scripts/setup-codex-cloud.sh --verify

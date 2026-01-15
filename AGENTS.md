@@ -49,6 +49,21 @@
 ## Docs usage
 
 - Do not open `docs/` unless requested or the task requires it; keep detailed changes in `docs/` rather than this file.
+- When behavior or setup changes, update `README.md` plus the affected doc pages and keep `docs/README.md` (index) and `docs/README-root.md` (snapshot) in sync.
+
+## Docs layout (canonical entrypoints)
+
+- `docs/README.md` — documentation index (update when adding/removing docs).
+- `docs/getting-started.md` — first-run walkthroughs.
+- `docs/local-development.md` — local workflows (Node vs shim vs compose).
+- `docs/api/overview.md` — endpoint overview + runnable curl examples.
+- `docs/api/responses.md` — `/v1/responses` usage notes.
+- `docs/api/chat-completions.md` — `/v1/chat/completions` usage notes.
+- `docs/configuration.md` — env vars and defaults (source of truth: `src/config/index.js`).
+- `docs/deployment/production.md` — production compose + Traefik.
+- `docs/ops/runbooks.md` — smoke/snapshot/rollback/backup workflows.
+- `docs/observability.md` — logs, metrics, tracing.
+- `docs/troubleshooting.md` — common issues and fixes.
 
 ## Logging and tracing
 

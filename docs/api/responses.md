@@ -2,6 +2,12 @@
 
 This endpoint aims to match the OpenAI Responses API closely and shares the same backend pipeline as chat completions.
 
+## Intended clients
+
+- Standard OpenAI Responses clients should use this endpoint.
+- Obsidian Copilot uses `/v1/responses` when the selected model is gpt-5* (current ChatGPT-login Codex support). If you pick a chat-completions model, Copilot will use `/v1/chat/completions` instead (see [`chat-completions.md`](chat-completions.md)).
+- Output mode defaults to `openai-json` for `/v1/responses`; override per request with `x-proxy-output-mode: openai-json` if needed.
+
 ## Enable/disable
 
 `/v1/responses` is enabled by default. Disable it with:
@@ -40,4 +46,4 @@ When `stream:true`, the proxy emits typed SSE events such as:
 
 ## Contract reference
 
-See `../openai-endpoint-golden-parity.md` for the canonical event ordering and envelope details.
+See [`../openai-endpoint-golden-parity.md`](../openai-endpoint-golden-parity.md) for the canonical event ordering and envelope details.
