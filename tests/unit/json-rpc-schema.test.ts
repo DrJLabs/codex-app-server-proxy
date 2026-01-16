@@ -510,6 +510,15 @@ describe("json-rpc schema bindings", () => {
 
       expect(paramsSnake.outputSchema).toEqual(snakeSchema);
       expect(paramsSnake.output_schema).toEqual(snakeSchema);
+
+      const paramsLegacy = buildSendUserTurnParams({
+        items: [item],
+        conversationId: "conv-schema-legacy",
+        finalOutputJsonSchema: legacySchema,
+      });
+
+      expect(paramsLegacy.outputSchema).toEqual(legacySchema);
+      expect(paramsLegacy.output_schema).toEqual(legacySchema);
     });
 
     it("normalizes legacy item shapes to typed input items", () => {

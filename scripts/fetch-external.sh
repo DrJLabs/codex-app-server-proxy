@@ -12,7 +12,9 @@ fetch_repo() {
   local dir="$EXTERNAL_DIR/$name"
 
   if [ -d "$dir/.git" ]; then
-    git -C "$dir" fetch --depth 1 origin "$branch"
+    if ! git -C "$dir" fetch --depth 1 origin "$branch"; then
+      git -C "$dir" fetch --depth 1 origin "refs/tags/$branch:refs/tags/$branch"
+    fi
     git -C "$dir" checkout -B "$branch" FETCH_HEAD
   else
     git clone --depth 1 --branch "$branch" "$url" "$dir"
