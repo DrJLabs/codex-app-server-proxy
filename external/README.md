@@ -4,8 +4,8 @@ This directory is intentionally ignored by git. Only this README and
 `manifest.json` are tracked so the layout is discoverable.
 
 Use `scripts/fetch-external.sh` to clone the upstream repos used for
-compatibility checks. The script reads `manifest.json`, tracks `main` for each
-repository, and requires `jq` on your PATH.
+compatibility checks. The script reads `manifest.json`, checks out the listed
+ref (branch or tag) for each repository, and requires `jq` on your PATH.
 
 Example:
 

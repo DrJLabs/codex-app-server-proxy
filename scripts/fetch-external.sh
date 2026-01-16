@@ -13,7 +13,7 @@ fetch_repo() {
 
   if [ -d "$dir/.git" ]; then
     git -C "$dir" fetch --depth 1 origin "$branch"
-    git -C "$dir" checkout -B "$branch" "origin/$branch"
+    git -C "$dir" checkout -B "$branch" FETCH_HEAD
   else
     git clone --depth 1 --branch "$branch" "$url" "$dir"
   fi
