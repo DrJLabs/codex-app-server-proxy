@@ -44,6 +44,10 @@
 - Confirmed: seed `CODEX_HOME` by creating `./.codex-responses-api/`, running `SOURCE_HOME=.codev DEST_HOME=.codex-responses-api bash scripts/sync-codex-config.sh --force`, then replace `./.codex-responses-api/AGENTS.md` with standard instructions and copy `~/.codex/auth.json` into `./.codex-responses-api/auth.json` on the host.
 - Confirmed: avoid local port collision on `127.0.0.1:11435` by exposing only the Obsidian service locally; for the standard service either omit `ports:` entirely or map `127.0.0.1:11436:11435` with `PORT=11435` unchanged in the container.
 
+## Status (as of 2026-01-16)
+- `docker-compose.yml` already includes the `codex-responses` service, Traefik routers, and `CODEX_HOME=/app/.codex-responses-api`.
+- The `.gitignore` / `.dockerignore` and README updates are still open follow-ups if we want to keep `./.codex-responses-api` out of commits/build context.
+
 ## Implementation plan
 1) Add `.codex-responses-api` to `.gitignore` and `.dockerignore` (avoid secrets in builds/commits).
 2) Add a new app service in `docker-compose.yml` (same image) with:
