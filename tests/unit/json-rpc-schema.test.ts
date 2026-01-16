@@ -170,8 +170,8 @@ describe("json-rpc schema bindings", () => {
     ensureTranscripts(["streaming-tool-calls.json"], { backend: "app" });
   }, 30000);
 
-  it("pins the schema to Codex CLI 0.77.0", () => {
-    expect(CODEX_CLI_VERSION).toBe("0.77.0");
+  it("pins the schema to Codex CLI 0.84.0", () => {
+    expect(CODEX_CLI_VERSION).toBe("0.84.0");
   });
 
   it("parses streaming text notifications and token counts", async () => {
@@ -484,6 +484,41 @@ describe("json-rpc schema bindings", () => {
       expect(params.effort).toBe("high");
       expect(params.items).toHaveLength(1);
       expect(params.items[0]).not.toBe(item);
+    });
+
+    it("normalizes output schema options for sendUserTurn params", () => {
+      const item = createUserMessageItem("hello");
+      const outputSchema = { type: "object", properties: { title: { type: "string" } } };
+      const snakeSchema = { type: "array" };
+      const legacySchema = { type: "string" };
+      const params = buildSendUserTurnParams({
+        items: [item],
+        conversationId: "conv-schema",
+        outputSchema,
+        output_schema: snakeSchema,
+        finalOutputJsonSchema: legacySchema,
+      });
+
+      expect(params.outputSchema).toEqual(outputSchema);
+      expect(params.output_schema).toEqual(outputSchema);
+
+      const paramsSnake = buildSendUserTurnParams({
+        items: [item],
+        conversationId: "conv-schema-snake",
+        output_schema: snakeSchema,
+      });
+
+      expect(paramsSnake.outputSchema).toEqual(snakeSchema);
+      expect(paramsSnake.output_schema).toEqual(snakeSchema);
+
+      const paramsLegacy = buildSendUserTurnParams({
+        items: [item],
+        conversationId: "conv-schema-legacy",
+        finalOutputJsonSchema: legacySchema,
+      });
+
+      expect(paramsLegacy.outputSchema).toEqual(legacySchema);
+      expect(paramsLegacy.output_schema).toEqual(legacySchema);
     });
 
     it("normalizes legacy item shapes to typed input items", () => {

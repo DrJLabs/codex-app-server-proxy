@@ -1,7 +1,7 @@
 /**
  * Codex App Server JSON-RPC bindings for chat.
  *
- * Generated with codex-cli/codex-rs/app-server-protocol export tooling (v0.77.0)
+ * Generated with codex-cli/codex-rs/app-server-protocol export tooling (v0.84.0)
  * and then trimmed to the subset needed by the proxy. Regenerate when the
  * upstream protocol changes.
  */
@@ -9,7 +9,7 @@
 /* eslint-disable */
 
 export const JSONRPC_VERSION = "2.0" as const;
-export const CODEX_CLI_VERSION = "0.77.0" as const;
+export const CODEX_CLI_VERSION = "0.84.0" as const;
 
 export type JsonRpcId = number | string;
 
@@ -159,6 +159,8 @@ export interface SendUserTurnParams {
   choice_count?: number;
   effort?: ReasoningEffort | null;
   summary: ReasoningSummary;
+  outputSchema?: JsonValue;
+  output_schema?: JsonValue;
   metadata?: Record<string, unknown> | null;
   tools?: Record<string, unknown> | null;
   [key: string]: unknown;
@@ -246,6 +248,9 @@ export interface BuildSendUserTurnOptions {
   effort?: ReasoningEffort | string | null;
   summary?: ReasoningSummary | string | null;
   tools?: JsonValue;
+  outputSchema?: JsonValue;
+  output_schema?: JsonValue;
+  finalOutputJsonSchema?: JsonValue;
 }
 
 export interface BuildSendUserMessageOptions {
@@ -436,6 +441,13 @@ export function buildSendUserTurnParams(
   const tools = toRecordOrNull(options.tools);
   if (tools !== undefined) {
     params.tools = tools;
+  }
+
+  const rawOutputSchema =
+    options.outputSchema ?? options.output_schema ?? options.finalOutputJsonSchema;
+  if (rawOutputSchema !== undefined) {
+    params.outputSchema = rawOutputSchema;
+    params.output_schema = rawOutputSchema;
   }
 
   return params;

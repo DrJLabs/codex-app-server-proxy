@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Codex App Server JSON-RPC Schema Bundle",
-  "cliVersion": "0.77.0",
+  "cliVersion": "0.84.0",
   "definitions": {
     "InitializeParams": {
       "type": "object",
@@ -228,6 +228,8 @@
         "summary": {
           "$ref": "#/definitions/ReasoningSummary"
         },
+        "outputSchema": {},
+        "output_schema": {},
         "metadata": {
           "anyOf": [
             {
