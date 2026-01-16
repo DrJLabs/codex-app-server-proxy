@@ -249,6 +249,7 @@ export interface BuildSendUserTurnOptions {
   summary?: ReasoningSummary | string | null;
   tools?: JsonValue;
   outputSchema?: JsonValue;
+  output_schema?: JsonValue;
   finalOutputJsonSchema?: JsonValue;
 }
 
@@ -443,13 +444,10 @@ export function buildSendUserTurnParams(
   }
 
   const rawOutputSchema =
-    options.outputSchema ??
-    (options as any).output_schema ??
-    (options as any).finalOutputJsonSchema;
+    options.outputSchema ?? options.output_schema ?? options.finalOutputJsonSchema;
   if (rawOutputSchema !== undefined) {
-    const schema = rawOutputSchema ?? null;
-    params.outputSchema = schema;
-    params.output_schema = schema;
+    params.outputSchema = rawOutputSchema;
+    params.output_schema = rawOutputSchema;
   }
 
   return params;

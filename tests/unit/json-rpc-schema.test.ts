@@ -486,6 +486,32 @@ describe("json-rpc schema bindings", () => {
       expect(params.items[0]).not.toBe(item);
     });
 
+    it("normalizes output schema options for sendUserTurn params", () => {
+      const item = createUserMessageItem("hello");
+      const outputSchema = { type: "object", properties: { title: { type: "string" } } };
+      const snakeSchema = { type: "array" };
+      const legacySchema = { type: "string" };
+      const params = buildSendUserTurnParams({
+        items: [item],
+        conversationId: "conv-schema",
+        outputSchema,
+        output_schema: snakeSchema,
+        finalOutputJsonSchema: legacySchema,
+      });
+
+      expect(params.outputSchema).toEqual(outputSchema);
+      expect(params.output_schema).toEqual(outputSchema);
+
+      const paramsSnake = buildSendUserTurnParams({
+        items: [item],
+        conversationId: "conv-schema-snake",
+        output_schema: snakeSchema,
+      });
+
+      expect(paramsSnake.outputSchema).toEqual(snakeSchema);
+      expect(paramsSnake.output_schema).toEqual(snakeSchema);
+    });
+
     it("normalizes legacy item shapes to typed input items", () => {
       const params = buildSendUserTurnParams({
         items: ["hi", { text: "hello" }, { data: { text: "hey" } }],
