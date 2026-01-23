@@ -74,6 +74,15 @@
 - Capture transcripts (full request/response bodies + stream frames) use `PROXY_CAPTURE_CHAT_TRANSCRIPTS` / `PROXY_CAPTURE_RESPONSES_TRANSCRIPTS`; raw bodies require `PROXY_CAPTURE_CHAT_RAW_TRANSCRIPTS` / `PROXY_CAPTURE_RESPONSES_RAW_TRANSCRIPTS`.
 - Default capture locations (host): `test-results/chat-copilot/raw/`, `test-results/chat-copilot/raw-unredacted/`, `test-results/responses-copilot/raw/`, `test-results/responses-copilot/raw-unredacted/`.
 - Raw capture files still redact secret headers; each capture includes `metadata.proxy_trace_id` for correlation.
+- Access/worker log tail: `docker logs -f codex-dev-app-dev-1` (dev stack) or your process manager stdout for `server.js`.
+- Trace event file ops: `PROTO_LOG_PATH` for protocol events (`backend_*`, `tool_block`, etc.); default `/tmp/codex-proto-events.ndjson`.
+- Usage aggregation ops: `TOKEN_LOG_PATH` for request/latency/token summaries; `/usage` reads it.
+- Sanitizer ops: `SANITIZER_LOG_PATH` stores sanitizer toggles and metadata scrub summaries.
+- Capture ops: `PROXY_CAPTURE_CHAT_*` and `PROXY_CAPTURE_RESPONSES_*` write stream JSON to `test-results/*`; `x-proxy-capture-id` pins filenames.
+- Exec output staging: `${PROXY_CODEX_WORKDIR}/exec-output/exec-*.txt` (ephemeral, deleted after read).
+- Codex CLI home: `CODEX_HOME` (dev `.codev/`, prod `.codex-api/`) may include `proto-events.ndjson` and `http-request-debug.ndjson` when enabled.
+- Dev/prod path quick map: dev containers use `/app/test-results/...` for captures (host `test-results/...`) and often set `PROTO_LOG_PATH` under `$CODEX_HOME` (e.g. `/home/node/.codex/proto-events.ndjson`); prod defaults to `/tmp/*.ndjson` unless overridden.
+- Grep recipes: `docker logs --since 2h codex-dev-app-dev-1 | rg -n 'responses_title_summary_intercept|responses_title_summary_intercept_error|chat_title_summary_intercept'`; per request id: `docker logs --since 24h codex-dev-app-dev-1 | rg -n '<req_id>'`.
 
 ## Global conventions
 
