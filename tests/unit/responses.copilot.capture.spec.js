@@ -21,9 +21,8 @@ describe("copilot responses fixtures", () => {
     const result = resolveResponsesOutputMode({
       req,
       defaultValue: "openai-json",
-      copilotDefault: "obsidian-xml",
     });
 
-    expect(result.effective).toBe(fixture.metadata.output_mode_effective);
+    expect(result.effective).toBe("openai-json");
   });
 });

@@ -73,8 +73,6 @@ export async function maybeHandleTitleSummaryIntercept({ req, res, body = {}, st
   const { effective: outputModeEffective } = resolveResponsesOutputMode({
     req,
     defaultValue: CFG.PROXY_RESPONSES_OUTPUT_MODE,
-    copilotDefault: "obsidian-xml",
-    copilotDetection: CFG.PROXY_COPILOT_AUTO_DETECT ? copilotDetection : null,
   });
   locals.output_mode_requested = outputModeRequested;
   locals.output_mode_effective = outputModeEffective;

@@ -175,8 +175,6 @@ export async function postResponsesNonStream(req, res) {
   const { effective: resolvedOutputMode } = resolveResponsesOutputMode({
     req,
     defaultValue: CFG.PROXY_RESPONSES_OUTPUT_MODE,
-    copilotDefault: "obsidian-xml",
-    copilotDetection: CFG.PROXY_COPILOT_AUTO_DETECT ? copilotDetection : null,
   });
   outputModeEffective = resolvedOutputMode;
   const restoreOutputMode = applyDefaultProxyOutputModeHeader(req, outputModeEffective);

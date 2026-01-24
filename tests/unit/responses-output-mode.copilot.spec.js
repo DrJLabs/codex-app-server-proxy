@@ -30,18 +30,18 @@ describe("responses output mode for Copilot", () => {
     expect(detectCopilotRequest(req)).toBe(false);
   });
 
-  it("forces obsidian-xml via legacy UA detection when no classifier provided", () => {
+  it("ignores legacy UA detection when no explicit header provided", () => {
     const req = { headers: { "user-agent": "obsidian/1.9.7" } };
     const result = resolveResponsesOutputMode({
       req,
       defaultValue: "openai-json",
       copilotDefault: "obsidian-xml",
     });
-    expect(result.effective).toBe("obsidian-xml");
-    expect(result.source).toBe("copilot");
+    expect(result.effective).toBe("openai-json");
+    expect(result.source).toBe("default");
   });
 
-  it("forces obsidian-xml for high-confidence classifier", () => {
+  it("ignores high-confidence classifier when no explicit header provided", () => {
     const req = { headers: { "user-agent": "curl/8.0" } };
     const result = resolveResponsesOutputMode({
       req,
@@ -53,8 +53,8 @@ describe("responses output mode for Copilot", () => {
         copilot_detect_reasons: ["marker_recent_conversations"],
       },
     });
-    expect(result.effective).toBe("obsidian-xml");
-    expect(result.source).toBe("copilot");
+    expect(result.effective).toBe("openai-json");
+    expect(result.source).toBe("default");
   });
 
   it("does not force obsidian-xml for suspected classifier", () => {

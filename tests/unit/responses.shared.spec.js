@@ -221,45 +221,22 @@ describe("responses shared helpers", () => {
     expect(normalizeMessageId("  bad*id  ")).toBe("msg_badid");
   });
 
-  test("resolves responses output mode from header, copilot, or default", () => {
+  test("resolves responses output mode from header or default", () => {
     const headerReq = { headers: { "x-proxy-output-mode": "xml" } };
     expect(
       resolveResponsesOutputMode({
         req: headerReq,
         defaultValue: "text",
-        copilotDefault: "copilot",
       })
     ).toEqual({ effective: "xml", source: "header" });
-
-    const copilotReq = { headers: { "user-agent": "Obsidian/1.0" } };
-    expect(
-      resolveResponsesOutputMode({
-        req: copilotReq,
-        defaultValue: "text",
-        copilotDefault: "copilot",
-      })
-    ).toEqual({ effective: "copilot", source: "copilot" });
 
     const fallbackReq = { headers: {} };
     expect(
       resolveResponsesOutputMode({
         req: fallbackReq,
         defaultValue: "text",
-        copilotDefault: "copilot",
-        copilotDetection: { copilot_detect_tier: "low" },
       })
     ).toEqual({ effective: "text", source: "default" });
-  });
-
-  test("resolveResponsesOutputMode prefers explicit copilot detection", () => {
-    const req = { headers: { "user-agent": "Custom" } };
-    const result = resolveResponsesOutputMode({
-      req,
-      defaultValue: "text",
-      copilotDefault: "copilot",
-      copilotDetection: { copilot_detect_tier: "high" },
-    });
-    expect(result).toEqual({ effective: "copilot", source: "copilot" });
   });
 
   test("applyDefaultProxyOutputModeHeader sets and restores headers", () => {
