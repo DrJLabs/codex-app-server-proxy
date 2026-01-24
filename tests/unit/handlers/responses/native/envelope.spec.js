@@ -27,7 +27,7 @@ describe("native responses envelope builder", () => {
       model: "gpt-4.1",
       outputText: "",
       functionCalls: [
-        { id: "call_1", function: { name: "lookup", arguments: { id: 42 } } },
+        { id: "call_1", function: { name: "lookup", arguments: 42 } },
       ],
       usage: null,
       status: "completed",
@@ -35,8 +35,9 @@ describe("native responses envelope builder", () => {
 
     const fnItem = envelope.output[1];
     expect(fnItem.type).toBe("function_call");
-    expect(fnItem.call_id).toBe("call_1");
+    expect(fnItem.call_id).toBeUndefined();
+    expect(fnItem.id).toBe("call_1");
     expect(fnItem.name).toBe("lookup");
-    expect(fnItem.arguments).toBe("{\"id\":42}");
+    expect(fnItem.arguments).toBe("42");
   });
 });

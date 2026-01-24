@@ -18,11 +18,10 @@ const mapUsage = (usage) => {
 const normalizeFunctionArguments = (args) => {
   if (typeof args === "string") return args;
   if (args === undefined) return "";
-  try {
-    return JSON.stringify(args);
-  } catch {
-    return String(args);
-  }
+  console.warn("[responses][native] function_call arguments not string; coercing", {
+    type: typeof args,
+  });
+  return String(args);
 };
 
 const buildMessageOutputItem = ({ messageId, role, text }) => {
@@ -43,7 +42,6 @@ const buildFunctionCallOutputItems = (functionCalls = []) => {
     return {
       id: callId,
       type: "function_call",
-      call_id: callId,
       name,
       arguments: normalizeFunctionArguments(call?.function?.arguments),
     };

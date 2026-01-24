@@ -65,7 +65,6 @@ describe("native responses request normalizer", () => {
     const result = normalizeResponsesRequest(body);
     expect(result.inputItems).toEqual([
       { type: "text", data: { text: "[user] hi" } },
-      { type: "text", data: { text: "[user]" } },
       { type: "image", data: { image_url: "https://img" } },
       { type: "text", data: { text: "[user] there" } },
     ]);

@@ -68,6 +68,7 @@ export const normalizeResponsesRequest = (body = {}) => {
 
   const items = [];
   let textLines = [];
+  let lastRoleAnchor = null;
 
   const flushText = () => {
     if (!textLines.length) return;
@@ -84,13 +85,17 @@ export const normalizeResponsesRequest = (body = {}) => {
   const pushRoleText = (role, text) => {
     const normalized = text === undefined || text === null ? "" : String(text);
     pushTextLine(`[${role}] ${normalized}`.trimEnd());
+    lastRoleAnchor = role;
   };
 
-  const emitRoleMarkerForImage = (role) => {
+  const ensureRoleAnchorForImage = (role) => {
     if (textLines.length) {
       flushText();
     }
-    items.push({ type: "text", data: { text: `[${role}]` } });
+    if (lastRoleAnchor !== role) {
+      items.push({ type: "text", data: { text: `[${role}]` } });
+      lastRoleAnchor = role;
+    }
   };
 
   const emitImage = (role, imageUrl, param) => {
@@ -100,7 +105,7 @@ export const normalizeResponsesRequest = (body = {}) => {
         invalidRequestBody(param, "input_image.image_url must be a string")
       );
     }
-    emitRoleMarkerForImage(role);
+    ensureRoleAnchorForImage(role);
     items.push({ type: "image", data: { image_url: url } });
   };
 
@@ -115,7 +120,7 @@ export const normalizeResponsesRequest = (body = {}) => {
     }
     if (Array.isArray(content)) {
       content.forEach((part, idx) => {
-        const param = `${baseParam}.content[${idx}]`;
+        const param = baseParam;
         if (!part || typeof part !== "object") {
           throw new ResponsesJsonRpcNormalizationError(
             invalidRequestBody(param, "content item must be an object")
@@ -131,7 +136,7 @@ export const normalizeResponsesRequest = (body = {}) => {
           return;
         }
         throw new ResponsesJsonRpcNormalizationError(
-          invalidRequestBody(param, "unsupported content item type")
+          invalidRequestBody(param, "unsupported input item type")
         );
       });
       return;
@@ -193,7 +198,7 @@ export const normalizeResponsesRequest = (body = {}) => {
 
   const instructions = asNonEmptyString(body.instructions);
   if (instructions) {
-    pushTextLine(`[system] ${instructions}`);
+    pushRoleText("system", instructions);
   }
 
   if (body.input === undefined) {
