@@ -540,4 +540,10 @@ export const normalizeChatJsonRpcRequest = ({
   return { turn, message: messagePayload };
 };
 
-export { ChatJsonRpcNormalizationError };
+export {
+  ChatJsonRpcNormalizationError,
+  normalizeParallelToolCalls,
+  normalizeResponseFormat,
+  normalizeToolChoice,
+  validateTools,
+};
