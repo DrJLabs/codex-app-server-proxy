@@ -78,6 +78,17 @@ const buildToolsPayload = ({ definitions, toolChoice, parallelToolCalls }) => {
   return Object.keys(payload).length ? payload : undefined;
 };
 
+const countToolDefinitions = (payload) => {
+  if (!payload || typeof payload !== "object") return 0;
+  const defs =
+    payload.definitions ||
+    payload.tools ||
+    payload.tool_definitions ||
+    payload.toolDefinitions ||
+    payload.functions;
+  return Array.isArray(defs) ? defs.length : 0;
+};
+
 const mapFinishStatus = (reason) => {
   const normalized = String(reason || "").toLowerCase();
   if (normalized === "length" || normalized === "content_filter") return "incomplete";
@@ -263,6 +274,28 @@ export async function postResponsesNonStream(req, res) {
   if (normalized.finalOutputJsonSchema !== undefined) {
     message.finalOutputJsonSchema = normalized.finalOutputJsonSchema;
   }
+
+  const ingressToolCount = Array.isArray(normalized.tools) ? normalized.tools.length : 0;
+  const turnToolCount = countToolDefinitions(turn.tools);
+  const messageToolCount = countToolDefinitions(message.tools);
+  const toolsMismatch =
+    ingressToolCount !== turnToolCount || ingressToolCount !== messageToolCount;
+  logStructured(
+    {
+      component: "responses",
+      event: "responses_tools_projection",
+      level: toolsMismatch ? "warn" : "info",
+      req_id: reqId,
+      route: "/v1/responses",
+      mode: "responses_nonstream",
+    },
+    {
+      ingress_tool_count: ingressToolCount,
+      turn_tool_count: turnToolCount,
+      message_tool_count: messageToolCount,
+      mismatch: toolsMismatch,
+    }
+  );
 
   const normalizedRequest = { turn, message };
   const child = createJsonRpcChildAdapter({

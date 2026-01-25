@@ -50,6 +50,7 @@ services:
       - PROXY_SUPPRESS_TAIL_AFTER_TOOLS=${PROXY_SUPPRESS_TAIL_AFTER_TOOLS:-}
       - PROXY_ENABLE_PARALLEL_TOOL_CALLS=${PROXY_ENABLE_PARALLEL_TOOL_CALLS:-}
       - PROXY_LOG_CORS_ORIGIN=${PROXY_LOG_CORS_ORIGIN:-true}
+      - PROXY_TRACE_REDACT=${PROXY_TRACE_REDACT:-}
       # Default to real Codex CLI; override with CODEX_BIN=/app/scripts/fake-codex-jsonrpc.js for the shim
       - CODEX_BIN=${CODEX_BIN:-/usr/local/lib/codex-cli/bin/codex.js}
       # Copilot capture (sanitized transcripts)
