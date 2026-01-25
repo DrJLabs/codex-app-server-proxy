@@ -141,6 +141,22 @@ describe("responses default max tokens", () => {
     expect(captured?.message?.max_output_tokens).toBeUndefined();
   });
 
+  it("skips backend tool capability checks for function tools", async () => {
+    vi.resetModules();
+    const { postResponsesStream } = await import("../../../../src/handlers/responses/stream.js");
+
+    await postResponsesStream(
+      makeReq({
+        input: "hello",
+        model: "gpt-5.2",
+        tools: [{ type: "function", name: "lookup", parameters: {} }],
+      }),
+      makeRes()
+    );
+
+    expect(ensureResponsesCapabilitiesMock).toHaveBeenCalledWith({ toolsRequested: false });
+  });
+
   it("injects maxOutputTokens for non-stream requests when missing", async () => {
     process.env.PROXY_RESPONSES_DEFAULT_MAX_TOKENS = "128";
     vi.resetModules();

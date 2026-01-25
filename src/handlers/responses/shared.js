@@ -66,3 +66,20 @@ export const applyDefaultProxyOutputModeHeader = (req, desiredOutputMode) => {
     }
   };
 };
+
+export const splitResponsesTools = (tools) => {
+  const functionTools = [];
+  const nativeTools = [];
+  if (!Array.isArray(tools)) {
+    return { functionTools, nativeTools };
+  }
+  tools.forEach((tool) => {
+    const type = typeof tool?.type === "string" ? tool.type.toLowerCase() : "";
+    if (type === "function") {
+      functionTools.push(tool);
+    } else {
+      nativeTools.push(tool);
+    }
+  });
+  return { functionTools, nativeTools };
+};

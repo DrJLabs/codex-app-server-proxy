@@ -1,5 +1,9 @@
 # Obsidian tool calling without JSON-RPC tool manifests
 
+> **Note**: This v1 draft is superseded. See
+> [`obsidian-tool-call-simulation_v2_fix-comments_2026-01-25.md`](obsidian-tool-call-simulation_v2_fix-comments_2026-01-25.md)
+> for the current behavior (call_id, sentinel parsing, and transcript flattening).
+
 ## Goal
 Provide **OpenAI Responses-compatible tool calling** for Obsidian while the app-server schema lacks per-request tool manifests.
 

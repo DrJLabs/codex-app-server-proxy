@@ -295,4 +295,49 @@ describe("responses nonstream handler", () => {
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ object: "response" }));
   });
+
+  it("strips <tool_call> blocks from output text and emits function calls", async () => {
+    createToolCallAggregatorMock.mockReturnValueOnce({
+      ingestDelta: vi.fn(),
+      ingestMessage: vi.fn(),
+      snapshot: vi.fn(() => []),
+    });
+    normalizeResponsesRequestMock.mockReturnValueOnce({
+      instructions: "",
+      inputItems: [{ type: "text", data: { text: "[user] hi" } }],
+      responseFormat: undefined,
+      finalOutputJsonSchema: undefined,
+      tools: [{ type: "function", function: { name: "search", parameters: {} } }],
+      toolChoice: "auto",
+      parallelToolCalls: undefined,
+      maxOutputTokens: undefined,
+    });
+    runNativeResponsesMock.mockImplementationOnce(async ({ onEvent }) => {
+      onEvent({
+        type: "text",
+        text:
+          "Hi <tool_call>{\"name\":\"search\",\"arguments\":\"{\\\"query\\\":\\\"x\\\"}\"}</tool_call> ok",
+        choiceIndex: 0,
+      });
+      onEvent({ type: "finish", reason: "stop", trigger: "task_complete" });
+    });
+
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    const [args] = buildResponsesEnvelopeMock.mock.calls[0];
+    expect(args.outputText).toBe("Hi  ok");
+    expect(args.functionCalls).toEqual([
+      {
+        id: "fc_001",
+        type: "function",
+        function: { name: "search", arguments: "{\"query\":\"x\"}" },
+      },
+    ]);
+  });
 });

@@ -383,4 +383,70 @@ describe("responses stream adapter", () => {
     );
     expect(protoEntry).toBeTruthy();
   });
+
+  it("parses <tool_call> blocks from text deltas", async () => {
+    const { createResponsesStreamAdapter } = await import(
+      "../../../../src/handlers/responses/stream-adapter.js"
+    );
+
+    const res = buildRes();
+    const adapter = createResponsesStreamAdapter(res, {
+      model: "gpt-test",
+      tools: [{ type: "function", name: "search", parameters: {} }],
+    });
+
+    adapter.handleEvent({
+      type: "text_delta",
+      delta:
+        "Hi <tool_call>{\"name\":\"search\",\"arguments\":\"{\\\"query\\\":\\\"x\\\"}\"}</tool_call> ok",
+      choiceIndex: 0,
+    });
+    await adapter.finalize();
+    await waitForWrites();
+
+    const entries = parseSSE(res.chunks.join(""));
+    const output = entries
+      .filter((entry) => entry.event === "response.output_text.delta")
+      .map((entry) => entry.data.delta)
+      .join("");
+    expect(output).toBe("Hi  ok");
+
+    const events = entries.map((entry) => entry.event).filter(Boolean);
+    const addedIndex = events.indexOf("response.output_item.added");
+    const doneIndex = events.indexOf("response.function_call_arguments.done");
+    const outputDoneIndex = events.indexOf("response.output_item.done");
+
+    expect(addedIndex).toBeGreaterThan(-1);
+    expect(doneIndex).toBeGreaterThan(addedIndex);
+    expect(outputDoneIndex).toBeGreaterThan(doneIndex);
+
+    const added = entries.find((entry) => entry.event === "response.output_item.added");
+    expect(added?.data?.item?.type).toBe("function_call");
+    expect(added?.data?.item?.name).toBe("search");
+  });
+
+  it("adds monotonically increasing sequence_number values", async () => {
+    const { createResponsesStreamAdapter } = await import(
+      "../../../../src/handlers/responses/stream-adapter.js"
+    );
+
+    const res = buildRes();
+    const adapter = createResponsesStreamAdapter(res, { model: "gpt-test" });
+
+    adapter.handleEvent({ type: "text_delta", delta: "Hello", choiceIndex: 0 });
+    await adapter.finalize();
+    await waitForWrites();
+
+    const entries = parseSSE(res.chunks.join(""));
+    const numbers = entries
+      .filter((entry) => entry.type === "data")
+      .map((entry) => entry.data?.sequence_number)
+      .filter((value) => Number.isInteger(value));
+
+    expect(numbers.length).toBeGreaterThan(0);
+    numbers.forEach((value, index) => {
+      if (index === 0) return;
+      expect(value).toBeGreaterThan(numbers[index - 1]);
+    });
+  });
 });

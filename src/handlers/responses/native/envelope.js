@@ -37,13 +37,16 @@ const buildMessageOutputItem = ({ messageId, role, text }) => {
 const buildFunctionCallOutputItems = (functionCalls = []) => {
   if (!Array.isArray(functionCalls) || !functionCalls.length) return [];
   return functionCalls.map((call, index) => {
-    const callId = call?.id || call?.call_id || `call_${index}_${nanoid()}`;
-    const name = call?.function?.name || call?.name || callId;
+    const id = call?.id || call?.call_id || `call_${index}_${nanoid()}`;
+    const callId = call?.call_id || id;
+    const name = call?.function?.name || call?.name || id;
+    const args = call?.function?.arguments ?? call?.arguments;
     return {
-      id: callId,
+      id,
+      call_id: callId,
       type: "function_call",
       name,
-      arguments: normalizeFunctionArguments(call?.function?.arguments),
+      arguments: normalizeFunctionArguments(args),
     };
   });
 };

@@ -35,7 +35,33 @@ describe("native responses request normalizer", () => {
     };
     const result = normalizeResponsesRequest(body);
     expect(result.inputItems).toEqual([
-      { type: "text", data: { text: "[assistant] ok\n[tool:c1] done" } },
+      {
+        type: "text",
+        data: { text: "[assistant] ok\n[function_call_output call_id=c1 output=done]" },
+      },
+    ]);
+  });
+
+  it("accepts echoed function_call items", () => {
+    const body = {
+      input: [
+        {
+          type: "function_call",
+          id: "fc_1",
+          call_id: "fc_1",
+          name: "lookup",
+          arguments: "{\"id\":1}",
+        },
+      ],
+    };
+    const result = normalizeResponsesRequest(body);
+    expect(result.inputItems).toEqual([
+      {
+        type: "text",
+        data: {
+          text: "[function_call id=fc_1 call_id=fc_1 name=lookup arguments={\"id\":1}]",
+        },
+      },
     ]);
   });
 
@@ -109,6 +135,25 @@ describe("native responses request normalizer", () => {
     };
     const result = normalizeResponsesRequest(body);
     expect(result.toolChoice).toBe("auto");
+  });
+
+  it("injects tool schema guidance into the transcript when tools are present", () => {
+    const body = {
+      tools: [
+        {
+          type: "function",
+          name: "lookup_user",
+          parameters: { type: "object", properties: { id: { type: "string" } } },
+        },
+      ],
+      input: "hi",
+    };
+    const result = normalizeResponsesRequest(body);
+    const text = result.inputItems[0].data.text;
+    expect(text).toContain("<tool_call>");
+    expect(text).toContain("lookup_user");
+    expect(text).toContain("\"type\":\"object\"");
+    expect(text).toContain("[user] hi");
   });
 
   it("rejects unsupported input item types", () => {

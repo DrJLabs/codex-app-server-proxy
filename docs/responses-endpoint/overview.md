@@ -21,7 +21,10 @@ The route is gated by `PROXY_ENABLE_RESPONSES` (default: `true`).
 - `messages` is rejected (400).
 - `input` (string or array) is flattened into a role-tagged transcript:
   - `[system] ...`, `[developer] ...`, `[user] ...`, `[assistant] ...`
-  - Tool outputs become `[tool:<call_id>] <output>`
+  - Tool outputs become `[function_call_output call_id=<call_id> output=<output>]`
+  - Echoed `function_call` items are accepted and flattened back into the transcript
+- When function tools are provided, the proxy injects a developer segment describing
+  `<tool_call>` formatting rules, tool schemas, and `tool_choice` constraints.
 - `input_image` is mapped to JSON-RPC `image` items, with role markers emitted only when needed for deterministic attribution.
 - `previous_response_id` is accepted for compatibility but **never** echoed in responses.
 
@@ -33,7 +36,7 @@ The flattened transcript is an internal representation; the `/v1/responses` requ
 
 - `object: "response"` and `created` are always present.
 - Output items include a `message` item with `output_text` and `function_call` items for tools.
-- `function_call.arguments` stays a **string**; no `call_id` field is emitted.
+- `function_call.arguments` stays a **string**, and `function_call` items include `call_id`.
 
 ## Streaming (typed SSE)
 
@@ -45,6 +48,7 @@ The flattened transcript is an internal representation; the `/v1/responses` requ
   `response.output_item.done`
 - `response.completed` (final envelope)
 - `done` with `[DONE]`
+- Every typed SSE payload includes a monotonically increasing `sequence_number`.
 
 If an upstream/transport error occurs **after** SSE starts, the adapter emits
 `response.failed` and terminates with `[DONE]` (no `response.completed`).

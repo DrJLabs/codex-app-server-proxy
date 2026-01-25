@@ -1,5 +1,9 @@
 import { config as CFG } from "../../config/index.js";
-import { applyDefaultProxyOutputModeHeader, resolveResponsesOutputMode } from "./shared.js";
+import {
+  applyDefaultProxyOutputModeHeader,
+  resolveResponsesOutputMode,
+  splitResponsesTools,
+} from "./shared.js";
 import {
   logResponsesIngressRaw,
   summarizeResponsesIngress,
@@ -28,6 +32,7 @@ import { runNativeResponses } from "./native/execute.js";
 import { createJsonRpcChildAdapter } from "../../services/transport/child-adapter.js";
 import { mapTransportError } from "../../services/transport/index.js";
 import { createToolCallAggregator } from "../../lib/tool-call-aggregator.js";
+import { parseToolCallText } from "./tool-call-parser.js";
 import {
   extractMetadataFromPayload,
   normalizeMetadataKey,
@@ -95,6 +100,60 @@ const mapFinishStatus = (reason) => {
   if (normalized === "failed" || normalized === "error") return "failed";
   if (normalized === "cancelled" || normalized === "canceled") return "failed";
   return "completed";
+};
+
+const normalizeToolChoiceMode = (toolChoice) => {
+  if (typeof toolChoice !== "string") return null;
+  return toolChoice.trim().toLowerCase();
+};
+
+const resolveForcedToolName = (toolChoice) => {
+  if (!toolChoice || typeof toolChoice !== "object") return "";
+  if (typeof toolChoice.name === "string" && toolChoice.name.trim()) {
+    return toolChoice.name.trim();
+  }
+  if (typeof toolChoice.function?.name === "string" && toolChoice.function.name.trim()) {
+    return toolChoice.function.name.trim();
+  }
+  return "";
+};
+
+const buildToolParseOptions = (tools, toolChoice) => {
+  let allowedTools = new Set();
+  const strictTools = new Map();
+  const toolSchemas = new Map();
+
+  if (Array.isArray(tools)) {
+    tools.forEach((tool) => {
+      if (!tool || typeof tool !== "object") return;
+      const fn = tool.function || tool.fn;
+      const name =
+        (typeof fn?.name === "string" && fn.name.trim()) ||
+        (typeof tool.name === "string" && tool.name.trim()) ||
+        "";
+      if (!name) return;
+      allowedTools.add(name);
+      strictTools.set(name, (fn?.strict ?? tool.strict) === true);
+      toolSchemas.set(name, fn?.parameters ?? tool.parameters ?? null);
+    });
+  }
+
+  const forcedName = resolveForcedToolName(toolChoice);
+  if (forcedName) {
+    allowedTools = new Set([forcedName]);
+  }
+
+  const mode = normalizeToolChoiceMode(toolChoice);
+  if (mode === "none") {
+    return { enabled: false, allowedTools, strictTools, toolSchemas };
+  }
+
+  return {
+    enabled: allowedTools.size > 0,
+    allowedTools,
+    strictTools,
+    toolSchemas,
+  };
 };
 
 const appendChoiceText = (store, choiceIndex, text) => {
@@ -231,8 +290,9 @@ export async function postResponsesNonStream(req, res) {
     }
   );
 
+  const { nativeTools } = splitResponsesTools(normalized.tools);
   const capabilityCheck = await ensureResponsesCapabilities({
-    toolsRequested: Array.isArray(normalized.tools) && normalized.tools.length > 0,
+    toolsRequested: nativeTools.length > 0,
   });
   if (!capabilityCheck.ok) {
     applyCors(req, res);
@@ -244,9 +304,9 @@ export async function postResponsesNonStream(req, res) {
   const fallbackMax = Number(CFG.PROXY_RESPONSES_DEFAULT_MAX_TOKENS || 0);
   const maxOutputTokens = normalized.maxOutputTokens ?? (fallbackMax > 0 ? fallbackMax : undefined);
   const toolsPayload = buildToolsPayload({
-    definitions: normalized.tools,
-    toolChoice: normalized.toolChoice,
-    parallelToolCalls: normalized.parallelToolCalls,
+    definitions: nativeTools.length ? nativeTools : undefined,
+    toolChoice: nativeTools.length ? normalized.toolChoice : undefined,
+    parallelToolCalls: nativeTools.length ? normalized.parallelToolCalls : undefined,
   });
 
   const turn = {
@@ -275,7 +335,7 @@ export async function postResponsesNonStream(req, res) {
     message.finalOutputJsonSchema = normalized.finalOutputJsonSchema;
   }
 
-  const ingressToolCount = Array.isArray(normalized.tools) ? normalized.tools.length : 0;
+  const ingressToolCount = nativeTools.length;
   const turnToolCount = countToolDefinitions(turn.tools);
   const messageToolCount = countToolDefinitions(message.tools);
   const toolsMismatch =
@@ -562,9 +622,36 @@ export async function postResponsesNonStream(req, res) {
 
   const choiceTextParts = textParts.get(0) || [];
   const choiceDeltaParts = textDeltas.get(0) || [];
-  const outputText = choiceTextParts.length ? choiceTextParts.join("") : choiceDeltaParts.join("");
-  const functionCalls = toolCallAggregator.snapshot({ choiceIndex: 0 });
-  const status = mapFinishStatus(finishReason);
+  let outputText = choiceTextParts.length ? choiceTextParts.join("") : choiceDeltaParts.join("");
+  const aggregatedCalls = toolCallAggregator.snapshot({ choiceIndex: 0 });
+  const toolParseOptions = buildToolParseOptions(normalized.tools, normalized.toolChoice);
+  let parsedCalls = [];
+  let parserErrors = [];
+
+  if (toolParseOptions.enabled && outputText) {
+    const parsed = parseToolCallText(outputText, {
+      allowedTools: toolParseOptions.allowedTools,
+      strictTools: toolParseOptions.strictTools,
+      toolSchemas: toolParseOptions.toolSchemas,
+    });
+    outputText = parsed.visibleTextDeltas.join("");
+    parserErrors = parsed.errors || [];
+    parsedCalls = parsed.parsedToolCalls.map((call, index) => ({
+      id: `fc_${String(index + 1).padStart(3, "0")}`,
+      type: "function",
+      function: { name: call.name, arguments: call.arguments },
+    }));
+  }
+
+  const strictError = parserErrors.find((err) => err?.strict);
+  let status = mapFinishStatus(finishReason);
+  if (strictError) {
+    status = "failed";
+    outputText = `Tool call parsing failed: ${strictError.message || strictError.type}`;
+    parsedCalls = [];
+  }
+
+  const functionCalls = [...aggregatedCalls, ...parsedCalls];
 
   const envelope = buildResponsesEnvelope({
     responseId: originalBody?.id,

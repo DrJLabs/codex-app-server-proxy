@@ -227,6 +227,9 @@ export function sanitizeResponsesNonStream(payload) {
       const next = structuredClone(item);
       if (next.type === "function_call") {
         next.id = RESP_PLACEHOLDER_TOOL_ID;
+        if (next.call_id) {
+          next.call_id = RESP_PLACEHOLDER_TOOL_ID;
+        }
       } else {
         next.id = RESP_PLACEHOLDER_MSG_ID;
       }
@@ -269,6 +272,13 @@ export function sanitizeResponsesStreamTranscript(entries) {
         }
         if (clone.data.item && typeof clone.data.item === "object" && clone.data.item.id) {
           clone.data.item.id = RESP_PLACEHOLDER_TOOL_ID;
+        }
+        if (
+          clone.data.item &&
+          typeof clone.data.item === "object" &&
+          typeof clone.data.item.call_id === "string"
+        ) {
+          clone.data.item.call_id = RESP_PLACEHOLDER_TOOL_ID;
         }
       }
       if (clone.event === "response.completed" && clone.data?.response) {

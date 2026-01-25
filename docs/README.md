@@ -44,6 +44,10 @@ This folder is the canonical index for repository documentation. Update this fil
 - [`app-server-migration/`](app-server-migration/) — JSON-RPC schema exports and migration notes
 - [`logging-gaps/README.md`](logging-gaps/README.md) — observability gap tracker
 
+## Plans (working drafts)
+
+- [`plans/2026-01-25-obsidian-tool-call-simulation-v2.md`](plans/2026-01-25-obsidian-tool-call-simulation-v2.md) — Responses tool-call simulation v2 implementation plan
+
 ## Internal docs (not published)
 
 - Internal planning/surveys/archives are maintained separately and are not part of the public distribution.

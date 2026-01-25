@@ -48,10 +48,23 @@ Authorization: Bearer <PROXY_API_KEY>
 {
   "type": "function_call",
   "id": "call_123",
+  "call_id": "call_123",
   "name": "lookup_user",
   "arguments": "{\"id\":\"42\"}"
 }
 ```
+
+Follow-up requests should send tool results as `function_call_output` items:
+
+```json
+{
+  "type": "function_call_output",
+  "call_id": "call_123",
+  "output": "{\"status\":\"ok\"}"
+}
+```
+
+Clients that echo `function_call` items back in `input` are accepted.
 
 ## Streaming (typed SSE)
 
@@ -62,6 +75,8 @@ When `stream:true`, the proxy emits typed SSE events such as:
 - `response.output_text.done`
 - `response.completed`
 - `done`
+
+Each SSE payload includes a monotonically increasing `sequence_number`.
 
 ## Contract reference
 

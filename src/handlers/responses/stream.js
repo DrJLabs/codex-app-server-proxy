@@ -1,5 +1,9 @@
 import { config as CFG } from "../../config/index.js";
-import { applyDefaultProxyOutputModeHeader, resolveResponsesOutputMode } from "./shared.js";
+import {
+  applyDefaultProxyOutputModeHeader,
+  resolveResponsesOutputMode,
+  splitResponsesTools,
+} from "./shared.js";
 import {
   logResponsesIngressRaw,
   summarizeResponsesIngress,
@@ -211,8 +215,9 @@ export async function postResponsesStream(req, res) {
     }
   );
 
+  const { nativeTools } = splitResponsesTools(normalized.tools);
   const capabilityCheck = await ensureResponsesCapabilities({
-    toolsRequested: Array.isArray(normalized.tools) && normalized.tools.length > 0,
+    toolsRequested: nativeTools.length > 0,
   });
   if (!capabilityCheck.ok) {
     applyCors(req, res);
@@ -250,9 +255,9 @@ export async function postResponsesStream(req, res) {
   const fallbackMax = Number(CFG.PROXY_RESPONSES_DEFAULT_MAX_TOKENS || 0);
   const maxOutputTokens = normalized.maxOutputTokens ?? (fallbackMax > 0 ? fallbackMax : undefined);
   const toolsPayload = buildToolsPayload({
-    definitions: normalized.tools,
-    toolChoice: normalized.toolChoice,
-    parallelToolCalls: normalized.parallelToolCalls,
+    definitions: nativeTools.length ? nativeTools : undefined,
+    toolChoice: nativeTools.length ? normalized.toolChoice : undefined,
+    parallelToolCalls: nativeTools.length ? normalized.parallelToolCalls : undefined,
   });
   const includeUsage = Boolean(originalBody?.stream_options?.include_usage);
 
@@ -283,7 +288,7 @@ export async function postResponsesStream(req, res) {
     message.finalOutputJsonSchema = normalized.finalOutputJsonSchema;
   }
 
-  const ingressToolCount = Array.isArray(normalized.tools) ? normalized.tools.length : 0;
+  const ingressToolCount = nativeTools.length;
   const turnToolCount = countToolDefinitions(turn.tools);
   const messageToolCount = countToolDefinitions(message.tools);
   const toolsMismatch =

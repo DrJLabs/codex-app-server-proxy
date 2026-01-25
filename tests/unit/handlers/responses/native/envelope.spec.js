@@ -33,7 +33,7 @@ describe("native responses envelope builder", () => {
 
     const fnItem = envelope.output[1];
     expect(fnItem.type).toBe("function_call");
-    expect(fnItem.call_id).toBeUndefined();
+    expect(fnItem.call_id).toBe("call_1");
     expect(fnItem.id).toBe("call_1");
     expect(fnItem.name).toBe("lookup");
     expect(fnItem.arguments).toBe("42");

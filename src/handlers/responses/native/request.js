@@ -140,6 +140,82 @@ const normalizeResponsesToolChoice = (rawChoice, definitions) => {
   );
 };
 
+const stringifyToolValue = (value) => {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value ?? "");
+  } catch {
+    return String(value ?? "");
+  }
+};
+
+const formatToolSchema = (schema) => {
+  if (schema === undefined) return "{}";
+  if (schema === null) return "null";
+  try {
+    return JSON.stringify(schema);
+  } catch {
+    return String(schema);
+  }
+};
+
+const collectFunctionTools = (tools) => {
+  if (!Array.isArray(tools)) return [];
+  return tools
+    .filter((tool) => String(tool?.type || "").toLowerCase() === "function")
+    .map((tool) => {
+      const fn = tool?.function || tool?.fn;
+      const name = asNonEmptyString(fn?.name) || asNonEmptyString(tool?.name);
+      if (!name) return null;
+      return {
+        name,
+        description: fn?.description ?? tool?.description,
+        parameters: fn?.parameters ?? tool?.parameters,
+        strict: fn?.strict ?? tool?.strict,
+      };
+    })
+    .filter(Boolean);
+};
+
+const resolveForcedToolChoiceName = (toolChoice) => {
+  if (!toolChoice || typeof toolChoice !== "object") return "";
+  return asNonEmptyString(toolChoice.function?.name) || asNonEmptyString(toolChoice.name);
+};
+
+const buildToolInjectionText = (tools, toolChoice) => {
+  const functionTools = collectFunctionTools(tools);
+  if (!functionTools.length) return "";
+
+  const lines = [];
+  lines.push("Tool calling instructions:");
+  lines.push("Only emit tool calls using <tool_call>...</tool_call>.");
+  lines.push('Format: <tool_call>{"name":"TOOL_NAME","arguments":"{...}"}</tool_call>');
+  lines.push('The "arguments" field must be a JSON string.');
+
+  if (toolChoice === "none") {
+    lines.push("Tool choice is none: never emit <tool_call>.");
+  } else {
+    const forcedName = resolveForcedToolChoiceName(toolChoice);
+    if (forcedName) {
+      lines.push(`If you call a tool, it must be "${forcedName}".`);
+    }
+  }
+
+  const strictTools = functionTools.filter((tool) => tool.strict === true).map((tool) => tool.name);
+  if (strictTools.length) {
+    lines.push(
+      `Strict tools: ${strictTools.join(", ")}. Arguments MUST conform exactly to schema.`
+    );
+  }
+
+  lines.push("Available tools:");
+  functionTools.forEach((tool) => {
+    lines.push(`- ${tool.name}: ${formatToolSchema(tool.parameters)}`);
+  });
+
+  return lines.join("\n");
+};
+
 export const normalizeResponsesRequest = (body = {}) => {
   if (Array.isArray(body.messages)) {
     throw new ResponsesJsonRpcNormalizationError(
@@ -256,18 +332,21 @@ export const normalizeResponsesRequest = (body = {}) => {
           invalidRequestBody(`input[${index}].call_id`, "call_id is required")
         );
       }
-      const output = item.output ?? "";
-      const rendered =
-        typeof output === "string"
-          ? output
-          : (() => {
-              try {
-                return JSON.stringify(output);
-              } catch {
-                return String(output);
-              }
-            })();
-      pushTextLine(`[tool:${callId}] ${rendered}`.trimEnd());
+      const output = stringifyToolValue(item.output ?? "");
+      pushTextLine(`[function_call_output call_id=${callId} output=${output}]`);
+      return;
+    }
+    if (itemType === "function_call") {
+      const itemId = asNonEmptyString(item.id) || asNonEmptyString(item.call_id) || `call_${index}`;
+      const callId = asNonEmptyString(item.call_id) || itemId;
+      const name =
+        asNonEmptyString(item.name) || asNonEmptyString(item.function?.name) || callId;
+      const argumentsText = stringifyToolValue(
+        item.arguments ?? item.function?.arguments ?? ""
+      );
+      pushTextLine(
+        `[function_call id=${itemId} call_id=${callId} name=${name} arguments=${argumentsText}]`
+      );
       return;
     }
     if (itemType === "input_text") {
@@ -282,25 +361,6 @@ export const normalizeResponsesRequest = (body = {}) => {
       invalidRequestBody(`input[${index}]`, "unsupported input item type")
     );
   };
-
-  const instructions = asNonEmptyString(body.instructions);
-  if (instructions) {
-    pushRoleText("system", instructions);
-  }
-
-  if (body.input === undefined) {
-    // No input, only instructions (if provided).
-  } else if (typeof body.input === "string") {
-    pushRoleText("user", body.input);
-  } else if (Array.isArray(body.input)) {
-    body.input.forEach((item, idx) => appendInputItem(item, idx));
-  } else {
-    throw new ResponsesJsonRpcNormalizationError(
-      invalidRequestBody("input", "input must be a string or an array of items")
-    );
-  }
-
-  flushText();
 
   const { responseFormat, finalOutputJsonSchema } = ensureValidator(() =>
     normalizeResponseFormat(body?.text?.format)
@@ -322,6 +382,30 @@ export const normalizeResponsesRequest = (body = {}) => {
       invalidRequestBody("parallel_tool_calls", "parallel_tool_calls must be a boolean")
     );
   }
+
+  const instructions = asNonEmptyString(body.instructions);
+  if (instructions) {
+    pushRoleText("system", instructions);
+  }
+
+  const toolInjection = buildToolInjectionText(tools, toolChoice);
+  if (toolInjection) {
+    pushRoleText("developer", toolInjection);
+  }
+
+  if (body.input === undefined) {
+    // No input, only instructions (if provided).
+  } else if (typeof body.input === "string") {
+    pushRoleText("user", body.input);
+  } else if (Array.isArray(body.input)) {
+    body.input.forEach((item, idx) => appendInputItem(item, idx));
+  } else {
+    throw new ResponsesJsonRpcNormalizationError(
+      invalidRequestBody("input", "input must be a string or an array of items")
+    );
+  }
+
+  flushText();
 
   return {
     instructions,

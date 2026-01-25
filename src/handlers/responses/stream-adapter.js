@@ -1,6 +1,7 @@
 import { normalizeResponseId } from "./shared.js";
 import { buildResponsesEnvelope } from "./native/envelope.js";
 import { createToolCallAggregator } from "../../lib/tool-call-aggregator.js";
+import { createToolCallParser } from "./tool-call-parser.js";
 import { recordResponsesSseEvent } from "../../services/metrics/index.js";
 import { writeSseChunk } from "../../services/sse.js";
 import { appendProtoEvent, LOG_PROTO } from "../../dev-logging.js";
@@ -64,8 +65,89 @@ const getDeltaBytes = (payload) => {
   return delta ? Buffer.byteLength(delta, "utf8") : null;
 };
 
+const asTrimmedString = (value) => (typeof value === "string" ? value.trim() : "");
+
+const normalizeFunctionTool = (tool) => {
+  if (!tool || typeof tool !== "object") return null;
+  const rawType = typeof tool.type === "string" ? tool.type.trim().toLowerCase() : "";
+  const fn = tool.function || tool.fn;
+  const name = asTrimmedString(fn?.name) || asTrimmedString(tool?.name);
+  if (rawType && rawType !== "function" && !fn && !name) return null;
+  if (!name) return null;
+  return {
+    name,
+    description: fn?.description ?? tool.description,
+    parameters: fn?.parameters ?? tool.parameters,
+    strict: fn?.strict ?? tool.strict,
+  };
+};
+
+const normalizeToolChoice = (value) => {
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "none" || normalized === "auto" || normalized === "required") {
+      return { mode: normalized, forcedName: null };
+    }
+  }
+  if (value && typeof value === "object") {
+    const name =
+      asTrimmedString(value.name) ||
+      asTrimmedString(value.function?.name) ||
+      asTrimmedString(value.fn?.name);
+    if (name) {
+      return { mode: "forced", forcedName: name };
+    }
+  }
+  return { mode: "auto", forcedName: null };
+};
+
+const buildToolRegistry = (requestBody = {}) => {
+  const rawTools = Array.isArray(requestBody?.tools) ? requestBody.tools : [];
+  const functionTools = rawTools.map(normalizeFunctionTool).filter(Boolean);
+  const allowedTools = new Set(functionTools.map((tool) => tool.name));
+  const strictTools = new Map(
+    functionTools.map((tool) => [tool.name, tool.strict === true])
+  );
+  const toolSchemas = new Map(
+    functionTools.map((tool) => [tool.name, tool.parameters ?? null])
+  );
+  const toolChoice = normalizeToolChoice(
+    requestBody?.tool_choice ?? requestBody?.toolChoice
+  );
+
+  if (toolChoice.mode === "none") {
+    return { allowedTools: new Set(), strictTools, toolSchemas, toolChoice, enabled: false };
+  }
+
+  if (toolChoice.mode === "forced" && toolChoice.forcedName) {
+    return {
+      allowedTools: new Set([toolChoice.forcedName]),
+      strictTools,
+      toolSchemas,
+      toolChoice,
+      enabled: true,
+    };
+  }
+
+  return {
+    allowedTools,
+    strictTools,
+    toolSchemas,
+    toolChoice,
+    enabled: allowedTools.size > 0,
+  };
+};
+
 export function createResponsesStreamAdapter(res, requestBody = {}, req = null) {
   const toolCallAggregator = createToolCallAggregator();
+  const toolRegistry = buildToolRegistry(requestBody);
+  const toolCallParser = toolRegistry.enabled
+    ? createToolCallParser({
+        allowedTools: toolRegistry.allowedTools,
+        strictTools: toolRegistry.strictTools,
+        toolSchemas: toolRegistry.toolSchemas,
+      })
+    : null;
   const choiceStates = new Map();
   const eventCounts = new Map();
   const streamCapture = createResponsesStreamCapture({
@@ -83,6 +165,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
     createdEmitted: false,
     finished: false,
     eventSeq: 0,
+    toolCallSeq: 0,
     outputTextHasUseTool: false,
     transformSummaryEmitted: false,
     createdAt: null,
@@ -197,15 +280,28 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
     if (res.writableEnded) return;
     try {
       state.eventSeq += 1;
-      const data = event === "done" && payload === "[DONE]" ? "[DONE]" : JSON.stringify(payload);
+      const sequenceNumber = state.eventSeq;
+      const enrichedPayload =
+        event === "done" && payload === "[DONE]"
+          ? payload
+          : payload && typeof payload === "object"
+            ? { ...payload, sequence_number: sequenceNumber }
+            : payload;
+      if (streamCapture) streamCapture.record(event, enrichedPayload);
+      const data =
+        event === "done" && payload === "[DONE]" ? "[DONE]" : JSON.stringify(enrichedPayload);
       if (LOG_PROTO) {
         const reqId = ensureReqId(res);
-        const deltaBytes = getDeltaBytes(payload);
+        const deltaBytes = getDeltaBytes(enrichedPayload);
         const verbose = shouldLogVerbose();
 
         const debugExtras = {};
-        if (verbose && event === OUTPUT_DELTA_EVENT && typeof payload?.delta === "string") {
-          const sample = preview(payload.delta, 160);
+        if (
+          verbose &&
+          event === OUTPUT_DELTA_EVENT &&
+          typeof enrichedPayload?.delta === "string"
+        ) {
+          const sample = preview(enrichedPayload.delta, 160);
           debugExtras.delta_preview = sample.preview;
           debugExtras.content_truncated = sample.truncated;
           debugExtras.content_preview_len = sample.preview.length;
@@ -236,7 +332,6 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
     }
   };
   const writeEvent = (event, payload) => {
-    if (streamCapture) streamCapture.record(event, payload);
     writeChain = writeChain.then(() => writeEventInternal(event, payload));
     return writeChain;
   };
@@ -374,6 +469,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
           output_index: index,
           item: {
             id: existing.id,
+            call_id: existing.id,
             type: existing.type,
             name: existing.name,
             status: "in_progress",
@@ -422,6 +518,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
           output_index: index,
           item: {
             id: existing.id,
+            call_id: existing.id,
             type: existing.type,
             name: existing.name,
             status: "in_progress",
@@ -548,6 +645,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
           output_index: index,
           item: {
             id: existing.id,
+            call_id: existing.id,
             type: existing.type,
             name: existing.name,
             arguments: existing.lastArgs || "",
@@ -584,6 +682,122 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
     return false;
   };
 
+  const nextToolCallId = () => {
+    state.toolCallSeq += 1;
+    return `fc_${String(state.toolCallSeq).padStart(3, "0")}`;
+  };
+
+  const emitTextDelta = (choiceState, choiceIndex, text) => {
+    if (!isNonEmptyString(text)) return;
+    if (!state.outputTextHasUseTool && text.toLowerCase().includes("<use_tool")) {
+      state.outputTextHasUseTool = true;
+    }
+    choiceState.textDeltas.push(text);
+    choiceState.hasDelta = true;
+    ensureCreated();
+    writeEvent(OUTPUT_DELTA_EVENT, {
+      type: OUTPUT_DELTA_EVENT,
+      delta: text,
+      output_index: choiceIndex,
+    });
+  };
+
+  const emitTextPart = (choiceState, choiceIndex, text) => {
+    if (!isNonEmptyString(text)) return;
+    choiceState.textParts.push(text);
+    if (!choiceState.hasDelta) {
+      emitTextDelta(choiceState, choiceIndex, text);
+    }
+  };
+
+  const emitToolCallComplete = (choiceState, choiceIndex, toolCall) => {
+    if (!toolCall || typeof toolCall !== "object") return;
+    const { toolCalls } = ensureToolCallTracking(choiceState);
+    const name = toolCall.function?.name || toolCall.name || toolCall.id || "tool";
+    const fallbackId = toolCall.id || `tool_${choiceIndex}_${toolCalls.size}`;
+    const existing = resolveToolCallState(choiceState, choiceIndex, {
+      id: toolCall.id,
+      ordinal: toolCalls.size,
+      fallbackId,
+      type: toolCall.type || "function",
+      name,
+    });
+
+    if (!existing.added) {
+      writeEvent("response.output_item.added", {
+        type: "response.output_item.added",
+        response_id: state.responseId,
+        output_index: choiceIndex,
+        item: {
+          id: existing.id,
+          call_id: existing.id,
+          type: existing.type,
+          name: existing.name,
+          status: "in_progress",
+        },
+      });
+      existing.added = true;
+    }
+
+    const argumentsText = toolCall.function?.arguments ?? toolCall.arguments ?? "";
+    if (argumentsText && argumentsText !== existing.lastArgs) {
+      writeEvent("response.function_call_arguments.delta", {
+        type: "response.function_call_arguments.delta",
+        response_id: state.responseId,
+        output_index: choiceIndex,
+        item_id: existing.id,
+        delta: argumentsText,
+      });
+      existing.lastArgs = argumentsText;
+    }
+
+    if (!existing.doneArguments) {
+      writeEvent("response.function_call_arguments.done", {
+        type: "response.function_call_arguments.done",
+        response_id: state.responseId,
+        output_index: choiceIndex,
+        item_id: existing.id,
+        arguments: argumentsText,
+      });
+      existing.doneArguments = true;
+    }
+
+    if (!existing.outputDone) {
+      writeEvent("response.output_item.done", {
+        type: "response.output_item.done",
+        response_id: state.responseId,
+        output_index: choiceIndex,
+        item: {
+          id: existing.id,
+          call_id: existing.id,
+          type: existing.type,
+          name: existing.name,
+          arguments: existing.lastArgs || "",
+          status: "completed",
+        },
+      });
+      existing.outputDone = true;
+    }
+  };
+
+  const handleParsedToolCalls = (choiceState, choiceIndex, parsedCalls = []) => {
+    if (!choiceState || !Array.isArray(parsedCalls) || parsedCalls.length === 0) return;
+    parsedCalls.forEach((call) => {
+      if (!call || typeof call !== "object") return;
+      const id = nextToolCallId();
+      const toolCall = {
+        id,
+        type: "function",
+        function: { name: call.name, arguments: call.arguments },
+      };
+      toolCallAggregator.ingestMessage({ tool_calls: [toolCall] }, { choiceIndex });
+      ensureCreated();
+      emitToolCallComplete(choiceState, choiceIndex, toolCall);
+    });
+  };
+
+  const shouldFailParserErrors = (errors = []) => errors.some((err) => err?.strict === true);
+
   const handleEvent = (event) => {
     try {
       if (!event || typeof event !== "object") return true;
@@ -591,31 +805,35 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
       if (event.type === "text_delta") {
         const choiceState = ensureChoiceState(choiceIndex);
         if (!isNonEmptyString(event.delta)) return true;
-        if (!state.outputTextHasUseTool && event.delta.toLowerCase().includes("<use_tool")) {
-          state.outputTextHasUseTool = true;
+        if (toolCallParser) {
+          const parsed = toolCallParser.ingest(event.delta);
+          if (parsed.errors?.length && shouldFailParserErrors(parsed.errors)) {
+            return emitFailure(new Error("strict tool_call parse failure"));
+          }
+          parsed.visibleTextDeltas.forEach((chunk) =>
+            emitTextDelta(choiceState, choiceIndex, chunk)
+          );
+          handleParsedToolCalls(choiceState, choiceIndex, parsed.parsedToolCalls);
+          return true;
         }
-        choiceState.textDeltas.push(event.delta);
-        choiceState.hasDelta = true;
-        ensureCreated();
-        writeEvent(OUTPUT_DELTA_EVENT, {
-          type: OUTPUT_DELTA_EVENT,
-          delta: event.delta,
-          output_index: choiceIndex,
-        });
+        emitTextDelta(choiceState, choiceIndex, event.delta);
         return true;
       }
       if (event.type === "text") {
         const choiceState = ensureChoiceState(choiceIndex);
         if (!isNonEmptyString(event.text)) return true;
-        choiceState.textParts.push(event.text);
-        if (!choiceState.hasDelta) {
-          ensureCreated();
-          writeEvent(OUTPUT_DELTA_EVENT, {
-            type: OUTPUT_DELTA_EVENT,
-            delta: event.text,
-            output_index: choiceIndex,
-          });
+        if (toolCallParser) {
+          const parsed = toolCallParser.ingest(event.text);
+          if (parsed.errors?.length && shouldFailParserErrors(parsed.errors)) {
+            return emitFailure(new Error("strict tool_call parse failure"));
+          }
+          parsed.visibleTextDeltas.forEach((chunk) =>
+            emitTextPart(choiceState, choiceIndex, chunk)
+          );
+          handleParsedToolCalls(choiceState, choiceIndex, parsed.parsedToolCalls);
+          return true;
         }
+        emitTextPart(choiceState, choiceIndex, event.text);
         return true;
       }
       if (event.type === "tool_calls_delta") {
@@ -696,8 +914,6 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
       state.finished = true;
       ensureCreated();
 
-      writeEvent("response.output_text.done", { type: "response.output_text.done" });
-
       const indices = Array.from(choiceStates.keys()).sort((a, b) => a - b);
       if (indices.length === 0) {
         indices.push(0);
@@ -713,6 +929,16 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
       }
 
       const choiceState = choiceStates.get(0);
+      if (toolCallParser && choiceState) {
+        const parsed = toolCallParser.flush();
+        if (parsed.errors?.length && shouldFailParserErrors(parsed.errors)) {
+          return emitFailure(new Error("strict tool_call parse failure"));
+        }
+        parsed.visibleTextDeltas.forEach((chunk) => emitTextPart(choiceState, 0, chunk));
+        handleParsedToolCalls(choiceState, 0, parsed.parsedToolCalls);
+      }
+
+      writeEvent("response.output_text.done", { type: "response.output_text.done" });
       const outputText =
         choiceState && choiceState.textParts.length
           ? choiceState.textParts.join("")
