@@ -73,7 +73,7 @@ test("aborting responses stream cancels request without killing worker", async (
     body: JSON.stringify({
       model: "codex-5",
       stream: true,
-      messages: [{ role: "user", content: "hold" }],
+      input: "hold",
     }),
     signal: controller.signal,
   });

@@ -274,7 +274,7 @@ async function runJsonRpcWorker() {
         write({
           jsonrpc: "2.0",
           id,
-          result: { advertised_models: ["codex-5"] },
+          result: { advertised_models: ["codex-5"], capabilities: { tools: {} } },
         });
         break;
       }

@@ -59,7 +59,7 @@ test.describe("Responses metadata sanitizer toggle", () => {
         body: JSON.stringify({
           model: "codex-5",
           stream: true,
-          messages: [{ role: "user", content: "hello" }],
+          input: "hello",
         }),
       });
 
@@ -122,7 +122,7 @@ test.describe("Responses metadata sanitizer toggle", () => {
         body: JSON.stringify({
           model: "codex-5",
           stream: true,
-          messages: [{ role: "user", content: "hello" }],
+          input: "hello",
         }),
       });
 

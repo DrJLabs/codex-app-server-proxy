@@ -26,7 +26,7 @@ describe("metrics endpoint", () => {
       body: JSON.stringify({
         model: "codex-5",
         stream: true,
-        messages: [{ role: "user", content: "metrics smoke" }],
+        input: "metrics smoke",
       }),
     });
     expect(responsesStream.ok).toBeTruthy();

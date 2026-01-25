@@ -120,33 +120,6 @@ async function captureNonStreamToolCall({ codexBin }) {
   });
 }
 
-async function captureNonStreamChained({ codexBin }) {
-  await runCapture({
-    codexBin,
-    filename: "nonstream-previous-response.json",
-    capture: async (port) => {
-      const request = {
-        model: "codex-5",
-        input: "Continue from the previous response.",
-        previous_response_id: "resp_external_chain_123",
-      };
-      const res = await fetch(`http://127.0.0.1:${port}/v1/responses`, {
-        method: "POST",
-        headers: BASE_HEADERS,
-        body: JSON.stringify(request),
-      });
-      if (!res.ok) {
-        throw new Error(`non-stream chained responses request failed (${res.status})`);
-      }
-      const payload = await res.json();
-      return {
-        request,
-        response: sanitizeResponsesNonStream(payload),
-      };
-    },
-  });
-}
-
 async function captureStreamingText({ codexBin }) {
   await runCapture({
     codexBin,
@@ -237,7 +210,6 @@ async function main() {
     "scripts/fake-codex-jsonrpc.js";
   await captureNonStreamMinimal({ codexBin });
   await captureNonStreamToolCall({ codexBin });
-  await captureNonStreamChained({ codexBin });
   await captureStreamingText({ codexBin });
   await captureStreamingToolCall({ codexBin });
 }

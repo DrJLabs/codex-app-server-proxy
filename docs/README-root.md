@@ -7,6 +7,7 @@ Goal: let any OpenAI Responses client (SDKs, IDEs, curl) talk to Codex CLI as if
 ## Features
 
 - OpenAI-compatible endpoints: `/v1/responses` (primary), `/v1/chat/completions` (compat), `/v1/models`.
+- `/v1/responses` uses native Responses semantics: `input`/`instructions` only (no `messages`) and `function_call` output items.
 - Streaming SSE with role-first deltas and `[DONE]` termination.
 - Output modes for different clients (`openai-json` for Responses, `obsidian-xml` for Copilot).
 - Deterministic JSON-RPC shim for CI/offline dev (`scripts/fake-codex-jsonrpc.js`).

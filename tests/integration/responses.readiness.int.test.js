@@ -61,7 +61,7 @@ describe("responses readiness guard (app-server backend)", () => {
       },
       body: JSON.stringify({
         model: "codex-5",
-        input: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+        input: "hello",
       }),
     });
 
@@ -84,7 +84,7 @@ describe("responses readiness guard (app-server backend)", () => {
       },
       body: JSON.stringify({
         model: "codex-5",
-        input: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+        input: "hello",
       }),
     });
 

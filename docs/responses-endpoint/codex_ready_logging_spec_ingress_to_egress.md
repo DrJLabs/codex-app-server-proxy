@@ -10,6 +10,10 @@
 > **Update note (Dec 13, 2025):** `/v1/responses` ingress logging now includes **context-contamination marker flags**
 > (`has_recent_conversations_tag`, `has_use_tool_tag`, `has_tool_result_marker`) and Responses streaming emits a
 > structured **`tool_call_arguments_done`** event (hashes/lengths only) to make multi-step Copilot tool loops easier to debug.
+>
+> **Update note (Jan 24, 2026):** `/v1/responses` now uses a **native** responses pipeline (no chat wrapper). References
+> to chat rewriting or `responseTransform` are legacy; the canonical flow is `normalizeResponsesRequest` →
+> `runNativeResponses` → `buildResponsesEnvelope`.
 
 ## 1) Assumptions and source anchors
 
@@ -17,11 +21,11 @@
 
 Key **main-branch behaviors** that drive logging requirements:
 
-- `/v1/responses` is implemented as a **wrapper** around `/v1/chat/completions`:
-  - `postResponsesStream()` rewrites `req.body` into chat-style messages and attaches a **stream adapter**.  
-    (`src/handlers/responses/stream.js` → `postResponsesStream`)
-  - `postResponsesNonStream()` rewrites `req.body` into chat-style messages and installs a **responseTransform** that converts chat JSON → Responses JSON.  
-    (`src/handlers/responses/nonstream.js` → `postResponsesNonStream`)
+- `/v1/responses` uses a **native JSON-RPC pipeline** (no chat wrapper):
+  - `postResponsesStream()` normalizes input (`normalizeResponsesRequest`) and streams `runNativeResponses` into the typed SSE adapter.  
+    (`src/handlers/responses/stream.js`, `src/handlers/responses/native/request.js`, `src/handlers/responses/native/execute.js`)
+  - `postResponsesNonStream()` normalizes input and builds the envelope directly via `buildResponsesEnvelope`.  
+    (`src/handlers/responses/nonstream.js`, `src/handlers/responses/native/envelope.js`)
 - **New in main:** `/v1/responses` now defaults `x-proxy-output-mode` using `PROXY_RESPONSES_OUTPUT_MODE` (default `openai-json`) when the client does not provide the header.  
   (`src/handlers/responses/shared.js` → `applyDefaultProxyOutputModeHeader`; used by both responses handlers)
 - **New in main:** Responses streaming already:
@@ -45,7 +49,7 @@ Remaining **knowledge gaps** this spec closes (updated for main):
 - **GAP-3 (updated):** Final `/v1/responses` **usage + finish semantics** are only partially observable:
   - status + finish reasons are logged in `sse_summary`, but
   - usage token counts and `previous_response_id` correlation are not consistently present in logs.
-- **GAP-4:** `previous_response_id` is echoed in Responses JSON (main), but presence/value is **not logged deterministically** (hash-only needed).  
+- **GAP-4 (updated):** `previous_response_id` is accepted but **not** echoed in Responses JSON; presence/value is **not logged deterministically** (hash-only needed).  
 - **GAP-5:** Tool-call argument validity + tool-call ID continuity are not logged (needed to debug Copilot tool-call loops).  
 - **GAP-ERR-STREAM (uncertainty):** Need deterministic evidence of which error path occurred:
   - chat stream error SSE vs adapter `response.failed` vs both.
@@ -57,13 +61,13 @@ Remaining **knowledge gaps** this spec closes (updated for main):
 | Ingress req_id | `src/middleware/access-log.js` | `accessLog()` | Generates `req_id`, sets `X-Request-Id`, logs access summary. |
 | Tracing | `src/middleware/tracing.js` | `tracingMiddleware()` | Sets `trace_id` / `span_id` in `res.locals`. |
 | Responses routing | `src/routes/responses.js` | `responsesRouter()` | `/v1/responses` POST selects stream/non-stream based on `body.stream`. |
-| Responses ingress translation | `src/handlers/responses/stream.js` | `postResponsesStream()` | Raw body exists here **before** rewrite; attaches `streamAdapter`. |
-| Responses ingress translation | `src/handlers/responses/nonstream.js` | `postResponsesNonStream()` | Raw body exists here **before** rewrite; installs `responseTransform`. |
+| Responses ingress translation | `src/handlers/responses/stream.js` | `postResponsesStream()` | Raw body exists here **before** normalization; builds JSON-RPC items and attaches typed SSE adapter. |
+| Responses ingress translation | `src/handlers/responses/nonstream.js` | `postResponsesNonStream()` | Raw body exists here **before** normalization; builds the Responses envelope directly. |
 | Output-mode defaulting | `src/handlers/responses/shared.js` | `applyDefaultProxyOutputModeHeader()` | New in main; changes downstream output/tool surfaces. |
 | Typed Responses SSE emission | `src/handlers/responses/stream-adapter.js` | `writeEvent()` | Single choke point for all typed SSE frames. |
 | Stream summary log | `src/handlers/responses/stream-adapter.js` | `logEventSummary()` | Already exists; extend to include usage + prev_response hash. |
 | Chat stream wrapper | `src/handlers/chat/stream.js` | `postChatStream()` | Calls adapter hooks; contains error paths; logs translated ingress. |
-| JSON response transform | `src/handlers/chat/nonstream.js` | `respondWithJson()` | Applies `res.locals.responseTransform` (Responses non-stream conversion). |
+| JSON response transform | `src/handlers/chat/nonstream.js` | `respondWithJson()` | Chat-only response transform; `/v1/responses` no longer relies on `responseTransform`. |
 | Proto egress logs | `src/services/sse.js` | `sendSSE()`, `finishSSE()`, `installJsonLogger()` | Logs chat-style SSE/json; does not cover typed Responses SSE. |
 | Proto ingress logs | `src/dev-trace/http.js` | `logHttpRequest()` | Current ingress log; caches once per request. |
 | Proto emitter controls | `src/dev-logging.js` | `appendProtoEvent()` | Dev-only JSONL event sink (`PROTO_LOG_PATH`), gated by `PROXY_LOG_PROTO`. |

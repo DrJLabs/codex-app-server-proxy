@@ -26,9 +26,7 @@ describe("native responses envelope builder", () => {
       created: 1,
       model: "gpt-4.1",
       outputText: "",
-      functionCalls: [
-        { id: "call_1", function: { name: "lookup", arguments: 42 } },
-      ],
+      functionCalls: [{ id: "call_1", function: { name: "lookup", arguments: 42 } }],
       usage: null,
       status: "completed",
     });

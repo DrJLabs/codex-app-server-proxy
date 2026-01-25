@@ -77,7 +77,7 @@ test("sanitizes metadata when toggle enabled", async () => {
     body: JSON.stringify({
       model: "codex-5",
       stream: false,
-      messages: [{ role: "user", content: "hello" }],
+      input: "hello",
     }),
   });
 
@@ -142,7 +142,7 @@ test("retains metadata when toggle disabled", async () => {
     body: JSON.stringify({
       model: "codex-5",
       stream: false,
-      messages: [{ role: "user", content: "hello" }],
+      input: "hello",
     }),
   });
 

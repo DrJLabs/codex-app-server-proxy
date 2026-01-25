@@ -1,8 +1,13 @@
 import crypto from "node:crypto";
 
 const redactKeys = new Set(["payload", "body", "headers", "messages", "response"]);
+const REDACT_ENABLED =
+  String(process.env.PROXY_LOG_REDACT ?? process.env.PROXY_TRACE_REDACT ?? "true")
+    .trim()
+    .toLowerCase() !== "false";
 
 const sanitize = (entry = {}) => {
+  if (!REDACT_ENABLED) return { ...entry };
   const cleaned = { ...entry };
   for (const key of redactKeys) {
     if (key in cleaned) {

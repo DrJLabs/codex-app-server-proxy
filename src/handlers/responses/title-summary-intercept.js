@@ -13,33 +13,11 @@ import { recordResponsesSseEvent } from "../../services/metrics/index.js";
 import { setSSEHeaders, writeSseChunk } from "../../services/sse.js";
 import { captureResponsesNonStream, createResponsesStreamCapture } from "./capture.js";
 import { logResponsesIngressRaw, summarizeResponsesIngress } from "./ingress-logging.js";
-import { normalizeMessageId, normalizeResponseId, resolveResponsesOutputMode } from "./shared.js";
+import { buildResponsesEnvelope } from "./native/envelope.js";
+import { normalizeResponseId, resolveResponsesOutputMode } from "./shared.js";
 
 const TITLE_INTERCEPT_ENABLED = CFG.PROXY_TITLE_GEN_INTERCEPT;
 const DEFAULT_MODEL = CFG.PROXY_TITLE_SUMMARY_EXEC_MODEL;
-
-const buildResponsesEnvelope = ({ text, model, requestBody, responseId, messageId }) => {
-  const resolvedResponseId = responseId || normalizeResponseId();
-  const resolvedMessageId = messageId || normalizeMessageId();
-  const output = [
-    {
-      id: resolvedMessageId,
-      type: "message",
-      role: "assistant",
-      content: [{ type: "output_text", text }],
-    },
-  ];
-  const payload = {
-    id: resolvedResponseId,
-    status: "completed",
-    model,
-    output,
-  };
-  if (requestBody?.previous_response_id) {
-    payload.previous_response_id = requestBody.previous_response_id;
-  }
-  return payload;
-};
 
 export async function maybeHandleTitleSummaryIntercept({ req, res, body = {}, stream } = {}) {
   if (!TITLE_INTERCEPT_ENABLED) return false;
@@ -98,9 +76,13 @@ export async function maybeHandleTitleSummaryIntercept({ req, res, body = {}, st
     });
 
     const responseBody = buildResponsesEnvelope({
-      text: outputText,
+      responseId: body?.id,
+      created: Math.floor(Date.now() / 1000),
       model: execModel,
-      requestBody: body,
+      outputText,
+      functionCalls: [],
+      usage: undefined,
+      status: "completed",
     });
 
     logStructured(

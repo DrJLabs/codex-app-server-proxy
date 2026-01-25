@@ -1,6 +1,6 @@
 # Responses (`/v1/responses`)
 
-This endpoint aims to match the OpenAI Responses API closely and shares the same backend pipeline as chat completions.
+This endpoint aims to match the OpenAI Responses API closely and uses a native responses pipeline (no chat wrapper).
 
 ## Intended clients
 
@@ -31,6 +31,25 @@ Authorization: Bearer <PROXY_API_KEY>
   "model": "codev-5",
   "input": "Say hello.",
   "stream": false
+}
+```
+
+## Input shape notes
+
+- Use `input` (string or array of input items). `messages` is not supported and returns 400.
+- `previous_response_id` is accepted for client compatibility but is not echoed back.
+- `instructions` is supported and flattened into the internal transcript for JSON-RPC.
+
+## Tool output shape
+
+`/v1/responses` emits tool calls as top-level `function_call` items in `output[]`:
+
+```json
+{
+  "type": "function_call",
+  "id": "call_123",
+  "name": "lookup_user",
+  "arguments": "{\"id\":\"42\"}"
 }
 ```
 

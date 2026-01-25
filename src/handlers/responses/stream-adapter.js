@@ -1,5 +1,5 @@
-import { nanoid } from "nanoid";
-import { normalizeResponseId, convertChatResponseToResponses } from "./shared.js";
+import { normalizeResponseId } from "./shared.js";
+import { buildResponsesEnvelope } from "./native/envelope.js";
 import { createToolCallAggregator } from "../../lib/tool-call-aggregator.js";
 import { recordResponsesSseEvent } from "../../services/metrics/index.js";
 import { writeSseChunk } from "../../services/sse.js";
@@ -76,8 +76,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
   });
   const state = {
     responseId: null,
-    chatCompletionId: null,
-    model: null,
+    model: requestBody?.model ?? null,
     finishReasons: new Set(),
     status: "completed",
     usage: null,
@@ -86,6 +85,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
     eventSeq: 0,
     outputTextHasUseTool: false,
     transformSummaryEmitted: false,
+    createdAt: null,
   };
 
   const recordEvent = (event) => {
@@ -102,7 +102,6 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
       const events = Object.fromEntries(
         Array.from(eventCounts.entries()).sort(([a], [b]) => a.localeCompare(b))
       );
-      const prev = requestBody?.previous_response_id;
       const usage = state.usage;
       logStructured(
         {
@@ -123,17 +122,16 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
           outcome,
           events,
           finish_reasons: Array.from(state.finishReasons),
-          usage_input_tokens: usage?.prompt_tokens ?? null,
-          usage_output_tokens: usage?.completion_tokens ?? null,
+          usage_input_tokens: usage?.input_tokens ?? usage?.prompt_tokens ?? null,
+          usage_output_tokens: usage?.output_tokens ?? usage?.completion_tokens ?? null,
           usage_total_tokens: usage?.total_tokens ?? null,
-          previous_response_id_hash: prev ? sha256(prev) : null,
           output_mode_effective: res.locals?.output_mode_effective ?? null,
           response_shape_version: RESPONSE_SHAPE_VERSION,
           ...extra,
         }
       );
     } catch {
-      // Logging failures are non-critical; swallow to avoid impacting callers.
+      // logging failures are non-critical
     }
   };
 
@@ -145,6 +143,8 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
       for (const choiceState of choiceStates.values()) {
         if (choiceState?.textParts?.length) {
           textParts.push(...choiceState.textParts);
+        } else if (choiceState?.textDeltas?.length) {
+          textParts.push(...choiceState.textDeltas);
         }
       }
       const textSummary = summarizeTextParts(textParts);
@@ -192,6 +192,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
   };
 
   let writeChain = Promise.resolve();
+  let endScheduled = false;
   const writeEventInternal = async (event, payload) => {
     if (res.writableEnded) return;
     try {
@@ -239,12 +240,23 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
     writeChain = writeChain.then(() => writeEventInternal(event, payload));
     return writeChain;
   };
+  const scheduleEnd = () => {
+    if (endScheduled) return writeChain;
+    endScheduled = true;
+    writeChain = writeChain.then(() => {
+      res.end?.();
+      return null;
+    });
+    return writeChain;
+  };
 
   const ensureCreated = () => {
     if (state.createdEmitted) return;
     if (!state.responseId) {
-      const baseId = state.chatCompletionId || `chatcmpl-${nanoid()}`;
-      state.responseId = normalizeResponseId(baseId);
+      state.responseId = normalizeResponseId(requestBody?.id);
+    }
+    if (!state.createdAt) {
+      state.createdAt = Math.floor(Date.now() / 1000);
     }
     state.createdEmitted = true;
     writeEvent("response.created", {
@@ -262,26 +274,13 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
         index,
         role: DEFAULT_ROLE,
         textParts: [],
-        finishReason: null,
+        textDeltas: [],
+        hasDelta: false,
         toolCalls: new Map(),
         toolCallOrdinals: new Map(),
       });
     }
     return choiceStates.get(index);
-  };
-
-  const appendTextSegment = (choiceState, index, text) => {
-    if (!isNonEmptyString(text)) return;
-    ensureCreated();
-    if (!state.outputTextHasUseTool && text.toLowerCase().includes("<use_tool")) {
-      state.outputTextHasUseTool = true;
-    }
-    choiceState.textParts.push(text);
-    writeEvent(OUTPUT_DELTA_EVENT, {
-      type: OUTPUT_DELTA_EVENT,
-      delta: text,
-      output_index: index,
-    });
   };
 
   const ensureToolCallTracking = (choiceState) => {
@@ -518,14 +517,15 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
             phase: "tool_call_arguments_done",
             endpoint_mode: res.locals?.endpoint_mode || "responses",
             req_id: res.locals?.req_id || ensureReqId(res),
-            copilot_trace_id: res.locals?.copilot_trace_id || null,
-            trace_id: res.locals?.trace_id || null,
+            trace_id: res.locals?.trace_id,
             route: res.locals?.routeOverride || RESPONSES_ROUTE,
             mode: res.locals?.modeOverride || res.locals?.mode || "responses_stream",
+            response_id: state.responseId,
             tool_call_id: existing.id,
             tool_name: existing.name,
             tool_args_bytes: argsBytes,
             tool_args_json_valid: jsonValid,
+            tool_args_hash: args ? sha256(args) : null,
             response_shape_version: RESPONSE_SHAPE_VERSION,
             ...debugExtras,
           });
@@ -536,7 +536,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
           response_id: responseId,
           output_index: index,
           item_id: existing.id,
-          arguments: argumentsText,
+          arguments: args,
         });
         existing.doneArguments = true;
       }
@@ -550,7 +550,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
             id: existing.id,
             type: existing.type,
             name: existing.name,
-            arguments: argumentsText,
+            arguments: existing.lastArgs || "",
             status: "completed",
           },
         });
@@ -559,25 +559,11 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
     });
   };
 
-  const endStream = () => {
-    if (typeof res.end !== "function" || res.writableEnded) return;
-    return writeChain
-      .catch(() => {})
-      .finally(() => {
-        try {
-          res.end();
-        } catch (err) {
-          console.error("[proxy][responses.stream-adapter] failed to end SSE response", err);
-        }
-      });
-  };
-
   const emitFailure = (error) => {
+    if (res.writableEnded) return false;
     if (state.finished) return false;
     state.finished = true;
     ensureCreated();
-    res.locals = res.locals || {};
-    res.locals.adapter_failed_emitted = true;
     const message = error?.message || "stream adapter error";
     writeEvent("response.failed", {
       type: "response.failed",
@@ -594,104 +580,117 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
     if (streamCapture) streamCapture.finalize("failed");
     emitTransformSummary("failed");
     logEventSummary("failed", { message });
-    endStream();
+    scheduleEnd();
     return false;
   };
 
-  const handleChoices = (choices = []) => {
-    for (const choice of choices) {
-      if (!choice) continue;
-      const index = Number.isInteger(choice.index) ? choice.index : 0;
-      const choiceState = ensureChoiceState(index);
-      const delta = choice.delta || {};
-
-      if (delta.role) choiceState.role = delta.role;
-
-      if (Array.isArray(delta.content)) {
-        delta.content.forEach((part) => {
-          if (typeof part === "string") {
-            appendTextSegment(choiceState, index, part);
-          } else if (part && typeof part === "object" && typeof part.text === "string") {
-            appendTextSegment(choiceState, index, part.text);
-          }
-        });
-      } else if (typeof delta.content === "string") {
-        appendTextSegment(choiceState, index, delta.content);
-      } else if (
-        delta.content &&
-        typeof delta.content === "object" &&
-        typeof delta.content.text === "string"
-      ) {
-        appendTextSegment(choiceState, index, delta.content.text);
-      }
-
-      let deltaUpdated = false;
-      if (delta && typeof delta === "object") {
-        const result = toolCallAggregator.ingestDelta(delta, { choiceIndex: index });
-        deltaUpdated = Boolean(result?.updated);
-        if (deltaUpdated) {
-          ensureCreated();
-          emitToolCallDeltas(choiceState, index, result?.deltas);
-        }
-      }
-
-      if (!deltaUpdated && choice.message && typeof choice.message === "object") {
-        // Some upstream workers send a final aggregated message payload within the streaming
-        // channel instead of emitting deltas for each tool call. When the delta ingestion above
-        // didn't update the aggregator, fall back to the message payload so we still surface
-        // tool_calls in the completion snapshot.
-        const messageResult = toolCallAggregator.ingestMessage(choice.message, {
-          choiceIndex: index,
-          emitIfMissing: true,
-        });
-        if (messageResult?.updated) {
-          ensureCreated();
-          emitToolCallDeltas(choiceState, index, messageResult.deltas);
-        }
-      }
-
-      if (choice.finish_reason) {
-        choiceState.finishReason = choice.finish_reason;
-        state.finishReasons.add(choice.finish_reason);
-      }
-    }
-
-    state.status = mapFinishStatus(Array.from(state.finishReasons));
-  };
-
-  const onChunk = (chunk) => {
+  const handleEvent = (event) => {
     try {
-      if (!chunk || typeof chunk !== "object") return true;
-
-      state.chatCompletionId = chunk.id || state.chatCompletionId || `chatcmpl-${nanoid()}`;
-      if (!state.responseId) {
-        state.responseId = normalizeResponseId(state.chatCompletionId);
+      if (!event || typeof event !== "object") return true;
+      const choiceIndex = Number.isInteger(event.choiceIndex) ? event.choiceIndex : 0;
+      if (event.type === "text_delta") {
+        const choiceState = ensureChoiceState(choiceIndex);
+        if (!isNonEmptyString(event.delta)) return true;
+        if (!state.outputTextHasUseTool && event.delta.toLowerCase().includes("<use_tool")) {
+          state.outputTextHasUseTool = true;
+        }
+        choiceState.textDeltas.push(event.delta);
+        choiceState.hasDelta = true;
+        ensureCreated();
+        writeEvent(OUTPUT_DELTA_EVENT, {
+          type: OUTPUT_DELTA_EVENT,
+          delta: event.delta,
+          output_index: choiceIndex,
+        });
+        return true;
       }
-      if (chunk.model) state.model = chunk.model;
-
-      if (!state.createdEmitted) ensureCreated();
-
-      handleChoices(Array.isArray(chunk.choices) ? chunk.choices : []);
-
-      if (chunk.usage && typeof chunk.usage === "object") {
-        const promptTokens = chunk.usage.prompt_tokens ?? chunk.usage.input_tokens ?? 0;
-        const completionTokens = chunk.usage.completion_tokens ?? chunk.usage.output_tokens ?? 0;
-        const totalTokens = chunk.usage.total_tokens ?? promptTokens + completionTokens;
-        state.usage = {
-          prompt_tokens: promptTokens,
-          completion_tokens: completionTokens,
-          total_tokens: totalTokens,
-        };
+      if (event.type === "text") {
+        const choiceState = ensureChoiceState(choiceIndex);
+        if (!isNonEmptyString(event.text)) return true;
+        choiceState.textParts.push(event.text);
+        if (!choiceState.hasDelta) {
+          ensureCreated();
+          writeEvent(OUTPUT_DELTA_EVENT, {
+            type: OUTPUT_DELTA_EVENT,
+            delta: event.text,
+            output_index: choiceIndex,
+          });
+        }
+        return true;
       }
-
+      if (event.type === "tool_calls_delta") {
+        if (Array.isArray(event.tool_calls)) {
+          const choiceState = ensureChoiceState(choiceIndex);
+          const result = toolCallAggregator.ingestDelta(
+            { tool_calls: event.tool_calls },
+            { choiceIndex }
+          );
+          if (result?.updated) {
+            ensureCreated();
+            emitToolCallDeltas(choiceState, choiceIndex, result?.deltas);
+          }
+        }
+        return true;
+      }
+      if (event.type === "tool_calls") {
+        if (Array.isArray(event.tool_calls)) {
+          const choiceState = ensureChoiceState(choiceIndex);
+          const result = toolCallAggregator.ingestMessage(
+            { tool_calls: event.tool_calls },
+            { choiceIndex, emitIfMissing: true }
+          );
+          if (result?.updated) {
+            ensureCreated();
+            emitToolCallDeltas(choiceState, choiceIndex, result?.deltas);
+          }
+        }
+        return true;
+      }
+      if (event.type === "function_call_delta") {
+        if (event.function_call && typeof event.function_call === "object") {
+          const choiceState = ensureChoiceState(choiceIndex);
+          const result = toolCallAggregator.ingestDelta(
+            { function_call: event.function_call },
+            { choiceIndex }
+          );
+          if (result?.updated) {
+            ensureCreated();
+            emitToolCallDeltas(choiceState, choiceIndex, result?.deltas);
+          }
+        }
+        return true;
+      }
+      if (event.type === "function_call") {
+        if (event.function_call && typeof event.function_call === "object") {
+          const choiceState = ensureChoiceState(choiceIndex);
+          const result = toolCallAggregator.ingestMessage(
+            { function_call: event.function_call },
+            { choiceIndex, emitIfMissing: true }
+          );
+          if (result?.updated) {
+            ensureCreated();
+            emitToolCallDeltas(choiceState, choiceIndex, result?.deltas);
+          }
+        }
+        return true;
+      }
+      if (event.type === "usage" && event.usage && typeof event.usage === "object") {
+        state.usage = event.usage;
+        return true;
+      }
+      if (event.type === "finish") {
+        if (event.reason) state.finishReasons.add(event.reason);
+        state.status = mapFinishStatus(Array.from(state.finishReasons));
+        return true;
+      }
       return true;
     } catch (error) {
-      console.error("[proxy][responses.stream-adapter] onChunk error", error);
+      console.error("[proxy][responses.stream-adapter] handleEvent error", error);
       return emitFailure(error);
     }
   };
 
-  const onDone = () => {
+  const finalize = async () => {
     try {
       if (state.finished) return true;
       state.finished = true;
@@ -706,38 +705,33 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
           index: 0,
           role: DEFAULT_ROLE,
           textParts: [],
-          finishReason: "stop",
+          textDeltas: [],
+          hasDelta: false,
           toolCalls: new Map(),
           toolCallOrdinals: new Map(),
         });
       }
 
-      const chatChoices = indices.map((index) => {
-        const choiceState = choiceStates.get(index);
-        const text = choiceState?.textParts.join("") || "";
-        const snapshot = toolCallAggregator.snapshot({ choiceIndex: index });
-        finalizeToolCalls(choiceState, index, snapshot);
-        return {
-          index,
-          message: {
-            role: choiceState?.role || DEFAULT_ROLE,
-            content: text,
-            ...(snapshot.length ? { tool_calls: snapshot } : {}),
-          },
-          finish_reason: choiceState?.finishReason || "stop",
-        };
-      });
+      const choiceState = choiceStates.get(0);
+      const outputText =
+        choiceState && choiceState.textParts.length
+          ? choiceState.textParts.join("")
+          : (choiceState?.textDeltas?.join("") ?? "");
+      const functionCalls = toolCallAggregator.snapshot({ choiceIndex: 0 });
 
-      const chatPayload = {
-        id: state.chatCompletionId || `chatcmpl-${nanoid()}`,
-        model: state.model,
-        choices: chatChoices,
+      if (choiceState) {
+        finalizeToolCalls(choiceState, 0, functionCalls);
+      }
+
+      const responsePayload = buildResponsesEnvelope({
+        responseId: state.responseId || requestBody?.id,
+        created: state.createdAt,
+        model: state.model || requestBody?.model,
+        outputText,
+        functionCalls,
         usage: state.usage || undefined,
-      };
-
-      const responsePayload = convertChatResponseToResponses(chatPayload, requestBody);
-      responsePayload.id = state.responseId || responsePayload.id;
-      responsePayload.status = state.status || responsePayload.status || "completed";
+        status: state.status || "completed",
+      });
 
       emitTransformSummary("completed", responsePayload);
       writeEvent("response.completed", {
@@ -747,16 +741,18 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
       writeEvent("done", "[DONE]");
       if (streamCapture) streamCapture.finalize("completed");
       logEventSummary("completed", { finish_reasons: Array.from(state.finishReasons) });
-      endStream();
+      await scheduleEnd();
       return true;
     } catch (error) {
-      console.error("[proxy][responses.stream-adapter] onDone error", error);
+      console.error("[proxy][responses.stream-adapter] finalize error", error);
       return emitFailure(error);
     }
   };
 
   return {
-    onChunk,
-    onDone,
+    handleEvent,
+    finalize,
+    fail: (error) => emitFailure(error),
+    toolCallAggregator,
   };
 }

@@ -27,8 +27,57 @@ const nestedToolPayload = (params) => {
   return null;
 };
 
+const summarizeToolsForLog = (tools, { maxTypes = 10, maxNames = 20 } = {}) => {
+  const resolveDefinitions = (value) => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value;
+    if (typeof value !== "object") return [];
+    const defs =
+      value.definitions ||
+      value.tools ||
+      value.tool_definitions ||
+      value.toolDefinitions ||
+      value.functions;
+    return Array.isArray(defs) ? defs : [];
+  };
+  const definitions = resolveDefinitions(tools);
+  if (!definitions.length) {
+    return {
+      tool_count: 0,
+      tool_types: [],
+      tool_types_truncated: false,
+      tool_names: [],
+      tool_names_truncated: false,
+    };
+  }
+  const types = [];
+  const names = [];
+  for (const tool of definitions) {
+    if (!tool || typeof tool !== "object") continue;
+    const rawType = typeof tool.type === "string" ? tool.type.trim() : "";
+    if (rawType) types.push(rawType.toLowerCase());
+    else if (tool?.function || tool?.fn || typeof tool?.name === "string") {
+      types.push("function");
+    }
+    const name = typeof tool?.function?.name === "string" ? tool.function.name.trim() : "";
+    const fallback = !name && typeof tool?.name === "string" ? tool.name.trim() : "";
+    const resolvedName = name || fallback;
+    if (resolvedName) names.push(resolvedName);
+  }
+  const uniqTypes = Array.from(new Set(types)).sort();
+  const uniqNames = Array.from(new Set(names)).sort();
+  return {
+    tool_count: definitions.length,
+    tool_types: uniqTypes.slice(0, Math.max(0, maxTypes)),
+    tool_types_truncated: uniqTypes.length > maxTypes,
+    tool_names: uniqNames.slice(0, Math.max(0, maxNames)),
+    tool_names_truncated: uniqNames.length > maxNames,
+  };
+};
+
 export function logBackendSubmission(trace, { rpcId, method, params }) {
   if (!hasTrace(trace)) return;
+  const toolsSummary = summarizeToolsForLog(params?.tools);
   appendProtoEvent({
     ts: Date.now(),
     phase: "backend_submission",
@@ -37,6 +86,7 @@ export function logBackendSubmission(trace, { rpcId, method, params }) {
     rpc_id: rpcId,
     method,
     payload: sanitizeRpcPayload(params),
+    tools_summary: toolsSummary,
     ...base(trace),
   });
 }

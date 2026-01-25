@@ -81,9 +81,9 @@ const extractTextParts = (value) => {
   return [];
 };
 
-const handleDeltaPayload = (delta, choiceIndex, emitEvent) => {
+const handleDeltaPayload = (delta, choiceIndex, emitEvent, metadataInfo) => {
   if (typeof delta === "string") {
-    emitEvent({ type: "text_delta", delta, choiceIndex });
+    emitEvent({ type: "text_delta", delta, choiceIndex, metadataInfo });
     return;
   }
   if (!delta || typeof delta !== "object") return;
@@ -98,7 +98,7 @@ const handleDeltaPayload = (delta, choiceIndex, emitEvent) => {
   if (typeof delta.text === "string") contentParts.push(delta.text);
   contentParts.forEach((part) => {
     if (typeof part === "string" && part.length) {
-      emitEvent({ type: "text_delta", delta: part, choiceIndex });
+      emitEvent({ type: "text_delta", delta: part, choiceIndex, metadataInfo });
     }
   });
 
@@ -113,14 +113,14 @@ const handleDeltaPayload = (delta, choiceIndex, emitEvent) => {
   }
 };
 
-const handleMessagePayload = (messagePayload, choiceIndex, emitEvent) => {
+const handleMessagePayload = (messagePayload, choiceIndex, emitEvent, metadataInfo) => {
   const message = messagePayload?.message || messagePayload;
   if (!message || typeof message !== "object") return;
 
   const contentParts = extractTextParts(message.content);
   contentParts.forEach((part) => {
     if (typeof part === "string" && part.length) {
-      emitEvent({ type: "text", text: part, choiceIndex });
+      emitEvent({ type: "text", text: part, choiceIndex, metadataInfo });
     }
   });
 
@@ -135,11 +135,19 @@ const handleMessagePayload = (messagePayload, choiceIndex, emitEvent) => {
   }
 };
 
-export const runNativeResponses = async ({ adapter, onEvent } = {}) => {
+export const runNativeResponses = async ({
+  adapter,
+  onEvent,
+  sanitizeMetadata = false,
+  extractMetadataFromPayload,
+} = {}) => {
   const emitEvent = typeof onEvent === "function" ? onEvent : () => {};
   const usageCounts = { prompt: null, completion: null };
   let finishReason = null;
   let finishTrigger = null;
+
+  const parseLine = (line) =>
+    parseStreamEventLine(line, { extractMetadataFromPayload, sanitizeMetadata });
 
   const updateUsageCounts = (_source, counts) => {
     if (Number.isFinite(counts?.prompt)) usageCounts.prompt = counts.prompt;
@@ -157,17 +165,16 @@ export const runNativeResponses = async ({ adapter, onEvent } = {}) => {
   };
 
   const eventRouter = createStreamEventRouter({
-    parseStreamEventLine,
+    parseStreamEventLine: parseLine,
     handleParsedEvent: (parsed) => {
-      const choiceIndex = Number.isInteger(parsed?.baseChoiceIndex)
-        ? parsed.baseChoiceIndex
-        : 0;
+      const choiceIndex = Number.isInteger(parsed?.baseChoiceIndex) ? parsed.baseChoiceIndex : 0;
+      const metadataInfo = parsed?.metadataInfo ?? null;
       if (parsed.type === "agent_message_delta" || parsed.type === "agent_message_content_delta") {
-        handleDeltaPayload(parsed.messagePayload?.delta, choiceIndex, emitEvent);
+        handleDeltaPayload(parsed.messagePayload?.delta, choiceIndex, emitEvent, metadataInfo);
         return;
       }
       if (parsed.type === "agent_message") {
-        handleMessagePayload(parsed.messagePayload, choiceIndex, emitEvent);
+        handleMessagePayload(parsed.messagePayload, choiceIndex, emitEvent, metadataInfo);
       }
     },
     extractFinishReasonFromMessage: (messagePayload) =>

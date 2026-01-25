@@ -3,7 +3,6 @@ import {
   normalizeParallelToolCalls,
   normalizeResponseFormat,
   normalizeToolChoice,
-  validateTools,
 } from "../../shared/request-validators.js";
 import { ChatJsonRpcNormalizationError } from "../../chat/request.js";
 
@@ -33,7 +32,9 @@ const resolveImageUrl = (value) => {
 };
 
 const normalizeRole = (role, param) => {
-  const normalized = String(role || "").trim().toLowerCase();
+  const normalized = String(role || "")
+    .trim()
+    .toLowerCase();
   if (!SUPPORTED_MESSAGE_ROLES.has(normalized)) {
     throw new ResponsesJsonRpcNormalizationError(
       invalidRequestBody(param, "message role must be system, developer, user, or assistant")
@@ -51,6 +52,92 @@ const ensureValidator = (fn) => {
     }
     throw err;
   }
+};
+
+const normalizeToolType = (tool) => {
+  const rawType = typeof tool?.type === "string" ? tool.type.trim() : "";
+  if (rawType) return rawType.toLowerCase();
+  if (tool?.function || tool?.fn || typeof tool?.name === "string") return "function";
+  return "";
+};
+
+const normalizeFunctionTool = (tool, index) => {
+  const fn = tool?.function || tool?.fn;
+  const fnShape = fn && typeof fn === "object" ? { ...fn } : {};
+  const name = asNonEmptyString(fnShape.name) || asNonEmptyString(tool?.name);
+  if (!name) {
+    throw new ResponsesJsonRpcNormalizationError(
+      invalidRequestBody(
+        `tools[${index}].function.name`,
+        'function definitions must include a non-empty "name"'
+      )
+    );
+  }
+  fnShape.name = name;
+  if (fnShape.description === undefined && tool?.description !== undefined) {
+    fnShape.description = tool.description;
+  }
+  if (fnShape.parameters === undefined && tool?.parameters !== undefined) {
+    fnShape.parameters = tool.parameters;
+  }
+  if (fnShape.strict === undefined && tool?.strict !== undefined) {
+    fnShape.strict = tool.strict;
+  }
+
+  const normalized = { ...tool, type: "function", function: fnShape };
+  delete normalized.fn;
+  if (tool?.function == null && tool?.name !== undefined) delete normalized.name;
+  if (tool?.function == null && tool?.description !== undefined) delete normalized.description;
+  if (tool?.function == null && tool?.parameters !== undefined) delete normalized.parameters;
+  if (tool?.function == null && tool?.strict !== undefined) delete normalized.strict;
+  return normalized;
+};
+
+const normalizeResponsesTools = (tools) => {
+  if (tools === undefined || tools === null) return undefined;
+  if (!Array.isArray(tools)) {
+    throw new ResponsesJsonRpcNormalizationError(
+      invalidRequestBody("tools", "tools must be an array of definitions")
+    );
+  }
+  const definitions = [];
+  for (const [idx, tool] of tools.entries()) {
+    if (!tool || typeof tool !== "object") {
+      throw new ResponsesJsonRpcNormalizationError(
+        invalidRequestBody(`tools[${idx}]`, "tool definition must be an object")
+      );
+    }
+    const type = normalizeToolType(tool);
+    if (!type) {
+      throw new ResponsesJsonRpcNormalizationError(
+        invalidRequestBody(`tools[${idx}].type`, "tool type must be a non-empty string")
+      );
+    }
+    if (type === "function") {
+      definitions.push(normalizeFunctionTool(tool, idx));
+      continue;
+    }
+    definitions.push({ ...tool, type });
+  }
+  return definitions.length ? definitions : undefined;
+};
+
+const normalizeResponsesToolChoice = (rawChoice, definitions) => {
+  if (!rawChoice || typeof rawChoice !== "object") {
+    return ensureValidator(() => normalizeToolChoice(rawChoice, definitions));
+  }
+  const name = asNonEmptyString(rawChoice.name);
+  if (!name) {
+    return ensureValidator(() => normalizeToolChoice(rawChoice, definitions));
+  }
+  const fn = rawChoice.function || rawChoice.fn;
+  const fnShape = fn && typeof fn === "object" ? { ...fn } : {};
+  if (!asNonEmptyString(fnShape.name)) {
+    fnShape.name = name;
+  }
+  return ensureValidator(() =>
+    normalizeToolChoice({ ...rawChoice, function: fnShape }, definitions)
+  );
 };
 
 export const normalizeResponsesRequest = (body = {}) => {
@@ -119,7 +206,7 @@ export const normalizeResponsesRequest = (body = {}) => {
       return;
     }
     if (Array.isArray(content)) {
-      content.forEach((part, idx) => {
+      content.forEach((part) => {
         const param = baseParam;
         if (!part || typeof part !== "object") {
           throw new ResponsesJsonRpcNormalizationError(
@@ -218,8 +305,12 @@ export const normalizeResponsesRequest = (body = {}) => {
   const { responseFormat, finalOutputJsonSchema } = ensureValidator(() =>
     normalizeResponseFormat(body?.text?.format)
   );
-  const tools = ensureValidator(() => validateTools(body.tools));
-  const toolChoice = ensureValidator(() => normalizeToolChoice(body.tool_choice, tools));
+  const tools = normalizeResponsesTools(body.tools);
+  const toolChoiceProvided = Object.prototype.hasOwnProperty.call(body, "tool_choice");
+  let toolChoice = normalizeResponsesToolChoice(body.tool_choice, tools);
+  if (!toolChoiceProvided && toolChoice === undefined && Array.isArray(tools) && tools.length) {
+    toolChoice = "auto";
+  }
   const rawParallelToolCalls = body.parallel_tool_calls;
   const parallelToolCalls = ensureValidator(() => normalizeParallelToolCalls(rawParallelToolCalls));
   if (

@@ -5,13 +5,7 @@ import { parseSSE } from "../shared/transcript-utils.js";
 
 const COPILOT_UA = "obsidian/1.9.7 Electron/37.2.4";
 
-const collectDeltas = (entries) =>
-  entries
-    .filter((entry) => entry?.type === "data" && entry.event === "response.output_text.delta")
-    .map((entry) => entry.data?.delta || "")
-    .join("");
-
-describe("/v1/responses Copilot output mode", () => {
+describe("/v1/responses output mode", () => {
   let serverCtx;
 
   beforeAll(async () => {
@@ -26,7 +20,7 @@ describe("/v1/responses Copilot output mode", () => {
     if (serverCtx) await stopServer(serverCtx.child);
   });
 
-  test("forces obsidian-xml when Copilot headers are present", async () => {
+  test("does not force obsidian-xml when Copilot headers are present", async () => {
     const res = await fetch(`http://127.0.0.1:${serverCtx.PORT}/v1/responses`, {
       method: "POST",
       headers: {
@@ -38,16 +32,14 @@ describe("/v1/responses Copilot output mode", () => {
     });
 
     expect(res.ok).toBe(true);
-    expect(res.headers.get("x-proxy-output-mode")).toBe("obsidian-xml");
+    expect(res.headers.get("x-proxy-output-mode")).toBeNull();
   });
 
-  test("streams obsidian XML tool blocks for Copilot", async () => {
+  test("streams tool events with default openai-json mode", async () => {
     const toolServer = await startServer({
       CODEX_BIN: "scripts/fake-codex-jsonrpc.js",
       FAKE_CODEX_MODE: "tool_call",
       PROXY_RESPONSES_OUTPUT_MODE: "openai-json",
-      PROXY_STOP_AFTER_TOOLS: "true",
-      PROXY_STOP_AFTER_TOOLS_MODE: "first",
       PROXY_SSE_KEEPALIVE_MS: "0",
     });
 
@@ -67,11 +59,13 @@ describe("/v1/responses Copilot output mode", () => {
       });
 
       expect(res.ok).toBe(true);
-      expect(res.headers.get("x-proxy-output-mode")).toBe("obsidian-xml");
+      expect(res.headers.get("x-proxy-output-mode")).toBeNull();
       const raw = await res.text();
       const entries = parseSSE(raw);
-      const deltas = collectDeltas(entries);
-      expect(deltas).toContain("<use_tool>");
+      const toolEvents = entries.filter((entry) =>
+        String(entry?.event || "").startsWith("response.output_item")
+      );
+      expect(toolEvents.length).toBeGreaterThan(0);
     } finally {
       await stopServer(toolServer.child);
     }

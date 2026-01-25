@@ -70,6 +70,47 @@ describe("native responses request normalizer", () => {
     ]);
   });
 
+  it("accepts responses-style function tools with top-level name", () => {
+    const body = {
+      tools: [
+        {
+          type: "function",
+          name: "lookup_user",
+          description: "lookup",
+          parameters: { type: "object", properties: { id: { type: "string" } } },
+        },
+      ],
+      tool_choice: { type: "function", name: "lookup_user" },
+    };
+    const result = normalizeResponsesRequest(body);
+    expect(result.tools).toEqual([
+      expect.objectContaining({
+        type: "function",
+        function: expect.objectContaining({ name: "lookup_user" }),
+      }),
+    ]);
+    expect(result.toolChoice).toEqual(
+      expect.objectContaining({
+        type: "function",
+        function: expect.objectContaining({ name: "lookup_user" }),
+      })
+    );
+  });
+
+  it("passes through non-function tools", () => {
+    const body = { tools: [{ type: "web_search", foo: "bar" }] };
+    const result = normalizeResponsesRequest(body);
+    expect(result.tools).toEqual([expect.objectContaining({ type: "web_search", foo: "bar" })]);
+  });
+
+  it("defaults tool_choice to auto when tools are provided", () => {
+    const body = {
+      tools: [{ type: "function", function: { name: "lookup" } }],
+    };
+    const result = normalizeResponsesRequest(body);
+    expect(result.toolChoice).toBe("auto");
+  });
+
   it("rejects unsupported input item types", () => {
     const err = expectNormalizeError(() =>
       normalizeResponsesRequest({ input: [{ type: "bogus" }] })

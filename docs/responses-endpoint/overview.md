@@ -1,9 +1,6 @@
-# `/v1/responses` — Implementation Overview (Current)
+# `/v1/responses` — Implementation Overview (Native)
 
-This repo implements `POST /v1/responses` (non-stream + typed SSE streaming) by reusing the existing `/v1/chat/completions` handlers and applying a small translation layer:
-
-- **Non-stream:** build a chat request, then transform the final chat JSON into a Responses JSON envelope.
-- **Stream:** run the chat SSE pipeline, but **suppress** chat chunks and emit **typed Responses SSE** events instead.
+This repo implements `POST /v1/responses` with a native responses pipeline (no chat wrapper). Both non-stream and typed SSE streaming talk directly to the JSON-RPC transport.
 
 The route is gated by `PROXY_ENABLE_RESPONSES` (default: `true`).
 
@@ -12,79 +9,71 @@ The route is gated by `PROXY_ENABLE_RESPONSES` (default: `true`).
 - Routing: `src/routes/responses.js`
 - Non-stream handler: `src/handlers/responses/nonstream.js`
 - Stream handler: `src/handlers/responses/stream.js`
+- Request normalizer (always-flatten): `src/handlers/responses/native/request.js`
+- Envelope builder: `src/handlers/responses/native/envelope.js`
+- JSON-RPC event ingestion: `src/handlers/responses/native/execute.js`
 - Typed SSE adapter: `src/handlers/responses/stream-adapter.js`
-- Conversion helpers: `src/handlers/responses/shared.js`
 
-## Request normalization (Responses → Chat)
+## Request normalization (Responses → JSON-RPC)
 
-The Responses handlers normalize to a chat-shaped request:
+`normalizeResponsesRequest` enforces OpenAI-style request shape:
 
-- `instructions` / `input` are coerced into `messages[]` via `coerceInputToChatMessages()`.
-- `previous_response_id` is **not sent upstream** (the proxy stays stateless), but is preserved/echoed in the final Responses JSON envelope.
+- `messages` is rejected (400).
+- `input` (string or array) is flattened into a role-tagged transcript:
+  - `[system] ...`, `[developer] ...`, `[user] ...`, `[assistant] ...`
+  - Tool outputs become `[tool:<call_id>] <output>`
+- `input_image` is mapped to JSON-RPC `image` items, with role markers emitted only when needed for deterministic attribution.
+- `previous_response_id` is accepted for compatibility but **never** echoed in responses.
 
-This keeps a single backend transport path while providing a stable Responses surface for clients.
+The flattened transcript is an internal representation; the `/v1/responses` request/response schema is unchanged.
 
-## Non-stream response shaping (Chat JSON → Responses JSON)
+## Non-stream response shaping
 
-`src/handlers/responses/nonstream.js` delegates to `postChatNonStream()` while installing `res.locals.responseTransform`.
+`src/handlers/responses/nonstream.js` runs the native executor and builds the canonical Responses envelope:
 
-The transform calls `convertChatResponseToResponses()` to produce a Responses-style payload:
+- `object: "response"` and `created` are always present.
+- Output items include a `message` item with `output_text` and `function_call` items for tools.
+- `function_call.arguments` stays a **string**; no `call_id` field is emitted.
 
-- Response IDs are normalized (`chatcmpl-*` → `resp_*`).
-- Chat `choices[]` become Responses `output[]` items.
-- Chat usage is mapped to Responses usage (`prompt_tokens → input_tokens`, `completion_tokens → output_tokens`).
+## Streaming (typed SSE)
 
-## Streaming (Chat SSE → typed Responses SSE)
+`src/handlers/responses/stream.js` drives `runNativeResponses` and `createResponsesStreamAdapter`, emitting typed SSE events:
 
-`src/handlers/responses/stream.js` delegates to `postChatStream()` while installing `res.locals.streamAdapter`.
+- `response.created`
+- `response.output_text.delta` / `response.output_text.done`
+- tool events: `response.output_item.added`, `response.function_call_arguments.delta/done`,
+  `response.output_item.done`
+- `response.completed` (final envelope)
+- `done` with `[DONE]`
 
-The adapter (`src/handlers/responses/stream-adapter.js`) is responsible for:
+If an upstream/transport error occurs **after** SSE starts, the adapter emits
+`response.failed` and terminates with `[DONE]` (no `response.completed`).
 
-- Emitting typed SSE events (`event:` + `data:` JSON) such as:
-  - `response.created`
-  - `response.output_text.delta` / `response.output_text.done`
-  - tool events: `response.output_item.added`, `response.function_call_arguments.delta/done`, `response.output_item.done`
-  - `response.completed` (contains the final Responses JSON envelope)
-  - `response.failed` (on adapter failure)
-- Terminating the stream with `event: done` and `data: [DONE]`
-- Suppressing default chat SSE output by returning `true` from `onChunk()`/`onDone()`
+## Output mode
 
-## Output mode and tool-call parity
+For `/v1/responses`, output mode is **header or default only**:
 
-Tool calling behavior in this proxy depends on the *output mode*:
+- `x-proxy-output-mode` (explicit) wins.
+- Otherwise use `PROXY_RESPONSES_OUTPUT_MODE` (default `openai-json`).
 
-- `obsidian-xml`: `<use_tool>...</use_tool>` blocks are emitted as assistant text.
-- `openai-json`: OpenAI-style tool call structures are emitted (chat: `tool_calls[]`; responses: typed tool events).
-
-For `/v1/responses`, the proxy defaults to `openai-json` (configurable via `PROXY_RESPONSES_OUTPUT_MODE`) unless the client explicitly overrides with `x-proxy-output-mode`.
-
-Copilot auto-detection: if the request looks like Obsidian Copilot (User-Agent contains `obsidian/` or an edge-injected `x-copilot-trace-id` is present) and `x-proxy-output-mode` is **absent**, the proxy forces `obsidian-xml`. Explicit `x-proxy-output-mode` always wins, even for Copilot requests.
-
-Rationale: This avoids “double tool intent” where a client could receive both:
-
-- tool events (`response.*function_call*`) and
-- the same `<use_tool>` blocks embedded inside `response.output_text.delta`.
+No Copilot auto-detection is applied to `/v1/responses`.
 
 ## Observability
 
 - **Structured logs (stdout):**
-  - `responses_ingress_raw` (info) captures raw `/v1/responses` request shape (no content), including `output_mode_requested/effective`.
-  - Copilot traces: `copilot_trace_id` is always present; `copilot_trace_source` and `copilot_trace_header` show whether the ID was header-provided or generated.
-  - `responses_nonstream_summary` (debug) captures final non-stream status + usage + `previous_response_id_hash`.
-  - `responses.sse_summary` (debug/error) captures stream outcome + usage + `previous_response_id_hash`.
-- Troubleshooting: `docs/responses-endpoint/ingress-debug-lnjs-400.md` (400 `messages[] required` when `input[]` message items use `content: string`).
+  - `responses_ingress_raw` (info) captures request shape and output mode.
+  - `responses_nonstream_summary` (debug) includes status + usage + `previous_response_id_hash`.
+  - `responses.sse_summary` (debug/error) includes stream outcome + usage + `previous_response_id_hash`.
 - **Dev trace (NDJSON, `PROTO_LOG_PATH`):**
-  - `responses_sse_out` logs *each* typed SSE event with a monotonic `stream_event_seq` (dev-only, gated by `PROXY_LOG_PROTO`).
-  - `tool_call_arguments_done` logs tool-call argument byte counts + JSON validity (no args content).
-  - Set `PROXY_DEBUG_WIRE=1` to enable small, capped previews for `response.output_text.delta` (and invalid tool args only).
-- Metrics: the adapter increments `codex_responses_sse_event_total{route,model,event}`.
+  - `responses_sse_out` logs each typed SSE event with `stream_event_seq`.
+- Metrics: `codex_responses_sse_event_total{route,model,event}`.
 
 ## Tests
 
-- Typed SSE contract: `tests/e2e/responses-contract.spec.js` (golden transcript-based)
-- Metrics presence: `tests/integration/metrics.int.test.js` (scrapes `/metrics` when enabled)
+- Typed SSE contract: `tests/e2e/responses-contract.spec.js`
+- Metrics presence: `tests/integration/metrics.int.test.js`
 
-If you change typed SSE semantics, regenerate transcripts with:
+If you change typed SSE semantics, regenerate transcripts:
 
 ```bash
 node scripts/generate-responses-transcripts.mjs

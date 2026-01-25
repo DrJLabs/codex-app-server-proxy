@@ -33,6 +33,7 @@ This folder is the canonical index for repository documentation. Update this fil
 
 - [`openai-endpoint-golden-parity.md`](openai-endpoint-golden-parity.md) — golden transcript contract for `/v1/chat/completions` and `/v1/responses`
 - [`responses-endpoint/overview.md`](responses-endpoint/overview.md) — `/v1/responses` implementation notes
+- [`responses-endpoint/app-server-tools.md`](responses-endpoint/app-server-tools.md) — tool manifest limitations and MCP integration notes
 
 ## Deep dives and backlogs
 

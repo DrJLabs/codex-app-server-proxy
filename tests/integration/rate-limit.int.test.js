@@ -112,7 +112,7 @@ test("responses endpoint is rate limited alongside chat/completions", async () =
     body: JSON.stringify({
       model: "codex-5",
       stream: false,
-      input: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+      input: "hello",
     }),
   });
   expect(r.status).toBe(200);
@@ -121,7 +121,7 @@ test("responses endpoint is rate limited alongside chat/completions", async () =
     body: JSON.stringify({
       model: "codex-5",
       stream: false,
-      input: [{ role: "user", content: [{ type: "text", text: "hi again" }] }],
+      input: "hi again",
     }),
   });
   expect(r.status).toBe(429);
