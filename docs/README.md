@@ -34,6 +34,10 @@ This folder is the canonical index for repository documentation. Update this fil
 - [`openai-endpoint-golden-parity.md`](openai-endpoint-golden-parity.md) — golden transcript contract for `/v1/chat/completions` and `/v1/responses`
 - [`responses-endpoint/overview.md`](responses-endpoint/overview.md) — `/v1/responses` implementation notes
 - [`responses-endpoint/app-server-tools.md`](responses-endpoint/app-server-tools.md) — tool manifest limitations and MCP integration notes
+- [`responses-endpoint/obsidian-tool-call-simulation.md`](responses-endpoint/obsidian-tool-call-simulation.md) — OpenAI-parity tool-call simulation plan
+- [`responses-api/obsidian-system-prompt-rTJBYn4-dDSccFvZ6sOyb.md`](responses-api/obsidian-system-prompt-rTJBYn4-dDSccFvZ6sOyb.md) — ingress evidence for Obsidian system prompt detection
+- [`responses-api/obsidian-system-prompt-lur1PQG76dSpMd4FPZij2.md`](responses-api/obsidian-system-prompt-lur1PQG76dSpMd4FPZij2.md) — captured Obsidian developer prompt
+- [`reference/app-server-schema-0.89-tools.md`](reference/app-server-schema-0.89-tools.md) — schema extract for tool support (Codex 0.89.0)
 
 ## Deep dives and backlogs
 

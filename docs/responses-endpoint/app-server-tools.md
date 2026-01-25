@@ -13,16 +13,22 @@ As a result, `/v1/responses` requests that include `tools` are accepted by the p
 
 ### JSON-RPC request payloads do not include tools
 
+Exported schema (from the live CLI) confirms no `tools` field on the request params:
+
+```
+codex app-server generate-json-schema --out /tmp/app-server-schema
+```
+
 - `SendUserTurnParams` only supports `conversation_id`, `items`, `cwd`, `approval_policy`, `sandbox_policy`, `model`, etc.
+  - `/tmp/app-server-schema/codex_app_server_protocol.schemas.json` (exported schema)
   - `/external/codex/codex-rs/app-server-protocol/src/protocol/v1.rs`
-- `UserInput` (v2) is limited to `Text`, `Image`, `LocalImage`, `Skill`.
-  - `/external/codex/codex-rs/app-server-protocol/src/protocol/v2.rs`
+- `SendUserMessageParams` only supports `conversationId` and `items`.
+  - `/tmp/app-server-schema/codex_app_server_protocol.schemas.json` (exported schema)
 
 ### Tool configuration is config + MCP only
 
-- `Tools`/`ToolsV2` only expose `web_search` and `view_image` toggles.
-  - `/external/codex/codex-rs/app-server-protocol/src/protocol/v1.rs`
-  - `/external/codex/codex-rs/app-server-protocol/src/protocol/v2.rs`
+- `ToolsV2` only exposes `web_search` and `view_image` toggles.
+  - `/tmp/app-server-schema/codex_app_server_protocol.schemas.json` (exported schema)
 - Core tool registry is built from config and MCP tools (converted into OpenAI tool specs).
   - `/external/codex/codex-rs/core/src/tools/spec.rs`
 
@@ -30,6 +36,8 @@ As a result, `/v1/responses` requests that include `tools` are accepted by the p
 
 - App-server exposes MCP server listing and status (`mcpServerStatus/list`), and reload (`config/mcpServer/reload`).
   - `/external/codex/codex-rs/app-server/README.md`
+- Exported schema shows `v2.McpServerStatus.tools` as a map of tool name → `Tool` (name + JSON schemas).
+  - `/tmp/app-server-schema/codex_app_server_protocol.schemas.json`
 
 ## How this fits into the proxy
 
