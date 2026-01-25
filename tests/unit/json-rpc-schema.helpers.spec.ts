@@ -146,7 +146,7 @@ describe("json-rpc schema helper behavior", () => {
     });
 
     expect(params.clientInfo.name).toBe("codex-app-server-proxy");
-    expect(params.clientInfo.version).toBe("0.84.0");
+    expect(params.clientInfo.version).toBe("0.89.0");
     expect(params.client_info).toEqual(params.clientInfo);
     expect(params.protocol_version).toBe("2.0.0");
     expect(params.capabilities).toBeNull();

@@ -3,7 +3,7 @@
     {
       "name": "codex",
       "url": "https://github.com/openai/codex.git",
-      "branch": "rust-v0.84.0"
+      "branch": "rust-v0.89.0"
     },
     {
       "name": "obsidian-copilot",

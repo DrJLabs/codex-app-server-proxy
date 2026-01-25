@@ -1,7 +1,7 @@
 /**
  * Codex App Server JSON-RPC bindings for chat.
  *
- * Generated with codex-cli/codex-rs/app-server-protocol export tooling (v0.84.0)
+ * Generated with codex-cli/codex-rs/app-server-protocol export tooling (v0.89.0)
  * and then trimmed to the subset needed by the proxy. Regenerate when the
  * upstream protocol changes.
  */
@@ -9,7 +9,7 @@
 /* eslint-disable */
 
 export const JSONRPC_VERSION = "2.0" as const;
-export const CODEX_CLI_VERSION = "0.84.0" as const;
+export const CODEX_CLI_VERSION = "0.89.0" as const;
 
 export type JsonRpcId = number | string;
 
