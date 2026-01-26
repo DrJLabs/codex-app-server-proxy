@@ -12,4 +12,3 @@ Current fixtures:
 
 - `responses-stream-text.json` — streaming request shape without tool events.
 - `responses-stream-tool.json` — streaming request shape with tool events.
-- `responses-nonstream.json` — non-stream request shape (only when captured).
