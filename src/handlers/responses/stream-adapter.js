@@ -105,15 +105,9 @@ const buildToolRegistry = (requestBody = {}) => {
   const rawTools = Array.isArray(requestBody?.tools) ? requestBody.tools : [];
   const functionTools = rawTools.map(normalizeFunctionTool).filter(Boolean);
   const allowedTools = new Set(functionTools.map((tool) => tool.name));
-  const strictTools = new Map(
-    functionTools.map((tool) => [tool.name, tool.strict === true])
-  );
-  const toolSchemas = new Map(
-    functionTools.map((tool) => [tool.name, tool.parameters ?? null])
-  );
-  const toolChoice = normalizeToolChoice(
-    requestBody?.tool_choice ?? requestBody?.toolChoice
-  );
+  const strictTools = new Map(functionTools.map((tool) => [tool.name, tool.strict === true]));
+  const toolSchemas = new Map(functionTools.map((tool) => [tool.name, tool.parameters ?? null]));
+  const toolChoice = normalizeToolChoice(requestBody?.tool_choice ?? requestBody?.toolChoice);
 
   if (toolChoice.mode === "none") {
     return { allowedTools: new Set(), strictTools, toolSchemas, toolChoice, enabled: false };
@@ -296,11 +290,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
         const verbose = shouldLogVerbose();
 
         const debugExtras = {};
-        if (
-          verbose &&
-          event === OUTPUT_DELTA_EVENT &&
-          typeof enrichedPayload?.delta === "string"
-        ) {
+        if (verbose && event === OUTPUT_DELTA_EVENT && typeof enrichedPayload?.delta === "string") {
           const sample = preview(enrichedPayload.delta, 160);
           debugExtras.delta_preview = sample.preview;
           debugExtras.content_truncated = sample.truncated;

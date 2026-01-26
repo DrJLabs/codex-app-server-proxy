@@ -196,9 +196,7 @@ describe("responses stream handler", () => {
       maxOutputTokens: undefined,
     });
 
-    const { postResponsesStream } = await import(
-      "../../../../src/handlers/responses/stream.js"
-    );
+    const { postResponsesStream } = await import("../../../../src/handlers/responses/stream.js");
 
     const req = makeReq({ input: "hello", model: "gpt-5.2", stream: true });
     const res = makeRes();

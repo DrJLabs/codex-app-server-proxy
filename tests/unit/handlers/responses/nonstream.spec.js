@@ -347,8 +347,7 @@ describe("responses nonstream handler", () => {
     runNativeResponsesMock.mockImplementationOnce(async ({ onEvent }) => {
       onEvent({
         type: "text",
-        text:
-          "Hi <tool_call>{\"name\":\"search\",\"arguments\":\"{\\\"query\\\":\\\"x\\\"}\"}</tool_call> ok",
+        text: 'Hi <tool_call>{"name":"search","arguments":"{\\"query\\":\\"x\\"}"}</tool_call> ok',
         choiceIndex: 0,
       });
       onEvent({ type: "finish", reason: "stop", trigger: "task_complete" });
@@ -368,7 +367,7 @@ describe("responses nonstream handler", () => {
       {
         id: "fc_001",
         type: "function",
-        function: { name: "search", arguments: "{\"query\":\"x\"}" },
+        function: { name: "search", arguments: '{"query":"x"}' },
       },
     ]);
   });
@@ -392,8 +391,7 @@ describe("responses nonstream handler", () => {
     runNativeResponsesMock.mockImplementationOnce(async ({ onEvent }) => {
       onEvent({
         type: "text",
-        text:
-          "Hi <tool_call>{\"name\":\"search\",\"arguments\":\"{\\\"query\\\":\\\"x\\\"}\"}</tool_call> ok",
+        text: 'Hi <tool_call>{"name":"search","arguments":"{\\"query\\":\\"x\\"}"}</tool_call> ok',
         choiceIndex: 0,
       });
       onEvent({ type: "finish", reason: "stop", trigger: "task_complete" });
@@ -413,7 +411,7 @@ describe("responses nonstream handler", () => {
       {
         id: "fc_001",
         type: "function",
-        function: { name: "search", arguments: "{\"query\":\"x\"}" },
+        function: { name: "search", arguments: '{"query":"x"}' },
       },
     ]);
   });

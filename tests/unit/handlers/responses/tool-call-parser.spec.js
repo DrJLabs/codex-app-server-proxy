@@ -11,7 +11,7 @@ describe("responses tool call parser", () => {
     expect(first.errors).toEqual([]);
 
     const second = parser.ingest(
-      "_call>{\"name\":\"localSearch\",\"arguments\":\"{\\\"q\\\":\\\"x\\\"}\"}</tool_call> world"
+      '_call>{"name":"localSearch","arguments":"{\\"q\\":\\"x\\"}"}</tool_call> world'
     );
 
     expect(second.visibleTextDeltas).toEqual([" world"]);
@@ -19,7 +19,7 @@ describe("responses tool call parser", () => {
     expect(second.parsedToolCalls).toEqual([
       {
         name: "localSearch",
-        arguments: "{\"q\":\"x\"}",
+        arguments: '{"q":"x"}',
       },
     ]);
   });
@@ -28,13 +28,13 @@ describe("responses tool call parser", () => {
     const parser = createToolCallParser({ allowedTools: new Set(["one", "two"]) });
 
     const result = parser.ingest(
-      "A <tool_call>{\"name\":\"one\",\"arguments\":\"{}\"}</tool_call> B <tool_call>{\"name\":\"two\",\"arguments\":\"{\\\"x\\\":1}\"}</tool_call> C"
+      'A <tool_call>{"name":"one","arguments":"{}"}</tool_call> B <tool_call>{"name":"two","arguments":"{\\"x\\":1}"}</tool_call> C'
     );
 
     expect(result.visibleTextDeltas.join("")).toBe("A  B  C");
     expect(result.parsedToolCalls).toEqual([
       { name: "one", arguments: "{}" },
-      { name: "two", arguments: "{\"x\":1}" },
+      { name: "two", arguments: '{"x":1}' },
     ]);
     expect(result.errors).toEqual([]);
   });
@@ -42,9 +42,7 @@ describe("responses tool call parser", () => {
   it("buffers partial </tool_call> tags across chunks", () => {
     const parser = createToolCallParser({ allowedTools: new Set(["webSearch"]) });
 
-    const first = parser.ingest(
-      "<tool_call>{\"name\":\"webSearch\",\"arguments\":\"{}\"}</tool"
-    );
+    const first = parser.ingest('<tool_call>{"name":"webSearch","arguments":"{}"}</tool');
     expect(first.visibleTextDeltas).toEqual([]);
     expect(first.parsedToolCalls).toEqual([]);
 
@@ -68,9 +66,7 @@ describe("responses tool call parser", () => {
   it("parses tool calls with a stray trailing >", () => {
     const parser = createToolCallParser({ allowedTools: new Set(["webSearch"]) });
 
-    const result = parser.ingest(
-      "<tool_call>{\"name\":\"webSearch\",\"arguments\":\"{}\"}></tool_call>"
-    );
+    const result = parser.ingest('<tool_call>{"name":"webSearch","arguments":"{}"}></tool_call>');
 
     expect(result.visibleTextDeltas).toEqual([]);
     expect(result.parsedToolCalls).toEqual([{ name: "webSearch", arguments: "{}" }]);
@@ -80,9 +76,7 @@ describe("responses tool call parser", () => {
   it("parses tool calls with a stray trailing }", () => {
     const parser = createToolCallParser({ allowedTools: new Set(["webSearch"]) });
 
-    const result = parser.ingest(
-      "<tool_call>{\"name\":\"webSearch\",\"arguments\":\"{}\"}}</tool_call>"
-    );
+    const result = parser.ingest('<tool_call>{"name":"webSearch","arguments":"{}"}}</tool_call>');
 
     expect(result.visibleTextDeltas).toEqual([]);
     expect(result.parsedToolCalls).toEqual([{ name: "webSearch", arguments: "{}" }]);
@@ -92,9 +86,7 @@ describe("responses tool call parser", () => {
   it("parses tool calls with a stray trailing ]", () => {
     const parser = createToolCallParser({ allowedTools: new Set(["webSearch"]) });
 
-    const result = parser.ingest(
-      "<tool_call>{\"name\":\"webSearch\",\"arguments\":\"{}\"}]</tool_call>"
-    );
+    const result = parser.ingest('<tool_call>{"name":"webSearch","arguments":"{}"}]</tool_call>');
 
     expect(result.visibleTextDeltas).toEqual([]);
     expect(result.parsedToolCalls).toEqual([{ name: "webSearch", arguments: "{}" }]);
@@ -107,9 +99,7 @@ describe("responses tool call parser", () => {
       strictFallback: true,
     });
 
-    const result = parser.ingest(
-      "<tool_call>{\"name\":\"unknown\",\"arguments\":\"{}\"}</tool_call>"
-    );
+    const result = parser.ingest('<tool_call>{"name":"unknown","arguments":"{}"}</tool_call>');
 
     expect(result.visibleTextDeltas).toEqual([]);
     expect(result.parsedToolCalls).toEqual([]);
@@ -119,9 +109,7 @@ describe("responses tool call parser", () => {
   it("parses an unterminated tool call on flush", () => {
     const parser = createToolCallParser({ allowedTools: new Set(["webSearch"]) });
 
-    const first = parser.ingest(
-      "<tool_call>{\"name\":\"webSearch\",\"arguments\":\"{}\"}"
-    );
+    const first = parser.ingest('<tool_call>{"name":"webSearch","arguments":"{}"}');
 
     expect(first.visibleTextDeltas).toEqual([]);
     expect(first.parsedToolCalls).toEqual([]);

@@ -342,8 +342,7 @@ export async function postResponsesNonStream(req, res) {
   const ingressToolCount = toolDefinitions.length;
   const turnToolCount = countToolDefinitions(turn.tools);
   const messageToolCount = countToolDefinitions(message.tools);
-  const toolsMismatch =
-    ingressToolCount !== turnToolCount || ingressToolCount !== messageToolCount;
+  const toolsMismatch = ingressToolCount !== turnToolCount || ingressToolCount !== messageToolCount;
   logStructured(
     {
       component: "responses",

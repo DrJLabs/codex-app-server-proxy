@@ -76,7 +76,7 @@ describe("native responses request normalizer", () => {
           id: "fc_1",
           call_id: "fc_1",
           name: "lookup",
-          arguments: "{\"id\":1}",
+          arguments: '{"id":1}',
         },
       ],
     };
@@ -85,7 +85,7 @@ describe("native responses request normalizer", () => {
       {
         type: "text",
         data: {
-          text: "[function_call id=fc_1 call_id=fc_1 name=lookup arguments={\"id\":1}]",
+          text: '[function_call id=fc_1 call_id=fc_1 name=lookup arguments={"id":1}]',
         },
       },
     ]);
@@ -203,7 +203,9 @@ describe("native responses request normalizer", () => {
     expect(text).toContain(
       'Inside <tool_call>...</tool_call>, output ONLY a JSON object with keys "name" and "arguments".'
     );
-    expect(text).toContain("Always emit <tool_call> blocks exactly as shown; the client executes them.");
+    expect(text).toContain(
+      "Always emit <tool_call> blocks exactly as shown; the client executes them."
+    );
     expect(text).toContain(
       "Do NOT call internal tools directly (shell, apply_patch, web_search, view_image); only emit <tool_call>."
     );
@@ -216,18 +218,14 @@ describe("native responses request normalizer", () => {
     expect(text).toContain(
       'Do not add any extra characters before or after the JSON (no trailing ">", no code fences).'
     );
-    expect(text).toContain(
-      "Use exactly one opening <tool_call> and one closing </tool_call> tag."
-    );
+    expect(text).toContain("Use exactly one opening <tool_call> and one closing </tool_call> tag.");
     expect(text).toContain(
       "Output must be valid JSON. Do not add extra braces or trailing characters."
     );
     expect(text).toContain(
-      "Do NOT wrap the JSON object in an array (no leading \"[\" or trailing \"]\")."
+      'Do NOT wrap the JSON object in an array (no leading "[" or trailing "]").'
     );
-    expect(text).toContain(
-      "Bad: <tool_call>[{\"name\":\"tool\",\"arguments\":\"{...}\"}]</tool_call>"
-    );
+    expect(text).toContain('Bad: <tool_call>[{"name":"tool","arguments":"{...}"}]</tool_call>');
     expect(text).toContain("Never repeat the closing tag.");
     expect(text).toContain(
       'Example (exact): <tool_call>{"name":"webSearch","arguments":"{\\"query\\":\\"example\\",\\"chatHistory\\":[]}"}<\/tool_call>'
@@ -240,7 +238,7 @@ describe("native responses request normalizer", () => {
     expect(text).toContain("- id (optional, string)");
     expect(text).toContain("Example tool_call:");
     expect(text).toContain("lookup_user");
-    expect(text).toContain("\"type\":\"object\"");
+    expect(text).toContain('"type":"object"');
     expect(text).toContain("If no tool is needed, respond with plain text.");
     expect(result.inputItems[0].data.text).toContain("[user] hi");
   });

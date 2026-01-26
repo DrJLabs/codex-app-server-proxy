@@ -397,8 +397,7 @@ describe("responses stream adapter", () => {
 
     adapter.handleEvent({
       type: "text_delta",
-      delta:
-        "Hi <tool_call>{\"name\":\"search\",\"arguments\":\"{\\\"query\\\":\\\"x\\\"}\"}</tool_call> ok",
+      delta: 'Hi <tool_call>{"name":"search","arguments":"{\\"query\\":\\"x\\"}"}</tool_call> ok',
       choiceIndex: 0,
     });
     await adapter.finalize();
@@ -435,8 +434,7 @@ describe("responses stream adapter", () => {
 
     adapter.handleEvent({
       type: "text_delta",
-      delta:
-        "Hi <tool_call>{\"name\":\"search\",\"arguments\":\"{\\\"query\\\":\\\"x\\\"}\"}</tool_call> ok",
+      delta: 'Hi <tool_call>{"name":"search","arguments":"{\\"query\\":\\"x\\"}"}</tool_call> ok',
       choiceIndex: 0,
     });
     await adapter.finalize();

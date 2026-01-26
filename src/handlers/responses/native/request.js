@@ -200,16 +200,14 @@ const buildToolInjectionText = (tools, toolChoice) => {
   lines.push(
     "Read-only sandbox or approval restrictions do NOT prevent emitting <tool_call> output."
   );
+  lines.push("Use EXACT parameter names from the schema; do NOT invent or rename keys.");
   lines.push(
-    "Use EXACT parameter names from the schema; do NOT invent or rename keys."
+    'Do not add any extra characters before or after the JSON (no trailing ">", no code fences).'
   );
-  lines.push('Do not add any extra characters before or after the JSON (no trailing ">", no code fences).');
   lines.push("Use exactly one opening <tool_call> and one closing </tool_call> tag.");
   lines.push("Output must be valid JSON. Do not add extra braces or trailing characters.");
-  lines.push(
-    "Do NOT wrap the JSON object in an array (no leading \"[\" or trailing \"]\")."
-  );
-  lines.push("Bad: <tool_call>[{\"name\":\"tool\",\"arguments\":\"{...}\"}]</tool_call>");
+  lines.push('Do NOT wrap the JSON object in an array (no leading "[" or trailing "]").');
+  lines.push('Bad: <tool_call>[{"name":"tool","arguments":"{...}"}]</tool_call>');
   lines.push("Never repeat the closing tag.");
   lines.push(
     'Example (exact): <tool_call>{"name":"webSearch","arguments":"{\\"query\\":\\"example\\",\\"chatHistory\\":[]}"}<\/tool_call>'
@@ -274,9 +272,7 @@ const buildToolInjectionText = (tools, toolChoice) => {
     if (!propKeys.length) {
       return ["- (no parameters)"];
     }
-    const required = new Set(
-      Array.isArray(normalized.required) ? normalized.required : []
-    );
+    const required = new Set(Array.isArray(normalized.required) ? normalized.required : []);
     return propKeys.map((key) => {
       const propSchema = sanitizeSchema(props[key]) || {};
       const requirement = required.has(key) ? "required" : "optional";
@@ -319,8 +315,7 @@ const buildToolInjectionText = (tools, toolChoice) => {
     return "example";
   };
 
-  const escapeExample = (value) =>
-    String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+  const escapeExample = (value) => String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 
   lines.push("Per-tool guidance and examples (schema-conformant):");
   functionTools.forEach((tool) => {
@@ -332,7 +327,9 @@ const buildToolInjectionText = (tools, toolChoice) => {
     lines.push("Parameters:");
     summarizeSchemaParameters(tool.parameters).forEach((line) => lines.push(line));
     lines.push("Example tool_call:");
-    lines.push(`<tool_call>{"name":"${tool.name}","arguments":"${escapeExample(exampleArgs)}"}</tool_call>`);
+    lines.push(
+      `<tool_call>{"name":"${tool.name}","arguments":"${escapeExample(exampleArgs)}"}</tool_call>`
+    );
   });
 
   return lines.join("\n");
@@ -519,11 +516,8 @@ export const normalizeResponsesRequest = (body = {}) => {
     if (itemType === "function_call") {
       const itemId = asNonEmptyString(item.id) || asNonEmptyString(item.call_id) || `call_${index}`;
       const callId = asNonEmptyString(item.call_id) || itemId;
-      const name =
-        asNonEmptyString(item.name) || asNonEmptyString(item.function?.name) || callId;
-      const argumentsText = stringifyToolValue(
-        item.arguments ?? item.function?.arguments ?? ""
-      );
+      const name = asNonEmptyString(item.name) || asNonEmptyString(item.function?.name) || callId;
+      const argumentsText = stringifyToolValue(item.arguments ?? item.function?.arguments ?? "");
       pushTextLine(
         `[function_call id=${itemId} call_id=${callId} name=${name} arguments=${argumentsText}]`
       );

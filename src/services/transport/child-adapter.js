@@ -70,7 +70,11 @@ export class JsonRpcChildAdapter extends EventEmitter {
       const messagePayload = normalized?.message ? { ...normalized.message } : {};
       if (turnPayload && turnPayload.tools === undefined && messagePayload.tools !== undefined) {
         turnPayload.tools = messagePayload.tools;
-      } else if (turnPayload && turnPayload.tools !== undefined && messagePayload.tools === undefined) {
+      } else if (
+        turnPayload &&
+        turnPayload.tools !== undefined &&
+        messagePayload.tools === undefined
+      ) {
         messagePayload.tools = turnPayload.tools;
       }
       if (turnPayload) {
