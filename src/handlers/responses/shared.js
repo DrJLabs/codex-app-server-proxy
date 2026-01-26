@@ -1,7 +1,10 @@
 import { nanoid } from "nanoid";
+import { invalidRequestBody } from "../../lib/errors.js";
+import { impliedEffortForModel } from "../../utils.js";
 
 const RESPONSE_ID_PREFIX = "resp_";
 const MESSAGE_ID_PREFIX = "msg_";
+const ALLOWED_REASONING_EFFORTS = new Set(["low", "medium", "high", "xhigh"]);
 
 const sanitizeIdentifier = (value, prefix) => {
   if (typeof value === "string" && value.trim()) {
@@ -65,6 +68,52 @@ export const applyDefaultProxyOutputModeHeader = (req, desiredOutputMode) => {
       headers["x-proxy-output-mode"] = original;
     }
   };
+};
+
+export const resolveResponsesReasoning = ({ body, requestedModel }) => {
+  const payload = body && typeof body === "object" ? body : {};
+  const rawReasoning = payload.reasoning;
+  if (rawReasoning !== undefined && rawReasoning !== null && typeof rawReasoning !== "object") {
+    return {
+      ok: false,
+      error: invalidRequestBody("reasoning", "reasoning must be an object when provided"),
+    };
+  }
+
+  let reasoningEffort = (
+    rawReasoning?.effort ||
+    payload.reasoning_effort ||
+    payload.reasoningEffort ||
+    ""
+  )
+    .toString()
+    .trim()
+    .toLowerCase();
+
+  if (!reasoningEffort) {
+    const implied = impliedEffortForModel(requestedModel);
+    if (implied) reasoningEffort = implied;
+  }
+
+  if (reasoningEffort && !ALLOWED_REASONING_EFFORTS.has(reasoningEffort)) {
+    return {
+      ok: false,
+      error: invalidRequestBody(
+        "reasoning.effort",
+        `reasoning.effort must be one of: ${Array.from(ALLOWED_REASONING_EFFORTS).join(", ")}`
+      ),
+    };
+  }
+
+  let reasoningPayload;
+  if (reasoningEffort) {
+    reasoningPayload = {
+      ...(rawReasoning && typeof rawReasoning === "object" ? rawReasoning : {}),
+      effort: reasoningEffort,
+    };
+  }
+
+  return { ok: true, effort: reasoningEffort || "", reasoningPayload };
 };
 
 export const splitResponsesTools = (tools) => {

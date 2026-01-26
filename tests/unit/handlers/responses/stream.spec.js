@@ -60,7 +60,7 @@ const appendProtoEventMock = vi.fn();
 const appendUsageMock = vi.fn();
 const applyCorsMock = vi.fn();
 const normalizeModelMock = vi.fn((model) => ({ requested: model, effective: model }));
-const acceptedModelIdsMock = vi.fn(() => new Set(["gpt-5.2"]));
+const acceptedModelIdsMock = vi.fn(() => new Set(["gpt-5.2", "gpt-5.2-codev-l"]));
 const setSSEHeadersMock = vi.fn();
 const computeKeepaliveMsMock = vi.fn(() => 0);
 const startKeepalivesMock = vi.fn(() => ({ stop: vi.fn() }));
@@ -138,9 +138,13 @@ vi.mock("../../../../src/utils.js", async () => {
   };
 });
 
-vi.mock("../../../../src/config/models.js", () => ({
-  acceptedModelIds: (...args) => acceptedModelIdsMock(...args),
-}));
+vi.mock("../../../../src/config/models.js", async () => {
+  const actual = await vi.importActual("../../../../src/config/models.js");
+  return {
+    ...actual,
+    acceptedModelIds: (...args) => acceptedModelIdsMock(...args),
+  };
+});
 
 vi.mock("../../../../src/services/sse.js", () => ({
   setSSEHeaders: (...args) => setSSEHeadersMock(...args),
@@ -223,5 +227,32 @@ describe("responses stream handler", () => {
         parallelToolCalls: true,
       })
     );
+  });
+
+  it("infers low reasoning effort from model alias when not provided", async () => {
+    const { postResponsesStream } = await import("../../../../src/handlers/responses/stream.js");
+    const req = makeReq({ input: "hello", model: "gpt-5.2-codev-l", stream: true });
+    const res = makeRes();
+
+    await postResponsesStream(req, res);
+
+    const call = createJsonRpcChildAdapterMock.mock.calls[0]?.[0];
+    expect(call?.normalizedRequest?.turn?.effort).toBe("low");
+  });
+
+  it("respects explicit reasoning effort over model alias", async () => {
+    const { postResponsesStream } = await import("../../../../src/handlers/responses/stream.js");
+    const req = makeReq({
+      input: "hello",
+      model: "gpt-5.2-codev-l",
+      reasoning: { effort: "high" },
+      stream: true,
+    });
+    const res = makeRes();
+
+    await postResponsesStream(req, res);
+
+    const call = createJsonRpcChildAdapterMock.mock.calls[0]?.[0];
+    expect(call?.normalizedRequest?.turn?.effort).toBe("high");
   });
 });

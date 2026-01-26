@@ -33,6 +33,13 @@ The route is gated by `PROXY_ENABLE_RESPONSES` (default: `true`).
 
 The flattened transcript is an internal representation; the `/v1/responses` request/response schema is unchanged.
 
+## Model selection and reasoning effort
+
+- Model aliases (ex: `gpt-5.2-codev-l`) are accepted and normalized to the effective model
+  (`gpt-5.2`) before executing the JSON-RPC turn.
+- If the request omits `reasoning.effort`, the responses pipeline infers it from model suffixes
+  (`-l`, `-m`, `-h`, `-xh`). Explicit `reasoning.effort` in the request always wins.
+
 ## Non-stream response shaping
 
 `src/handlers/responses/nonstream.js` runs the native executor and builds the canonical Responses envelope:

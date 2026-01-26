@@ -2,6 +2,7 @@ import { config as CFG } from "../../config/index.js";
 import {
   applyDefaultProxyOutputModeHeader,
   resolveResponsesOutputMode,
+  resolveResponsesReasoning,
   splitResponsesTools,
 } from "./shared.js";
 import {
@@ -257,6 +258,18 @@ export async function postResponsesNonStream(req, res) {
     return;
   }
 
+  const reasoningResult = resolveResponsesReasoning({
+    body: originalBody,
+    requestedModel,
+  });
+  if (!reasoningResult.ok) {
+    applyCors(req, res);
+    res.status(400).json(reasoningResult.error);
+    restoreOutputMode();
+    return;
+  }
+  const { effort: reasoningEffort, reasoningPayload } = reasoningResult;
+
   let normalized;
   try {
     normalized = normalizeResponsesRequest(originalBody);
@@ -327,6 +340,7 @@ export async function postResponsesNonStream(req, res) {
     summary: "auto",
     includeApplyPatchTool: true,
   };
+  if (reasoningEffort) turn.effort = reasoningEffort;
   if (Number.isInteger(nValue) && nValue > 0) turn.choiceCount = nValue;
   if (toolsPayload) turn.tools = toolsPayload;
   if (normalized.developerInstructions) {
@@ -342,6 +356,7 @@ export async function postResponsesNonStream(req, res) {
   };
   if (maxOutputTokens !== undefined) message.maxOutputTokens = maxOutputTokens;
   if (toolsPayload) message.tools = toolsPayload;
+  if (reasoningPayload !== undefined) message.reasoning = reasoningPayload;
   if (normalized.responseFormat !== undefined) message.responseFormat = normalized.responseFormat;
   if (normalized.finalOutputJsonSchema !== undefined) {
     message.finalOutputJsonSchema = normalized.finalOutputJsonSchema;

@@ -40,6 +40,13 @@ Authorization: Bearer <PROXY_API_KEY>
 - `previous_response_id` is accepted for client compatibility but is not echoed back.
 - `instructions` is supported and flattened into the internal transcript for JSON-RPC.
 
+## Model aliases and reasoning effort
+
+- The responses endpoint accepts model aliases like `gpt-5.2-codev-l` and maps them to `gpt-5.2`.
+- Alias lookup is case-insensitive (`gpt-5.2-codev-L` and `gpt-5.2-codev-l` are equivalent).
+- If the request does **not** set `reasoning.effort`, the proxy infers it from the model suffix
+  (`-l`, `-m`, `-h`, `-xh`). Explicit `reasoning.effort` always wins.
+
 ## Tool output shape
 
 `/v1/responses` emits tool calls as top-level `function_call` items in `output[]`:

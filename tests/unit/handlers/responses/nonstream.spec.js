@@ -209,6 +209,36 @@ describe("responses nonstream handler", () => {
     expect(createJsonRpcChildAdapterMock).not.toHaveBeenCalled();
   });
 
+  it("infers low reasoning effort from model alias when not provided", async () => {
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2-codev-l" });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    const call = createJsonRpcChildAdapterMock.mock.calls[0]?.[0];
+    expect(call?.normalizedRequest?.turn?.effort).toBe("low");
+  });
+
+  it("respects explicit reasoning effort over model alias", async () => {
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({
+      input: "hello",
+      model: "gpt-5.2-codev-l",
+      reasoning: { effort: "high" },
+    });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    const call = createJsonRpcChildAdapterMock.mock.calls[0]?.[0];
+    expect(call?.normalizedRequest?.turn?.effort).toBe("high");
+  });
+
   it("returns 400 when n is greater than 1", async () => {
     const { postResponsesNonStream } = await import(
       "../../../../src/handlers/responses/nonstream.js"
