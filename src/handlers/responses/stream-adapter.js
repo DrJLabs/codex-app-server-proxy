@@ -134,7 +134,7 @@ const buildToolRegistry = (requestBody = {}) => {
     strictTools,
     toolSchemas,
     toolChoice,
-    enabled: allowedTools.size > 0,
+    enabled: toolChoice.mode !== "none",
   };
 };
 

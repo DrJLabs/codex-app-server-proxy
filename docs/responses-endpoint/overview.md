@@ -19,12 +19,15 @@ The route is gated by `PROXY_ENABLE_RESPONSES` (default: `true`).
 `normalizeResponsesRequest` enforces OpenAI-style request shape:
 
 - `messages` is rejected (400).
-- `input` (string or array) is flattened into a role-tagged transcript:
-  - `[system] ...`, `[developer] ...`, `[user] ...`, `[assistant] ...`
+- `input` (string or array) is flattened into a role-tagged transcript for **non-system roles**:
+  - `[user] ...`, `[assistant] ...`
   - Tool outputs become `[function_call_output call_id=<call_id> output=<output>]`
   - Echoed `function_call` items are accepted and flattened back into the transcript
-- When function tools are provided, the proxy injects a developer segment describing
-  `<tool_call>` formatting rules, tool schemas, and `tool_choice` constraints.
+- System/developer role messages (and top-level `instructions`) are moved into
+  `developerInstructions` for the app-server conversation.
+- When function tools are provided, the proxy injects a developer instructions block describing
+  `<tool_call>` formatting rules, tool schemas, and `tool_choice` constraints (also via
+  `developerInstructions`).
 - `input_image` is mapped to JSON-RPC `image` items, with role markers emitted only when needed for deterministic attribution.
 - `previous_response_id` is accepted for compatibility but **never** echoed in responses.
 

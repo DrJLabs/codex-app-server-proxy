@@ -108,6 +108,7 @@ See [external/README.md](../external/README.md) for details.
 - [docs/ops/runbooks.md](ops/runbooks.md) - smoke, snapshot, rollback, backup
 - [docs/observability.md](observability.md) - logs, metrics, tracing
 - [docs/troubleshooting.md](troubleshooting.md) - common issues
+- [docs/responses-endpoint/prompt-injection.md](responses-endpoint/prompt-injection.md) - responses tool-call prompt injection matrix
 
 ## Contributing
 

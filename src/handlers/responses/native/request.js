@@ -190,14 +190,42 @@ const buildToolInjectionText = (tools, toolChoice) => {
   lines.push("Tool calling instructions:");
   lines.push("Only emit tool calls using <tool_call>...</tool_call>.");
   lines.push('Format: <tool_call>{"name":"TOOL_NAME","arguments":"{...}"}</tool_call>');
+  lines.push(
+    'Inside <tool_call>...</tool_call>, output ONLY a JSON object with keys "name" and "arguments".'
+  );
+  lines.push("Always emit <tool_call> blocks exactly as shown; the client executes them.");
+  lines.push(
+    "Do NOT call internal tools directly (shell, apply_patch, web_search, view_image); only emit <tool_call>."
+  );
+  lines.push(
+    "Read-only sandbox or approval restrictions do NOT prevent emitting <tool_call> output."
+  );
+  lines.push(
+    "Use EXACT parameter names from the schema; do NOT invent or rename keys."
+  );
+  lines.push('Do not add any extra characters before or after the JSON (no trailing ">", no code fences).');
+  lines.push("Use exactly one opening <tool_call> and one closing </tool_call> tag.");
+  lines.push("Output must be valid JSON. Do not add extra braces or trailing characters.");
+  lines.push(
+    "Do NOT wrap the JSON object in an array (no leading \"[\" or trailing \"]\")."
+  );
+  lines.push("Bad: <tool_call>[{\"name\":\"tool\",\"arguments\":\"{...}\"}]</tool_call>");
+  lines.push("Never repeat the closing tag.");
+  lines.push(
+    'Example (exact): <tool_call>{"name":"webSearch","arguments":"{\\"query\\":\\"example\\",\\"chatHistory\\":[]}"}<\/tool_call>'
+  );
   lines.push('The "arguments" field must be a JSON string.');
+  lines.push('If a tool has no parameters, use arguments "{}".');
+  lines.push("If no tool is needed, respond with plain text.");
 
   if (toolChoice === "none") {
     lines.push("Tool choice is none: never emit <tool_call>.");
+  } else if (toolChoice === "required") {
+    lines.push("Tool choice is required: you MUST emit at least one <tool_call>.");
   } else {
     const forcedName = resolveForcedToolChoiceName(toolChoice);
     if (forcedName) {
-      lines.push(`If you call a tool, it must be "${forcedName}".`);
+      lines.push(`Tool choice is forced: you MUST call "${forcedName}".`);
     }
   }
 
@@ -208,9 +236,103 @@ const buildToolInjectionText = (tools, toolChoice) => {
     );
   }
 
-  lines.push("Available tools:");
+  lines.push("Available tools (schema):");
   functionTools.forEach((tool) => {
     lines.push(`- ${tool.name}: ${formatToolSchema(tool.parameters)}`);
+  });
+
+  const sanitizeSchema = (schema) => {
+    if (schema && typeof schema === "object") {
+      if (Array.isArray(schema.oneOf) && schema.oneOf.length) return schema.oneOf[0];
+      if (Array.isArray(schema.anyOf) && schema.anyOf.length) return schema.anyOf[0];
+      if (Array.isArray(schema.allOf) && schema.allOf.length) return schema.allOf[0];
+    }
+    return schema;
+  };
+
+  const resolveSchemaType = (schema) => {
+    if (!schema || typeof schema !== "object") return "unknown";
+    const normalized = sanitizeSchema(schema) || {};
+    const type = normalized.type;
+    if (Array.isArray(type) && type.length) return type.join("|");
+    if (typeof type === "string" && type) return type;
+    if (normalized.properties) return "object";
+    if (normalized.items) return "array";
+    return "unknown";
+  };
+
+  const summarizeSchemaParameters = (schema) => {
+    const normalized = sanitizeSchema(schema);
+    if (!normalized || typeof normalized !== "object") {
+      return ["- (no parameters)"];
+    }
+    if (normalized.type !== "object" && !normalized.properties) {
+      return [`- (schema) ${formatToolSchema(normalized)}`];
+    }
+    const props = normalized.properties || {};
+    const propKeys = Object.keys(props);
+    if (!propKeys.length) {
+      return ["- (no parameters)"];
+    }
+    const required = new Set(
+      Array.isArray(normalized.required) ? normalized.required : []
+    );
+    return propKeys.map((key) => {
+      const propSchema = sanitizeSchema(props[key]) || {};
+      const requirement = required.has(key) ? "required" : "optional";
+      const type = resolveSchemaType(propSchema);
+      const description = asNonEmptyString(propSchema.description);
+      const suffix = description ? `: ${description}` : "";
+      return `- ${key} (${requirement}, ${type})${suffix}`;
+    });
+  };
+
+  const exampleForSchema = (schema, depth = 0) => {
+    if (depth > 2) return "example";
+    if (!schema || typeof schema !== "object") return "example";
+    if (schema.default !== undefined) return schema.default;
+    if (schema.example !== undefined) return schema.example;
+    if (Array.isArray(schema.examples) && schema.examples.length) return schema.examples[0];
+    if (schema.const !== undefined) return schema.const;
+    if (Array.isArray(schema.enum) && schema.enum.length) return schema.enum[0];
+    const normalized = sanitizeSchema(schema) || {};
+    const type = normalized.type;
+    if (Array.isArray(type) && type.length) {
+      const first = type.find((entry) => entry !== "null") ?? type[0];
+      return exampleForSchema({ ...normalized, type: first }, depth);
+    }
+    if (type === "array") {
+      const itemExample = exampleForSchema(normalized.items || {}, depth + 1);
+      return itemExample === undefined ? [] : [itemExample];
+    }
+    if (type === "object" || normalized.properties) {
+      const props = normalized.properties || {};
+      const example = {};
+      Object.keys(props).forEach((key) => {
+        example[key] = exampleForSchema(props[key], depth + 1);
+      });
+      return example;
+    }
+    if (type === "integer" || type === "number") return 0;
+    if (type === "boolean") return false;
+    if (type === "null") return null;
+    return "example";
+  };
+
+  const escapeExample = (value) =>
+    String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+
+  lines.push("Per-tool guidance and examples (schema-conformant):");
+  functionTools.forEach((tool) => {
+    const exampleArgs = JSON.stringify(exampleForSchema(tool.parameters) ?? {});
+    lines.push(`Tool: ${tool.name}`);
+    if (asNonEmptyString(tool.description)) {
+      lines.push(`Description: ${tool.description}`);
+    }
+    lines.push("Parameters:");
+    summarizeSchemaParameters(tool.parameters).forEach((line) => lines.push(line));
+    lines.push("Example tool_call:");
+    lines.push(`<tool_call>{"name":"${tool.name}","arguments":"${escapeExample(exampleArgs)}"}</tool_call>`);
   });
 
   return lines.join("\n");
@@ -230,6 +352,7 @@ export const normalizeResponsesRequest = (body = {}) => {
   }
 
   const items = [];
+  const developerInstructionsParts = [];
   let textLines = [];
   let lastRoleAnchor = null;
 
@@ -249,6 +372,13 @@ export const normalizeResponsesRequest = (body = {}) => {
     const normalized = text === undefined || text === null ? "" : String(text);
     pushTextLine(`[${role}] ${normalized}`.trimEnd());
     lastRoleAnchor = role;
+  };
+
+  const pushDeveloperInstruction = (text) => {
+    if (text === undefined || text === null) return;
+    const value = String(text).trim();
+    if (!value) return;
+    developerInstructionsParts.push(value);
   };
 
   const ensureRoleAnchorForImage = (role) => {
@@ -272,7 +402,57 @@ export const normalizeResponsesRequest = (body = {}) => {
     items.push({ type: "image", data: { image_url: url } });
   };
 
+  const appendDeveloperContent = (content, baseParam) => {
+    if (content === undefined || content === null) {
+      return;
+    }
+    if (typeof content === "string") {
+      pushDeveloperInstruction(content);
+      return;
+    }
+    if (Array.isArray(content)) {
+      content.forEach((part) => {
+        const param = baseParam;
+        if (!part || typeof part !== "object") {
+          throw new ResponsesJsonRpcNormalizationError(
+            invalidRequestBody(param, "content item must be an object")
+          );
+        }
+        const partType = String(part.type || "").toLowerCase();
+        if (partType === "input_text" || partType === "text") {
+          pushDeveloperInstruction(part.text ?? part.input_text ?? "");
+          return;
+        }
+        if (partType === "input_image") {
+          const url = resolveImageUrl(part.image_url);
+          if (!url) {
+            throw new ResponsesJsonRpcNormalizationError(
+              invalidRequestBody(param, "input_image.image_url must be a string")
+            );
+          }
+          pushDeveloperInstruction(`[image_url] ${url}`);
+          return;
+        }
+        throw new ResponsesJsonRpcNormalizationError(
+          invalidRequestBody(param, "unsupported input item type")
+        );
+      });
+      return;
+    }
+    if (content && typeof content === "object") {
+      if (typeof content.text === "string") {
+        pushDeveloperInstruction(content.text);
+        return;
+      }
+    }
+    pushDeveloperInstruction(String(content));
+  };
+
   const appendMessageContent = (role, content, baseParam) => {
+    if (role === "system" || role === "developer") {
+      appendDeveloperContent(content, baseParam);
+      return;
+    }
     if (content === undefined || content === null) {
       pushRoleText(role, "");
       return;
@@ -383,14 +563,14 @@ export const normalizeResponsesRequest = (body = {}) => {
     );
   }
 
-  const instructions = asNonEmptyString(body.instructions);
-  if (instructions) {
-    pushRoleText("system", instructions);
-  }
-
   const toolInjection = buildToolInjectionText(tools, toolChoice);
   if (toolInjection) {
-    pushRoleText("developer", toolInjection);
+    pushDeveloperInstruction(toolInjection);
+  }
+
+  const instructions = asNonEmptyString(body.instructions);
+  if (instructions) {
+    pushDeveloperInstruction(instructions);
   }
 
   if (body.input === undefined) {
@@ -407,8 +587,13 @@ export const normalizeResponsesRequest = (body = {}) => {
 
   flushText();
 
+  const developerInstructions = developerInstructionsParts.length
+    ? developerInstructionsParts.join("\n\n")
+    : undefined;
+
   return {
     instructions,
+    developerInstructions,
     inputItems: items,
     responseFormat,
     finalOutputJsonSchema,

@@ -47,7 +47,14 @@ const repairJsonPayload = (raw) => {
   if (typeof raw !== "string") return raw;
   const trimmed = raw.trim();
   if (!trimmed) return trimmed;
-  return trimmed.replace(/,\s*([}\]])/g, "$1");
+  let repaired = trimmed.replace(/,\s*([}\]])/g, "$1").replace(/>\s*$/, "");
+  if (repaired.endsWith("}}")) {
+    repaired = repaired.slice(0, -1);
+  }
+  if (repaired.startsWith("{") && repaired.endsWith("]")) {
+    repaired = repaired.slice(0, -1);
+  }
+  return repaired;
 };
 
 const resolveStrictMode = (name, { strictTools, strictFallback }) => {
@@ -235,8 +242,19 @@ const consumeBuffer = (state, incoming, options, { flush = false } = {}) => {
     if (state.inTag) {
       const closeIdx = buffer.indexOf(CLOSE_TAG);
       if (closeIdx === -1) {
-        state.tagContent += buffer;
-        buffer = "";
+        if (flush) {
+          state.tagContent += buffer;
+          buffer = "";
+          break;
+        }
+        const keep = longestSuffixPrefix(buffer, CLOSE_TAG);
+        if (keep > 0) {
+          state.tagContent += buffer.slice(0, buffer.length - keep);
+          buffer = buffer.slice(buffer.length - keep);
+        } else {
+          state.tagContent += buffer;
+          buffer = "";
+        }
         break;
       }
       state.tagContent += buffer.slice(0, closeIdx);
@@ -260,8 +278,23 @@ const consumeBuffer = (state, incoming, options, { flush = false } = {}) => {
 
   if (flush) {
     if (state.inTag) {
-      result.errors.push({ type: "unclosed_tag", message: "unterminated tool_call block" });
-      result.visibleTextDeltas.push(`${OPEN_TAG}${state.tagContent}`);
+      const parsed = parseToolCallPayload(state.tagContent, options);
+      if (parsed.call) {
+        result.parsedToolCalls.push(parsed.call);
+        result.errors.push({
+          type: "unclosed_tag_recovered",
+          message: "unterminated tool_call block recovered",
+        });
+      } else if (!parsed.fallbackText) {
+        result.errors.push({ type: "unclosed_tag", message: "unterminated tool_call block" });
+        result.visibleTextDeltas.push(`${OPEN_TAG}${state.tagContent}`);
+      }
+      if (parsed.fallbackText) {
+        result.visibleTextDeltas.push(parsed.fallbackText);
+      }
+      if (parsed.errors.length) {
+        result.errors.push(...parsed.errors);
+      }
       state.inTag = false;
       state.tagContent = "";
     }

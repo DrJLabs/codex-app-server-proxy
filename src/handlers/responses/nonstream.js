@@ -149,7 +149,7 @@ const buildToolParseOptions = (tools, toolChoice) => {
   }
 
   return {
-    enabled: allowedTools.size > 0,
+    enabled: mode !== "none",
     allowedTools,
     strictTools,
     toolSchemas,
@@ -290,9 +290,10 @@ export async function postResponsesNonStream(req, res) {
     }
   );
 
-  const { nativeTools } = splitResponsesTools(normalized.tools);
+  const { nativeTools, functionTools } = splitResponsesTools(normalized.tools);
+  const toolDefinitions = nativeTools.concat(functionTools);
   const capabilityCheck = await ensureResponsesCapabilities({
-    toolsRequested: nativeTools.length > 0,
+    toolsRequested: nativeTools.length > 0 || functionTools.length > 0,
   });
   if (!capabilityCheck.ok) {
     applyCors(req, res);
@@ -304,9 +305,9 @@ export async function postResponsesNonStream(req, res) {
   const fallbackMax = Number(CFG.PROXY_RESPONSES_DEFAULT_MAX_TOKENS || 0);
   const maxOutputTokens = normalized.maxOutputTokens ?? (fallbackMax > 0 ? fallbackMax : undefined);
   const toolsPayload = buildToolsPayload({
-    definitions: nativeTools.length ? nativeTools : undefined,
-    toolChoice: nativeTools.length ? normalized.toolChoice : undefined,
-    parallelToolCalls: nativeTools.length ? normalized.parallelToolCalls : undefined,
+    definitions: toolDefinitions.length ? toolDefinitions : undefined,
+    toolChoice: toolDefinitions.length ? normalized.toolChoice : undefined,
+    parallelToolCalls: toolDefinitions.length ? normalized.parallelToolCalls : undefined,
   });
 
   const turn = {
@@ -320,6 +321,9 @@ export async function postResponsesNonStream(req, res) {
   };
   if (Number.isInteger(nValue) && nValue > 0) turn.choiceCount = nValue;
   if (toolsPayload) turn.tools = toolsPayload;
+  if (normalized.developerInstructions) {
+    turn.developerInstructions = normalized.developerInstructions;
+  }
   if (normalized.finalOutputJsonSchema !== undefined) {
     turn.finalOutputJsonSchema = normalized.finalOutputJsonSchema;
   }
@@ -335,7 +339,7 @@ export async function postResponsesNonStream(req, res) {
     message.finalOutputJsonSchema = normalized.finalOutputJsonSchema;
   }
 
-  const ingressToolCount = nativeTools.length;
+  const ingressToolCount = toolDefinitions.length;
   const turnToolCount = countToolDefinitions(turn.tools);
   const messageToolCount = countToolDefinitions(message.tools);
   const toolsMismatch =

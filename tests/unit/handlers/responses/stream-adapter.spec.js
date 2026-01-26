@@ -425,6 +425,35 @@ describe("responses stream adapter", () => {
     expect(added?.data?.item?.name).toBe("search");
   });
 
+  it("parses <tool_call> blocks without tool definitions", async () => {
+    const { createResponsesStreamAdapter } = await import(
+      "../../../../src/handlers/responses/stream-adapter.js"
+    );
+
+    const res = buildRes();
+    const adapter = createResponsesStreamAdapter(res, { model: "gpt-test" });
+
+    adapter.handleEvent({
+      type: "text_delta",
+      delta:
+        "Hi <tool_call>{\"name\":\"search\",\"arguments\":\"{\\\"query\\\":\\\"x\\\"}\"}</tool_call> ok",
+      choiceIndex: 0,
+    });
+    await adapter.finalize();
+    await waitForWrites();
+
+    const entries = parseSSE(res.chunks.join(""));
+    const output = entries
+      .filter((entry) => entry.event === "response.output_text.delta")
+      .map((entry) => entry.data.delta)
+      .join("");
+    expect(output).toBe("Hi  ok");
+
+    const added = entries.find((entry) => entry.event === "response.output_item.added");
+    expect(added?.data?.item?.type).toBe("function_call");
+    expect(added?.data?.item?.name).toBe("search");
+  });
+
   it("adds monotonically increasing sequence_number values", async () => {
     const { createResponsesStreamAdapter } = await import(
       "../../../../src/handlers/responses/stream-adapter.js"

@@ -215,9 +215,10 @@ export async function postResponsesStream(req, res) {
     }
   );
 
-  const { nativeTools } = splitResponsesTools(normalized.tools);
+  const { nativeTools, functionTools } = splitResponsesTools(normalized.tools);
+  const toolDefinitions = nativeTools.concat(functionTools);
   const capabilityCheck = await ensureResponsesCapabilities({
-    toolsRequested: nativeTools.length > 0,
+    toolsRequested: nativeTools.length > 0 || functionTools.length > 0,
   });
   if (!capabilityCheck.ok) {
     applyCors(req, res);
@@ -255,9 +256,9 @@ export async function postResponsesStream(req, res) {
   const fallbackMax = Number(CFG.PROXY_RESPONSES_DEFAULT_MAX_TOKENS || 0);
   const maxOutputTokens = normalized.maxOutputTokens ?? (fallbackMax > 0 ? fallbackMax : undefined);
   const toolsPayload = buildToolsPayload({
-    definitions: nativeTools.length ? nativeTools : undefined,
-    toolChoice: nativeTools.length ? normalized.toolChoice : undefined,
-    parallelToolCalls: nativeTools.length ? normalized.parallelToolCalls : undefined,
+    definitions: toolDefinitions.length ? toolDefinitions : undefined,
+    toolChoice: toolDefinitions.length ? normalized.toolChoice : undefined,
+    parallelToolCalls: toolDefinitions.length ? normalized.parallelToolCalls : undefined,
   });
   const includeUsage = Boolean(originalBody?.stream_options?.include_usage);
 
@@ -272,6 +273,9 @@ export async function postResponsesStream(req, res) {
   };
   if (Number.isInteger(nValue) && nValue > 0) turn.choiceCount = nValue;
   if (toolsPayload) turn.tools = toolsPayload;
+  if (normalized.developerInstructions) {
+    turn.developerInstructions = normalized.developerInstructions;
+  }
   if (normalized.finalOutputJsonSchema !== undefined) {
     turn.finalOutputJsonSchema = normalized.finalOutputJsonSchema;
   }
@@ -288,7 +292,7 @@ export async function postResponsesStream(req, res) {
     message.finalOutputJsonSchema = normalized.finalOutputJsonSchema;
   }
 
-  const ingressToolCount = nativeTools.length;
+  const ingressToolCount = toolDefinitions.length;
   const turnToolCount = countToolDefinitions(turn.tools);
   const messageToolCount = countToolDefinitions(message.tools);
   const toolsMismatch =
@@ -323,7 +327,13 @@ export async function postResponsesStream(req, res) {
   let idleTimer = null;
   let keepalive = null;
 
-  const streamAdapter = createResponsesStreamAdapter(res, originalBody, req);
+  const adapterBody = {
+    ...originalBody,
+    tools: normalized.tools ?? originalBody.tools,
+    tool_choice: normalized.toolChoice ?? originalBody.tool_choice,
+    toolChoice: normalized.toolChoice ?? originalBody.toolChoice,
+  };
+  const streamAdapter = createResponsesStreamAdapter(res, adapterBody, req);
 
   const cleanupStream = () => {
     if (keepalive) {
