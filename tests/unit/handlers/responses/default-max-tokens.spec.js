@@ -141,7 +141,7 @@ describe("responses default max tokens", () => {
     expect(captured?.message?.max_output_tokens).toBeUndefined();
   });
 
-  it("skips backend tool capability checks for function tools", async () => {
+  it("checks backend tool capabilities for function tools", async () => {
     vi.resetModules();
     const { postResponsesStream } = await import("../../../../src/handlers/responses/stream.js");
 
@@ -154,7 +154,7 @@ describe("responses default max tokens", () => {
       makeRes()
     );
 
-    expect(ensureResponsesCapabilitiesMock).toHaveBeenCalledWith({ toolsRequested: false });
+    expect(ensureResponsesCapabilitiesMock).toHaveBeenCalledWith({ toolsRequested: true });
   });
 
   it("injects maxOutputTokens for non-stream requests when missing", async () => {
