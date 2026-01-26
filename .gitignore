@@ -44,6 +44,8 @@ docs/internal/
 # Generated infra (rendered from templates)
 infra/cloudflare/rht.json
 infra/cloudflare/rht_update.json
+rht.json
+rht_update.json
 workers/cors-preflight-logger/wrangler.toml
 scripts/validate-domain-scrub.sh
 
@@ -63,6 +65,9 @@ scripts/validate-domain-scrub.sh
 .codev/*.log
 .codev/*.ndjson
 .codev/auth.json
+.codev/models_cache.json
+.codev/tmp/
+.codev/*.bkp
 
 # Production Codex HOME (.codex-api): contains secrets at runtime
 # Ignore everything except placeholders so the path exists after checkout.
@@ -105,9 +110,13 @@ releases/*.latest.path
 # Local helper scripts
 scripts/watch-docs-sync.sh
 scripts/sync-docs-to-vault.sh
+setup-codex-cloud.sh
 .codex/
 docs/bmad/sprint-artifacts/
 docs/bmad/qa/artifacts/streaming-tool-call/*
+# Local compose overrides
+compose.dev.stack.yml
+docker-compose.local.example.yml
 # Allow structured logging schema module under src
 !src/services/logging/
 !src/services/logging/**
