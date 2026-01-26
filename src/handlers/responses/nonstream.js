@@ -58,6 +58,8 @@ const buildInvalidChoiceError = (value) =>
     "n",
     `n must be an integer between 1 and ${MAX_RESP_CHOICES}; received ${value}`
   );
+const buildUnsupportedChoiceError = (value) =>
+  invalidRequestBody("n", `n must be 1 for /v1/responses; received ${value}`, "n_unsupported");
 
 const normalizeChoiceCount = (raw) => {
   if (raw === undefined || raw === null) return { ok: true, value: 1 };
@@ -226,6 +228,12 @@ export async function postResponsesNonStream(req, res) {
     const choiceError = nError || buildInvalidChoiceError(originalBody?.n);
     applyCors(req, res);
     res.status(400).json(choiceError);
+    restoreOutputMode();
+    return;
+  }
+  if (nValue > 1) {
+    applyCors(req, res);
+    res.status(400).json(buildUnsupportedChoiceError(originalBody?.n));
     restoreOutputMode();
     return;
   }
@@ -426,12 +434,19 @@ export async function postResponsesNonStream(req, res) {
     if (removedEntries.length) {
       for (const entry of removedEntries) {
         const normalizedKey = normalizeMetadataKey(entry.key);
-        const signature = `${normalizedKey || ""}::${entry.raw || ""}`;
+        const rawValue = entry.raw !== undefined && entry.raw !== null ? String(entry.raw) : "";
+        const rawLength = rawValue ? rawValue.length : 0;
+        const rawHash = rawValue ? sha256(rawValue) : null;
+        const signature = `${normalizedKey || ""}::${rawHash || ""}::${rawLength}`;
         if (!signature.trim()) continue;
         if (seenSanitizedRemovalSignatures.has(signature)) continue;
         seenSanitizedRemovalSignatures.add(signature);
         if (normalizedKey) sanitizedMetadataSummary.keys.add(normalizedKey);
-        uniqueRemovedEntries.push({ ...entry, key: normalizedKey || entry.key });
+        uniqueRemovedEntries.push({
+          key: normalizedKey || entry.key,
+          raw_length: rawLength || undefined,
+          raw_hash: rawHash || undefined,
+        });
       }
       sanitizedMetadataSummary.count += uniqueRemovedEntries.length;
     }

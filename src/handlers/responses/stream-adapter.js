@@ -361,6 +361,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
         textParts: [],
         textDeltas: [],
         hasDelta: false,
+        mixedTextWarningEmitted: false,
         toolCalls: new Map(),
         toolCallOrdinals: new Map(),
       });
@@ -679,6 +680,25 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
 
   const emitTextDelta = (choiceState, choiceIndex, text) => {
     if (!isNonEmptyString(text)) return;
+    if (choiceState.textParts.length && !choiceState.mixedTextWarningEmitted) {
+      choiceState.mixedTextWarningEmitted = true;
+      logStructured(
+        {
+          component: "responses",
+          event: "responses_text_mixed",
+          level: "warn",
+          req_id: res?.locals?.req_id,
+          route: res?.locals?.routeOverride || RESPONSES_ROUTE,
+          mode: res?.locals?.modeOverride || res?.locals?.mode,
+          model: state.model || requestBody?.model,
+        },
+        {
+          choice_index: choiceIndex,
+          has_delta: true,
+          text_parts_seen: choiceState.textParts.length,
+        }
+      );
+    }
     if (!state.outputTextHasUseTool && text.toLowerCase().includes("<use_tool")) {
       state.outputTextHasUseTool = true;
     }
@@ -694,6 +714,25 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
 
   const emitTextPart = (choiceState, choiceIndex, text) => {
     if (!isNonEmptyString(text)) return;
+    if (choiceState.hasDelta && !choiceState.mixedTextWarningEmitted) {
+      choiceState.mixedTextWarningEmitted = true;
+      logStructured(
+        {
+          component: "responses",
+          event: "responses_text_mixed",
+          level: "warn",
+          req_id: res?.locals?.req_id,
+          route: res?.locals?.routeOverride || RESPONSES_ROUTE,
+          mode: res?.locals?.modeOverride || res?.locals?.mode,
+          model: state.model || requestBody?.model,
+        },
+        {
+          choice_index: choiceIndex,
+          has_delta: true,
+          text_deltas_seen: choiceState.textDeltas.length,
+        }
+      );
+    }
     choiceState.textParts.push(text);
     if (!choiceState.hasDelta) {
       emitTextDelta(choiceState, choiceIndex, text);

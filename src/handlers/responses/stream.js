@@ -56,6 +56,8 @@ const buildInvalidChoiceError = (value) =>
     "n",
     `n must be an integer between 1 and ${MAX_RESP_CHOICES}; received ${value}`
   );
+const buildUnsupportedChoiceError = (value) =>
+  invalidRequestBody("n", `n must be 1 for /v1/responses; received ${value}`, "n_unsupported");
 
 const normalizeChoiceCount = (raw) => {
   if (raw === undefined || raw === null) return { ok: true, value: 1 };
@@ -151,6 +153,12 @@ export async function postResponsesStream(req, res) {
     const choiceError = nError || buildInvalidChoiceError(originalBody?.n);
     applyCors(req, res);
     res.status(400).json(choiceError);
+    restoreOutputMode();
+    return;
+  }
+  if (nValue > 1) {
+    applyCors(req, res);
+    res.status(400).json(buildUnsupportedChoiceError(originalBody?.n));
     restoreOutputMode();
     return;
   }

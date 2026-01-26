@@ -183,6 +183,22 @@ afterEach(() => {
 });
 
 describe("responses stream handler", () => {
+  it("returns 400 when n is greater than 1", async () => {
+    const { postResponsesStream } = await import("../../../../src/handlers/responses/stream.js");
+    const req = makeReq({ input: "hello", model: "gpt-5.2", n: 2 });
+    const res = makeRes();
+
+    await postResponsesStream(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({ param: "n", code: "n_unsupported" }),
+      })
+    );
+    expect(createJsonRpcChildAdapterMock).not.toHaveBeenCalled();
+  });
+
   it("forwards function tools to backend tool payload", async () => {
     const definitions = [{ type: "function", function: { name: "lookup", parameters: {} } }];
     normalizeResponsesRequestMock.mockReturnValueOnce({

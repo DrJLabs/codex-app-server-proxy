@@ -209,6 +209,24 @@ describe("responses nonstream handler", () => {
     expect(createJsonRpcChildAdapterMock).not.toHaveBeenCalled();
   });
 
+  it("returns 400 when n is greater than 1", async () => {
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2", n: 2 });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({ param: "n", code: "n_unsupported" }),
+      })
+    );
+    expect(createJsonRpcChildAdapterMock).not.toHaveBeenCalled();
+  });
+
   it("returns 400 when model is missing", async () => {
     const { postResponsesNonStream } = await import(
       "../../../../src/handlers/responses/nonstream.js"
