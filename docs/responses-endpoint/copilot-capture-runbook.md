@@ -14,7 +14,7 @@ Goal: capture real Obsidian Copilot `/v1/responses` requests + streams and promo
 2. Restart the proxy.
 
 ## Capture scenarios
-- Non-stream request (simple prompt).
+- Non-stream request (simple prompt, optional).
 - Streaming request that triggers a tool call.
 
 Optional: add an edge-injected header to name files deterministically:
@@ -34,7 +34,7 @@ Optional: add an edge-injected header to name files deterministically:
 3. The script writes stable files:
    - `responses-stream-text.json`
    - `responses-stream-tool.json`
-   - `responses-nonstream.json` (only when captured)
+   - `responses-nonstream.json` (optional; only when captured)
 
 ## Validation
 - `npm run test:unit -- tests/unit/responses.copilot.capture.spec.js`
