@@ -41,6 +41,42 @@ If no tool is needed, respond with plain text.
 
 After the base block, the proxy adds scenario-specific lines and the tool manifest (see below).
 
+## Flow (request → injection → tools)
+
+This section describes how tool prompt injection relates to the tool definitions and how both flow through the request lifecycle:
+
+1) **Ingress normalization (`/v1/responses`)**
+   - `normalizeResponsesRequest` parses `tools` and `tool_choice` from the request.
+   - Only function tools (`type: "function"`) are used to build the injection block.
+   - Non-function tools are passed through but do **not** trigger tool-call injection text.
+
+2) **Injection generation (tool schema → developerInstructions)**
+   - The injection block is derived exclusively from the function tool list in the request:
+     - Base instructions
+     - Tool choice constraint line (if any)
+     - Tool schema manifest
+     - Per-tool examples
+   - The injection **does not modify** the tool list; it is advisory text only.
+   - Ordering inside `developerInstructions`:
+     1. tool injection block (when tools exist)
+     2. top-level `instructions`
+     3. `input` items with role `system` or `developer`
+
+3) **Forwarding to app-server**
+   - The normalized tool list is forwarded to app-server as `turn.tools`:
+     - `definitions` = the (normalized) function tools
+     - `choice` = normalized `tool_choice` (`auto`, `none`, `required`, or forced name)
+     - `parallelToolCalls` = normalized `parallel_tool_calls`
+   - The tool injection text is sent via `developerInstructions`, separate from user transcript.
+
+4) **Streaming parser configuration**
+   - The stream adapter uses the same request tool list to configure parsing:
+     - `allowedTools` = function tool names
+     - `strictTools`/`toolSchemas` = strict schema enforcement where requested
+     - If `tool_choice` is `none`, tool parsing is disabled.
+
+In short: **tools define both the model-facing injection text and the parser/runtime tool constraints**, but the injection text itself is only a behavioral hint; tool execution depends on parsed `<tool_call>` output and the tool registry built from the request.
+
 ## Tool manifest
 
 The injection ends with a tool manifest, one line per function tool:

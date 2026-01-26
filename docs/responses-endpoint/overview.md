@@ -27,7 +27,7 @@ The route is gated by `PROXY_ENABLE_RESPONSES` (default: `true`).
   `developerInstructions` for the app-server conversation.
 - When function tools are provided, the proxy injects a developer instructions block describing
   `<tool_call>` formatting rules, tool schemas, and `tool_choice` constraints (also via
-  `developerInstructions`).
+  `developerInstructions`). See `docs/responses-endpoint/prompt-injection.md` for the full flow.
 - `input_image` is mapped to JSON-RPC `image` items, with role markers emitted only when needed for deterministic attribution.
 - `previous_response_id` is accepted for compatibility but **never** echoed in responses.
 
