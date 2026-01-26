@@ -36,7 +36,6 @@ This folder is the canonical index for repository documentation. Update this fil
 - [`responses-endpoint/app-server-tools.md`](responses-endpoint/app-server-tools.md) — tool manifest limitations and MCP integration notes
 - [`responses-endpoint/obsidian-tool-call-simulation.md`](responses-endpoint/obsidian-tool-call-simulation.md) — OpenAI-parity tool-call simulation plan
 - [`responses-endpoint/prompt-injection.md`](responses-endpoint/prompt-injection.md) — `/v1/responses` tool-call prompt injection matrix
-- [`responses-api/obsidian-system-prompt-lur1PQG76dSpMd4FPZij2.md`](responses-api/obsidian-system-prompt-lur1PQG76dSpMd4FPZij2.md) — captured Obsidian developer prompt
 - [`reference/app-server-protocol.schema.json`](reference/app-server-protocol.schema.json) — JSON-RPC schema bundle (Codex app-server)
 - [`reference/app-server-schema-0.89-tools.md`](reference/app-server-schema-0.89-tools.md) — schema extract for tool support (Codex 0.89.0)
 
