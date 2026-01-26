@@ -2,7 +2,7 @@
 
 ## How the schema was obtained
 
-```
+```bash
 codex app-server generate-json-schema --out /tmp/app-server-schema
 ```
 

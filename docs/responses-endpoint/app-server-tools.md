@@ -15,7 +15,7 @@ As a result, `/v1/responses` requests that include `tools` are accepted by the p
 
 Exported schema (from the live CLI) confirms no `tools` field on the request params:
 
-```
+```bash
 codex app-server generate-json-schema --out /tmp/app-server-schema
 ```
 
@@ -54,7 +54,7 @@ To make Obsidian tools available to Codex via the app-server, they must be expos
 
 Example MCP config pattern (from Codex docs):
 
-```
+```toml
 # config.toml
 [mcp_servers.obsidian]
 command = "codex-stdio-to-uds"

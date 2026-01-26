@@ -1,4 +1,5 @@
 import { nanoid } from "nanoid";
+import { logStructured } from "../../../services/logging/schema.js";
 import { normalizeMessageId, normalizeResponseId } from "../shared.js";
 
 const mapUsage = (usage) => {
@@ -18,10 +19,18 @@ const mapUsage = (usage) => {
 const normalizeFunctionArguments = (args) => {
   if (typeof args === "string") return args;
   if (args === undefined) return "";
-  console.warn("[responses][native] function_call arguments not string; coercing", {
-    type: typeof args,
-  });
-  return String(args);
+  try {
+    return JSON.stringify(args ?? "");
+  } catch (error) {
+    logStructured(
+      { component: "responses.native", event: "function_call_arguments_coerce", level: "warn" },
+      {
+        type: typeof args,
+        message: error?.message,
+      }
+    );
+    return String(args ?? "");
+  }
 };
 
 const buildMessageOutputItem = ({ messageId, role, text }) => {

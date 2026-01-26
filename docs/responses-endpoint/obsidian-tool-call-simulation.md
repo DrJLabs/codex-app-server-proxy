@@ -40,7 +40,7 @@ The model is instructed to emit tool calls **as strict JSON blocks** that the pr
 }
 ```
 
-**Rules**
+### Rules
 - `id` is required and must be stable. The client will use it as `call_id` in the next request.
 - `name` must match one of the `tools[].function.name` provided by the client.
 - `arguments` must be a **string**, matching OpenAI Responses semantics.
@@ -49,7 +49,7 @@ The model is instructed to emit tool calls **as strict JSON blocks** that the pr
 ### Sentinel framing (optional but recommended)
 To avoid accidental parsing of ordinary JSON, wrap tool calls in explicit sentinels:
 
-```
+```text
 <tool_call>{...}</tool_call>
 ```
 

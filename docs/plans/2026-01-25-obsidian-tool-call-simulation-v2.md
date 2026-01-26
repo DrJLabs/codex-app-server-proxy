@@ -97,9 +97,10 @@ Stream:
 
 Backend must emit tool calls only as sentinel-wrapped JSON blocks:
 
-```
-<tool_call>{"name":"toolName","arguments":"{\"k\":\"v\"}"}</tool_call>
-```
+>
+> ```text
+> <tool_call>{"name":"toolName","arguments":"{\"k\":\"v\"}"}</tool_call>
+> ```
 
 Rules:
 - `name`: string, must match allowed tools for the request.

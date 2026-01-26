@@ -144,7 +144,7 @@ describe("responses stream adapter", () => {
     expect(outputDoneIndex).toBeGreaterThan(doneIndex);
   });
 
-  it("emits response.failed when onChunk throws", async () => {
+  it("emits response.failed when handleEvent encounters an error", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     createToolCallAggregator.mockReturnValue(
       buildAggregator({

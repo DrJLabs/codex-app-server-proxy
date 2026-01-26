@@ -229,7 +229,7 @@ git commit -m "feat: extend json-rpc input items for responses"
 ```
 
 **Acceptance**
-- `function_call_output` and `input_image` map through JSON-RPC without drops.\n+- If protocol supports message items, `message` input is preserved; otherwise role-prefixed flattening is used.
+- Ensure `function_call_output` and `input_image` map through JSON-RPC without drops; if the protocol supports message items, `message` input is preserved, otherwise role-prefixed flattening is used.
 
 ---
 

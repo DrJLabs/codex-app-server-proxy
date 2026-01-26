@@ -170,12 +170,7 @@ const makeRes = () => {
 };
 
 beforeEach(() => {
-  normalizeResponsesRequestMock.mockClear();
-  ensureResponsesCapabilitiesMock.mockClear();
-  runNativeResponsesMock.mockClear();
-  createJsonRpcChildAdapterMock.mockClear();
-  createResponsesStreamAdapterMock.mockClear();
-  setupStreamGuardMock.mockClear();
+  vi.clearAllMocks();
 });
 
 afterEach(() => {

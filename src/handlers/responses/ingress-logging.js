@@ -124,17 +124,11 @@ export const summarizeTools = (tools, { maxTypes = 10, maxNames = 20 } = {}) => 
   for (const tool of tools) {
     if (!tool || typeof tool !== "object") continue;
     const rawType = typeof tool.type === "string" ? tool.type.trim() : "";
-    const hasName =
-      typeof tool?.function?.name === "string"
-        ? Boolean(tool.function.name.trim())
-        : typeof tool?.name === "string"
-          ? Boolean(tool.name.trim())
-          : false;
-    if (hasName) namePresent += 1;
-    else nameMissing += 1;
     const name = typeof tool?.function?.name === "string" ? tool.function.name.trim() : "";
     const fallback = !name && typeof tool?.name === "string" ? tool.name.trim() : "";
     const resolvedName = name || fallback;
+    if (resolvedName) namePresent += 1;
+    else nameMissing += 1;
     if (resolvedName) names.push(resolvedName);
     if (rawType) types.push(rawType.toLowerCase());
     else if (tool?.function || tool?.fn || typeof tool?.name === "string") {

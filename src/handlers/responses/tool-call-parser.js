@@ -47,10 +47,13 @@ const repairJsonPayload = (raw) => {
   if (typeof raw !== "string") return raw;
   const trimmed = raw.trim();
   if (!trimmed) return trimmed;
+  // Strip trailing commas and stray ">" artifacts that models sometimes emit.
   let repaired = trimmed.replace(/,\s*([}\]])/g, "$1").replace(/>\s*$/, "");
+  // Some models emit an extra closing brace.
   if (repaired.endsWith("}}")) {
     repaired = repaired.slice(0, -1);
   }
+  // Some models wrap tool calls in arrays and leak a trailing closing bracket.
   if (repaired.startsWith("{") && repaired.endsWith("]")) {
     repaired = repaired.slice(0, -1);
   }

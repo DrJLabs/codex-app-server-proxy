@@ -15,7 +15,7 @@ const SECRET_HEADERS = new Set([
 const REDACTED = "[REDACTED]";
 const TRUNCATION_SUFFIX = "…<truncated>";
 const REDACT_ENABLED =
-  String(process.env.PROXY_TRACE_REDACT ?? "true")
+  String(process.env.PROXY_LOG_REDACT ?? process.env.PROXY_TRACE_REDACT ?? "true")
     .trim()
     .toLowerCase() !== "false";
 const SENSITIVE_BODY_KEYS = new Set([

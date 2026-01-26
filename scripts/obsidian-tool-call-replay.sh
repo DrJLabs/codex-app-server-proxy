@@ -3,8 +3,6 @@ set -euo pipefail
 
 URL="${OBSIDIAN_REPLAY_URL:-http://localhost:11435/v1/responses}"
 API_KEY="${PROXY_API_KEY:-}"
-MODEL="${OBSIDIAN_REPLAY_MODEL:-gpt-5.2}"
-QUERY="${OBSIDIAN_REPLAY_QUERY:-Kingston, TN weather today}"
 DRY_RUN="${OBSIDIAN_REPLAY_DRY_RUN:-}"
 
 if [[ -z "${API_KEY}" ]]; then

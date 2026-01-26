@@ -484,7 +484,21 @@ export async function postResponsesStream(req, res) {
       op: { type: "user_input", items: [{ type: "text", text: prompt }] },
     };
     child.stdin.write(JSON.stringify(submission) + "\n");
-  } catch {}
+  } catch (error) {
+    logStructured(
+      {
+        component: "responses",
+        event: "responses_stream_submit_failed",
+        level: "warn",
+        req_id: reqId,
+        route: "/v1/responses",
+        mode: "responses_stream",
+      },
+      {
+        message: error?.message,
+      }
+    );
+  }
 
   try {
     await Promise.race([

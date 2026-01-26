@@ -19,6 +19,8 @@ describe("obsidian tool-call replay script", () => {
         OBSIDIAN_REPLAY_QUERY: "Test Query",
       },
       encoding: "utf8",
+      timeout: 5000,
+      maxBuffer: 1024 * 1024,
     });
 
     const payload = JSON.parse(output);
