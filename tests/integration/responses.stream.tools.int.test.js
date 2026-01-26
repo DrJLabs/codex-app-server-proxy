@@ -12,9 +12,7 @@ beforeAll(async () => {
     PROXY_PROTECT_MODELS: "false",
     CODEX_BIN: "scripts/fake-codex-jsonrpc.js",
     FAKE_CODEX_MODE: "textual_tool_tail",
-    PROXY_STOP_AFTER_TOOLS: "true",
-    PROXY_STOP_AFTER_TOOLS_MODE: "first",
-    PROXY_RESPONSES_OUTPUT_MODE: "obsidian-xml",
+    PROXY_RESPONSES_OUTPUT_MODE: "openai-json",
     PROXY_SSE_KEEPALIVE_MS: "0",
   });
   PORT = server.PORT;
@@ -48,14 +46,14 @@ const collectFinalText = (entries) => {
     .join("\n");
 };
 
-test("stop-after-tools cuts trailing text for responses streaming", async () => {
+test("responses streaming preserves textual tool tail in openai-json mode", async () => {
   const res = await fetch(`http://127.0.0.1:${PORT}/v1/responses?stream=true`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: "Bearer test-sk-ci" },
     body: JSON.stringify({
       model: "codex-5",
       stream: true,
-      messages: [{ role: "user", content: "hi" }],
+      input: "hi",
     }),
   });
 
@@ -64,9 +62,9 @@ test("stop-after-tools cuts trailing text for responses streaming", async () => 
   const entries = parseSSE(raw);
   const deltas = collectDeltas(entries);
   expect(deltas).toContain("<use_tool>");
-  expect(deltas).not.toContain("AFTER_TOOL_TEXT");
+  expect(deltas).toContain("AFTER_TOOL_TEXT");
 
   const finalText = collectFinalText(entries);
   expect(finalText).toContain("<use_tool>");
-  expect(finalText).not.toContain("AFTER_TOOL_TEXT");
+  expect(finalText).toContain("AFTER_TOOL_TEXT");
 });

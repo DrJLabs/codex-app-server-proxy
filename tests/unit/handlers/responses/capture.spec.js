@@ -27,6 +27,15 @@ vi.mock("../../../../src/config/index.js", () => ({
 
 vi.mock("../../../../src/handlers/responses/ingress-logging.js", () => ({
   summarizeResponsesIngress: (...args) => summarizeResponsesIngressMock(...args),
+  summarizeTools: vi.fn(() => ({
+    tool_count: 0,
+    tool_types: [],
+    tool_types_truncated: false,
+    tool_names: [],
+    tool_names_truncated: false,
+    tool_function_name_present_count: 0,
+    tool_function_name_missing_count: 0,
+  })),
 }));
 
 vi.mock("../../../../src/lib/capture/sanitize.js", async () => {

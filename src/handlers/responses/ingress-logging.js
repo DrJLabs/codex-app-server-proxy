@@ -105,6 +105,49 @@ const summarizeCandidateIdFields = (body, { maxFields = 10 } = {}) => {
   };
 };
 
+export const summarizeTools = (tools, { maxTypes = 10, maxNames = 20 } = {}) => {
+  if (!Array.isArray(tools)) {
+    return {
+      tool_count: 0,
+      tool_types: [],
+      tool_types_truncated: false,
+      tool_names: [],
+      tool_names_truncated: false,
+      tool_function_name_present_count: 0,
+      tool_function_name_missing_count: 0,
+    };
+  }
+  const types = [];
+  const names = [];
+  let namePresent = 0;
+  let nameMissing = 0;
+  for (const tool of tools) {
+    if (!tool || typeof tool !== "object") continue;
+    const rawType = typeof tool.type === "string" ? tool.type.trim() : "";
+    const name = typeof tool?.function?.name === "string" ? tool.function.name.trim() : "";
+    const fallback = !name && typeof tool?.name === "string" ? tool.name.trim() : "";
+    const resolvedName = name || fallback;
+    if (resolvedName) namePresent += 1;
+    else nameMissing += 1;
+    if (resolvedName) names.push(resolvedName);
+    if (rawType) types.push(rawType.toLowerCase());
+    else if (tool?.function || tool?.fn || typeof tool?.name === "string") {
+      types.push("function");
+    }
+  }
+  const uniq = Array.from(new Set(types)).sort();
+  const uniqNames = Array.from(new Set(names)).sort();
+  return {
+    tool_count: tools.length,
+    tool_types: uniq.slice(0, Math.max(0, maxTypes)),
+    tool_types_truncated: uniq.length > maxTypes,
+    tool_names: uniqNames.slice(0, Math.max(0, maxNames)),
+    tool_names_truncated: uniqNames.length > maxNames,
+    tool_function_name_present_count: namePresent,
+    tool_function_name_missing_count: nameMissing,
+  };
+};
+
 const resolveInputItems = (body) => {
   const input = body?.input;
   if (Array.isArray(input)) return input;
@@ -239,6 +282,7 @@ export function summarizeResponsesIngress(body = {}, req = null) {
   const metadataSummary = summarizeKeys(body?.metadata, { maxKeys: 25 });
   const inputMetadataKeyList = Array.from(inputMetadataKeys).sort();
   const sessionKeyRe = /(session|conversation|thread|chat|idempotency)/i;
+  const toolSummary = summarizeTools(body?.tools, { maxTypes: 10 });
 
   return {
     has_messages: Array.isArray(body?.messages) && body.messages.length > 0,
@@ -263,6 +307,13 @@ export function summarizeResponsesIngress(body = {}, req = null) {
     has_tools: Array.isArray(body?.tools) && body.tools.length > 0,
     has_tool_choice: body?.tool_choice !== undefined,
     has_previous_response_id: isNonEmptyString(body?.previous_response_id),
+    tool_count: toolSummary.tool_count,
+    tool_types: toolSummary.tool_types,
+    tool_types_truncated: toolSummary.tool_types_truncated,
+    tool_names: toolSummary.tool_names,
+    tool_names_truncated: toolSummary.tool_names_truncated,
+    tool_function_name_present_count: toolSummary.tool_function_name_present_count,
+    tool_function_name_missing_count: toolSummary.tool_function_name_missing_count,
     has_tool_output_items: hasToolOutputItems,
     tool_output_bytes_total: hasToolOutputItems
       ? toolOutputBytesKnown

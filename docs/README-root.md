@@ -7,6 +7,7 @@ Goal: let any OpenAI Responses client (SDKs, IDEs, curl) talk to Codex CLI as if
 ## Features
 
 - OpenAI-compatible endpoints: `/v1/responses` (primary), `/v1/chat/completions` (compat), `/v1/models`.
+- `/v1/responses` uses native Responses semantics: `input`/`instructions` only (no `messages`) and `function_call` output items (with `call_id`).
 - Streaming SSE with role-first deltas and `[DONE]` termination.
 - Output modes for different clients (`openai-json` for Responses, `obsidian-xml` for Copilot).
 - Deterministic JSON-RPC shim for CI/offline dev (`scripts/fake-codex-jsonrpc.js`).
@@ -102,11 +103,26 @@ See [external/README.md](../external/README.md) for details.
 - [docs/getting-started.md](getting-started.md) - first run walkthroughs
 - [docs/local-development.md](local-development.md) - local workflows (Node vs shim vs compose)
 - [docs/api/overview.md](api/overview.md) - endpoint overview + curl examples
+- [docs/api/responses.md](api/responses.md) - `/v1/responses` usage notes
+- [docs/api/chat-completions.md](api/chat-completions.md) - `/v1/chat/completions` usage notes
 - [docs/configuration.md](configuration.md) - environment variables and defaults
+- [docs/deployment/dev-stack.md](deployment/dev-stack.md) - dev stack compose
 - [docs/deployment/production.md](deployment/production.md) - production compose + Traefik
 - [docs/ops/runbooks.md](ops/runbooks.md) - smoke, snapshot, rollback, backup
 - [docs/observability.md](observability.md) - logs, metrics, tracing
+- [docs/reference/config-matrix.md](reference/config-matrix.md) - environment/mount matrix
 - [docs/troubleshooting.md](troubleshooting.md) - common issues
+- [docs/openai-endpoint-golden-parity.md](openai-endpoint-golden-parity.md) - parity contract
+- [docs/responses-endpoint/overview.md](responses-endpoint/overview.md) - `/v1/responses` implementation notes
+- [docs/responses-endpoint/app-server-tools.md](responses-endpoint/app-server-tools.md) - tool manifest limitations
+- [docs/responses-endpoint/obsidian-tool-call-simulation.md](responses-endpoint/obsidian-tool-call-simulation.md) - OpenAI-parity tool-call simulation
+- [docs/responses-endpoint/prompt-injection.md](responses-endpoint/prompt-injection.md) - responses tool-call prompt injection matrix
+- [docs/responses-api/obsidian-system-prompt-rTJBYn4-dDSccFvZ6sOyb.md](responses-api/obsidian-system-prompt-rTJBYn4-dDSccFvZ6sOyb.md) - ingress evidence (system prompt)
+- [docs/responses-api/obsidian-system-prompt-lur1PQG76dSpMd4FPZij2.md](responses-api/obsidian-system-prompt-lur1PQG76dSpMd4FPZij2.md) - captured developer prompt
+- [docs/reference/app-server-schema-0.89-tools.md](reference/app-server-schema-0.89-tools.md) - app-server tools schema
+- [docs/app-server-migration/](app-server-migration/) - JSON-RPC schema exports + migration notes
+- [docs/logging-gaps/README.md](logging-gaps/README.md) - observability gap tracker
+- [docs/plans/2026-01-25-obsidian-tool-call-simulation-v2.md](plans/2026-01-25-obsidian-tool-call-simulation-v2.md) - tool-call simulation v2 plan
 
 ## Contributing
 

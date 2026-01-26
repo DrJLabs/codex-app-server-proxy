@@ -14,6 +14,10 @@ const SECRET_HEADERS = new Set([
 
 const REDACTED = "[REDACTED]";
 const TRUNCATION_SUFFIX = "…<truncated>";
+const REDACT_ENABLED =
+  String(process.env.PROXY_LOG_REDACT ?? process.env.PROXY_TRACE_REDACT ?? "true")
+    .trim()
+    .toLowerCase() !== "false";
 const SENSITIVE_BODY_KEYS = new Set([
   "auth_url",
   "authurl",
@@ -56,11 +60,13 @@ const safeToString = (value) => {
 };
 
 const redactInlineAuth = (value) => {
+  if (!REDACT_ENABLED) return value;
   if (!value || typeof value !== "string") return value;
   return value.replace(INLINE_AUTH_PATTERN, (_match, key) => `${key}=${REDACTED}`);
 };
 
 const redactSensitiveFields = (value, key = "") => {
+  if (!REDACT_ENABLED) return value;
   if (value === null || value === undefined) return value;
   const normalizedKey = String(key || "").toLowerCase();
   if (normalizedKey && SENSITIVE_BODY_KEYS.has(normalizedKey)) {
@@ -83,7 +89,7 @@ export function sanitizeHeaders(headers = {}) {
   for (const [keyRaw, value] of Object.entries(headers)) {
     const key = String(keyRaw || "").toLowerCase();
     if (!key) continue;
-    if (SECRET_HEADERS.has(key)) {
+    if (REDACT_ENABLED && SECRET_HEADERS.has(key)) {
       result[key] = REDACTED;
       continue;
     }

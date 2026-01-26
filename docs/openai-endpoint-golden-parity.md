@@ -37,7 +37,7 @@ Use these to resolve any ambiguities; they are the primary, authoritative refere
 
 | Endpoint                    | Status                 | Primary use                                                    | Notes                                                                                                               |
 | --------------------------- | ---------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `POST /v1/responses`        | **Primary**            | Text generation, tools, structured output, **typed streaming** | The recommended path for new builds; supports multi‑turn via `previous_response_id`. citeturn2search1turn5view0 |
+| `POST /v1/responses`        | **Primary**            | Text generation, tools, structured output, **typed streaming** | Recommended for new builds; this proxy accepts `previous_response_id` but does not persist/echo it. citeturn2search1turn5view0 |
 | `POST /v1/chat/completions` | **Supported (legacy)** | Chat messages array + function calling                         | Still widely used; OpenAI recommends starting new work on **Responses**. citeturn5view0turn2search3             |
 
 ---
@@ -69,7 +69,7 @@ Authorization: Bearer $OPENAI_API_KEY
 | `temperature`, `top_p` | number      | Sampling controls. citeturn2search0                                                            |
 | `tools`                | array       | Built‑in tools or **custom functions** (JSON Schema definitions). citeturn2search6turn17view0 |
 | `tool_choice`          | enum/object | `auto`/`none`/specific function selection. citeturn17view0                                     |
-| `previous_response_id` | string      | Links a new turn to the last response for **server‑side state**. citeturn2search1              |
+| `previous_response_id` | string      | Links a new turn to the last response for OpenAI server-side state; this proxy accepts it but does not persist/echo. citeturn2search1              |
 | `store`                | boolean     | Opts server‑side storage in/out for tracing/evals. citeturn2search1                            |
 | `stream`               | boolean     | Enable SSE **typed events** stream. citeturn5view0                                             |
 
@@ -271,7 +271,7 @@ data: [DONE]
 | `max_tokens`                     | `max_output_tokens`        | Semantics unchanged. citeturn2search3                      |
 | `tools` (functions)              | `tools` + `tool_choice`    | JSON Schema functions supported in both. citeturn17view0   |
 | `stream: true`                   | `stream: true`             | SSE in both; **typed events** in Responses. citeturn5view0 |
-| (n/a)                            | `previous_response_id`     | Optional server‑side conversation state. citeturn2search1  |
+| (n/a)                            | `previous_response_id`     | Optional OpenAI server-side conversation state (proxy accepts but is stateless). citeturn2search1  |
 
 > For larger migrations, see the **Completions → Responses Migration Pack**. citeturn21search0
 

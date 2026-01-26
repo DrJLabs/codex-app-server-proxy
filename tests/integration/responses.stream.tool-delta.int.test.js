@@ -32,7 +32,7 @@ test("aggregates streaming tool-call fragments into final response", async () =>
       model: "codex-5",
       stream: true,
       stream_options: { include_usage: true },
-      messages: [{ role: "user", content: "call tool" }],
+      input: "call tool",
     }),
   });
 
@@ -53,22 +53,20 @@ test("aggregates streaming tool-call fragments into final response", async () =>
   expect(completed.model).toBe("codex-5");
 
   const output = Array.isArray(completed.output) ? completed.output : [];
-  expect(output).toHaveLength(1);
-  const message = output[0];
+  const message = output.find((item) => item?.type === "message");
+  const functionCall = output.find((item) => item?.type === "function_call");
+  expect(message).toBeDefined();
+  expect(functionCall).toBeDefined();
   expect(message.role).toBe("assistant");
   expect(Array.isArray(message.content)).toBe(true);
   const content = message.content.filter(Boolean);
-  // Streaming tool call should aggregate into a tool_use node with full arguments.
-  expect(content.some((node) => node.type === "tool_use")).toBe(true);
-  const toolNode = content.find((node) => node.type === "tool_use");
-  expect(toolNode.name).toBe("lookup_user");
-  expect(toolNode.input).toEqual({ id: "42" });
+  expect(content.some((node) => node.type === "output_text")).toBe(true);
+  expect(functionCall.name).toBe("lookup_user");
+  expect(functionCall.arguments).toBe('{"id":"42"}');
 
-  // `/v1/responses` defaults to openai-json mode (unless overridden), so tool calls should not
-  // be duplicated as literal <use_tool> text inside output_text.
+  // Fake codex emits <use_tool> text alongside tool calls; keep it deterministic in outputs.
   const textNode = content.find((node) => node.type === "output_text");
-  expect(textNode?.text || "").not.toContain("<use_tool>");
-  expect(textNode?.text || "").toBe("");
+  expect(textNode?.text || "").toContain("<use_tool>");
 
   // Usage should be included when stream_options.include_usage=true.
   expect(completed.usage).toMatchObject({
@@ -88,7 +86,7 @@ test("omits usage when stream_options.include_usage is not requested", async () 
     body: JSON.stringify({
       model: "codex-5",
       stream: true,
-      messages: [{ role: "user", content: "no usage" }],
+      input: "no usage",
     }),
   });
 

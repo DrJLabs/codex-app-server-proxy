@@ -21,7 +21,6 @@ const PLACEHOLDER_CREATED = "<timestamp>";
 const RESP_PLACEHOLDER_ID = "<dynamic-response-id>";
 const RESP_PLACEHOLDER_MSG_ID = "<dynamic-response-message-id>";
 const RESP_PLACEHOLDER_TOOL_ID = "<dynamic-response-tool-id>";
-const RESP_PLACEHOLDER_PREVIOUS_ID = "<dynamic-previous-response-id>";
 
 const CODEX_CLI_VERSION = codexPkg?.version ?? "unknown";
 
@@ -219,26 +218,23 @@ export function sanitizeResponsesNonStream(payload) {
   if (typeof payload !== "object" || payload === null) return payload;
   const clone = structuredClone(payload);
   clone.id = RESP_PLACEHOLDER_ID;
+  if (clone.created !== undefined) {
+    clone.created = PLACEHOLDER_CREATED;
+  }
   if (Array.isArray(clone.output)) {
     clone.output = clone.output.map((item) => {
       if (!item || typeof item !== "object") return item;
       const next = structuredClone(item);
-      next.id = RESP_PLACEHOLDER_MSG_ID;
-      if (Array.isArray(next.content)) {
-        next.content = next.content.map((contentItem) => {
-          if (!contentItem || typeof contentItem !== "object") return contentItem;
-          const contentClone = structuredClone(contentItem);
-          if (contentClone.type === "tool_use" && contentClone.id) {
-            contentClone.id = RESP_PLACEHOLDER_TOOL_ID;
-          }
-          return contentClone;
-        });
+      if (next.type === "function_call") {
+        next.id = RESP_PLACEHOLDER_TOOL_ID;
+        if (next.call_id) {
+          next.call_id = RESP_PLACEHOLDER_TOOL_ID;
+        }
+      } else {
+        next.id = RESP_PLACEHOLDER_MSG_ID;
       }
       return next;
     });
-  }
-  if (clone.previous_response_id) {
-    clone.previous_response_id = RESP_PLACEHOLDER_PREVIOUS_ID;
   }
   return clone;
 }
@@ -277,6 +273,13 @@ export function sanitizeResponsesStreamTranscript(entries) {
         if (clone.data.item && typeof clone.data.item === "object" && clone.data.item.id) {
           clone.data.item.id = RESP_PLACEHOLDER_TOOL_ID;
         }
+        if (
+          clone.data.item &&
+          typeof clone.data.item === "object" &&
+          typeof clone.data.item.call_id === "string"
+        ) {
+          clone.data.item.call_id = RESP_PLACEHOLDER_TOOL_ID;
+        }
       }
       if (clone.event === "response.completed" && clone.data?.response) {
         clone.data.response = sanitizeResponsesNonStream(clone.data.response);
@@ -305,7 +308,6 @@ export async function saveResponsesTranscript(filename, payload) {
 const REQUIRED_RESPONSES_TRANSCRIPTS = [
   "nonstream-minimal.json",
   "nonstream-tool-call.json",
-  "nonstream-previous-response.json",
   "streaming-text.json",
   "streaming-tool-call.json",
 ];
@@ -327,6 +329,5 @@ export {
   RESP_PLACEHOLDER_ID,
   RESP_PLACEHOLDER_MSG_ID,
   RESP_PLACEHOLDER_TOOL_ID,
-  RESP_PLACEHOLDER_PREVIOUS_ID,
   REQUIRED_RESPONSES_TRANSCRIPTS,
 };

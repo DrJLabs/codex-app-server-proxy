@@ -10,13 +10,11 @@ describe("responses non-stream contract", () => {
   let serverCtx;
   let minimalTranscript;
   let toolCallTranscript;
-  let chainedTranscript;
 
   beforeAll(async () => {
     ensureResponsesTranscripts();
     minimalTranscript = await loadResponsesTranscript("nonstream-minimal.json");
     toolCallTranscript = await loadResponsesTranscript("nonstream-tool-call.json");
-    chainedTranscript = await loadResponsesTranscript("nonstream-previous-response.json");
     serverCtx = await startServer({ CODEX_BIN: "scripts/fake-codex-jsonrpc.js" });
   }, 10_000);
 
@@ -36,6 +34,8 @@ describe("responses non-stream contract", () => {
     });
     expect(res.ok).toBe(true);
     const payload = await res.json();
+    expect(payload.object).toBe("response");
+    expect(typeof payload.created).toBe("number");
     const sanitized = sanitizeResponsesNonStream(payload);
     expect(sanitized).toEqual(expected);
   });
@@ -57,26 +57,11 @@ describe("responses non-stream contract", () => {
       });
       expect(res.ok).toBe(true);
       const payload = await res.json();
+      expect(payload.output.some((item) => item?.type === "function_call")).toBe(true);
       const sanitized = sanitizeResponsesNonStream(payload);
       expect(sanitized).toEqual(expected);
     } finally {
       await stopServer(toolServer.child);
     }
-  });
-
-  test("previous_response_id is preserved and sanitized", async () => {
-    const { request, response: expected } = chainedTranscript;
-    const res = await fetch(`http://127.0.0.1:${serverCtx.PORT}/v1/responses`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer test-sk-ci",
-      },
-      body: JSON.stringify(request),
-    });
-    expect(res.ok).toBe(true);
-    const payload = await res.json();
-    const sanitized = sanitizeResponsesNonStream(payload);
-    expect(sanitized).toEqual(expected);
   });
 });

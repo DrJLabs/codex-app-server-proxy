@@ -48,17 +48,6 @@ test.describe("Responses contract baselines", () => {
     }
   });
 
-  test("non-stream previous_response_id is preserved", async ({ request }) => {
-    const transcript = await loadResponsesTranscript("nonstream-previous-response.json");
-    const response = await request.post("/v1/responses", {
-      data: transcript.request,
-    });
-    expect(response.ok()).toBeTruthy();
-    const payload = await response.json();
-    const sanitized = sanitizeResponsesNonStream(payload);
-    expect(sanitized).toEqual(transcript.response);
-  });
-
   test("streaming SSE matches transcript", async ({ request }) => {
     const transcript = await loadResponsesTranscript("streaming-text.json");
     const response = await request.fetch("/v1/responses", {

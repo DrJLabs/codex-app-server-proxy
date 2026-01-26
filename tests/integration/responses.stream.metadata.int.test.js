@@ -85,7 +85,7 @@ test("sanitizes streaming metadata when toggle enabled", async () => {
     body: JSON.stringify({
       model: "codex-5",
       stream: true,
-      messages: [{ role: "user", content: "hello" }],
+      input: "hello",
       stream_options: { include_usage: true },
     }),
   });
@@ -171,7 +171,7 @@ test("retains streaming metadata when toggle disabled", async () => {
     body: JSON.stringify({
       model: "codex-5",
       stream: true,
-      messages: [{ role: "user", content: "hello" }],
+      input: "hello",
       stream_options: { include_usage: true },
     }),
   });

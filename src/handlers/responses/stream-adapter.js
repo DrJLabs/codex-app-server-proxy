@@ -1,6 +1,7 @@
-import { nanoid } from "nanoid";
-import { normalizeResponseId, convertChatResponseToResponses } from "./shared.js";
+import { normalizeResponseId } from "./shared.js";
+import { buildResponsesEnvelope } from "./native/envelope.js";
 import { createToolCallAggregator } from "../../lib/tool-call-aggregator.js";
+import { createToolCallParser } from "./tool-call-parser.js";
 import { recordResponsesSseEvent } from "../../services/metrics/index.js";
 import { writeSseChunk } from "../../services/sse.js";
 import { appendProtoEvent, LOG_PROTO } from "../../dev-logging.js";
@@ -64,8 +65,87 @@ const getDeltaBytes = (payload) => {
   return delta ? Buffer.byteLength(delta, "utf8") : null;
 };
 
+const asTrimmedString = (value) => (typeof value === "string" ? value.trim() : "");
+
+const normalizeFunctionTool = (tool) => {
+  if (!tool || typeof tool !== "object") return null;
+  const rawType = typeof tool.type === "string" ? tool.type.trim().toLowerCase() : "";
+  const fn = tool.function || tool.fn;
+  const name = asTrimmedString(fn?.name) || asTrimmedString(tool?.name);
+  if (rawType && rawType !== "function" && !fn && !name) return null;
+  if (!name) return null;
+  return {
+    name,
+    description: fn?.description ?? tool.description,
+    parameters: fn?.parameters ?? tool.parameters,
+    strict: fn?.strict ?? tool.strict,
+  };
+};
+
+const normalizeToolChoice = (value) => {
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "none" || normalized === "auto" || normalized === "required") {
+      return { mode: normalized, forcedName: null };
+    }
+  }
+  if (value && typeof value === "object") {
+    const name =
+      asTrimmedString(value.name) ||
+      asTrimmedString(value.function?.name) ||
+      asTrimmedString(value.fn?.name);
+    if (name) {
+      return { mode: "forced", forcedName: name };
+    }
+  }
+  return { mode: "auto", forcedName: null };
+};
+
+const buildToolRegistry = (requestBody = {}) => {
+  const rawTools = Array.isArray(requestBody?.tools) ? requestBody.tools : [];
+  const functionTools = rawTools.map(normalizeFunctionTool).filter(Boolean);
+  const allowedTools = new Set(functionTools.map((tool) => tool.name));
+  const strictTools = new Map(functionTools.map((tool) => [tool.name, tool.strict === true]));
+  const toolSchemas = new Map(functionTools.map((tool) => [tool.name, tool.parameters ?? null]));
+  const toolChoice = normalizeToolChoice(requestBody?.tool_choice ?? requestBody?.toolChoice);
+
+  if (!functionTools.length) {
+    return { allowedTools, strictTools, toolSchemas, toolChoice, enabled: false };
+  }
+
+  if (toolChoice.mode === "none") {
+    return { allowedTools: new Set(), strictTools, toolSchemas, toolChoice, enabled: false };
+  }
+
+  if (toolChoice.mode === "forced" && toolChoice.forcedName) {
+    return {
+      allowedTools: new Set([toolChoice.forcedName]),
+      strictTools,
+      toolSchemas,
+      toolChoice,
+      enabled: true,
+    };
+  }
+
+  return {
+    allowedTools,
+    strictTools,
+    toolSchemas,
+    toolChoice,
+    enabled: toolChoice.mode !== "none",
+  };
+};
+
 export function createResponsesStreamAdapter(res, requestBody = {}, req = null) {
   const toolCallAggregator = createToolCallAggregator();
+  const toolRegistry = buildToolRegistry(requestBody);
+  const toolCallParser = toolRegistry.enabled
+    ? createToolCallParser({
+        allowedTools: toolRegistry.allowedTools,
+        strictTools: toolRegistry.strictTools,
+        toolSchemas: toolRegistry.toolSchemas,
+      })
+    : null;
   const choiceStates = new Map();
   const eventCounts = new Map();
   const streamCapture = createResponsesStreamCapture({
@@ -76,16 +156,17 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
   });
   const state = {
     responseId: null,
-    chatCompletionId: null,
-    model: null,
+    model: requestBody?.model ?? null,
     finishReasons: new Set(),
     status: "completed",
     usage: null,
     createdEmitted: false,
     finished: false,
     eventSeq: 0,
+    toolCallSeq: 0,
     outputTextHasUseTool: false,
     transformSummaryEmitted: false,
+    createdAt: null,
   };
 
   const recordEvent = (event) => {
@@ -102,7 +183,6 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
       const events = Object.fromEntries(
         Array.from(eventCounts.entries()).sort(([a], [b]) => a.localeCompare(b))
       );
-      const prev = requestBody?.previous_response_id;
       const usage = state.usage;
       logStructured(
         {
@@ -123,17 +203,16 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
           outcome,
           events,
           finish_reasons: Array.from(state.finishReasons),
-          usage_input_tokens: usage?.prompt_tokens ?? null,
-          usage_output_tokens: usage?.completion_tokens ?? null,
+          usage_input_tokens: usage?.input_tokens ?? usage?.prompt_tokens ?? null,
+          usage_output_tokens: usage?.output_tokens ?? usage?.completion_tokens ?? null,
           usage_total_tokens: usage?.total_tokens ?? null,
-          previous_response_id_hash: prev ? sha256(prev) : null,
           output_mode_effective: res.locals?.output_mode_effective ?? null,
           response_shape_version: RESPONSE_SHAPE_VERSION,
           ...extra,
         }
       );
     } catch {
-      // Logging failures are non-critical; swallow to avoid impacting callers.
+      // logging failures are non-critical
     }
   };
 
@@ -145,6 +224,8 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
       for (const choiceState of choiceStates.values()) {
         if (choiceState?.textParts?.length) {
           textParts.push(...choiceState.textParts);
+        } else if (choiceState?.textDeltas?.length) {
+          textParts.push(...choiceState.textDeltas);
         }
       }
       const textSummary = summarizeTextParts(textParts);
@@ -192,19 +273,29 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
   };
 
   let writeChain = Promise.resolve();
+  let endScheduled = false;
   const writeEventInternal = async (event, payload) => {
     if (res.writableEnded) return;
     try {
       state.eventSeq += 1;
-      const data = event === "done" && payload === "[DONE]" ? "[DONE]" : JSON.stringify(payload);
+      const sequenceNumber = state.eventSeq;
+      const enrichedPayload =
+        event === "done" && payload === "[DONE]"
+          ? payload
+          : payload && typeof payload === "object"
+            ? { ...payload, sequence_number: sequenceNumber }
+            : payload;
+      if (streamCapture) streamCapture.record(event, enrichedPayload);
+      const data =
+        event === "done" && payload === "[DONE]" ? "[DONE]" : JSON.stringify(enrichedPayload);
       if (LOG_PROTO) {
         const reqId = ensureReqId(res);
-        const deltaBytes = getDeltaBytes(payload);
+        const deltaBytes = getDeltaBytes(enrichedPayload);
         const verbose = shouldLogVerbose();
 
         const debugExtras = {};
-        if (verbose && event === OUTPUT_DELTA_EVENT && typeof payload?.delta === "string") {
-          const sample = preview(payload.delta, 160);
+        if (verbose && event === OUTPUT_DELTA_EVENT && typeof enrichedPayload?.delta === "string") {
+          const sample = preview(enrichedPayload.delta, 160);
           debugExtras.delta_preview = sample.preview;
           debugExtras.content_truncated = sample.truncated;
           debugExtras.content_preview_len = sample.preview.length;
@@ -235,16 +326,26 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
     }
   };
   const writeEvent = (event, payload) => {
-    if (streamCapture) streamCapture.record(event, payload);
     writeChain = writeChain.then(() => writeEventInternal(event, payload));
+    return writeChain;
+  };
+  const scheduleEnd = () => {
+    if (endScheduled) return writeChain;
+    endScheduled = true;
+    writeChain = writeChain.then(() => {
+      res.end?.();
+      return null;
+    });
     return writeChain;
   };
 
   const ensureCreated = () => {
     if (state.createdEmitted) return;
     if (!state.responseId) {
-      const baseId = state.chatCompletionId || `chatcmpl-${nanoid()}`;
-      state.responseId = normalizeResponseId(baseId);
+      state.responseId = normalizeResponseId(requestBody?.id);
+    }
+    if (!state.createdAt) {
+      state.createdAt = Math.floor(Date.now() / 1000);
     }
     state.createdEmitted = true;
     writeEvent("response.created", {
@@ -262,26 +363,14 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
         index,
         role: DEFAULT_ROLE,
         textParts: [],
-        finishReason: null,
+        textDeltas: [],
+        hasDelta: false,
+        mixedTextWarningEmitted: false,
         toolCalls: new Map(),
         toolCallOrdinals: new Map(),
       });
     }
     return choiceStates.get(index);
-  };
-
-  const appendTextSegment = (choiceState, index, text) => {
-    if (!isNonEmptyString(text)) return;
-    ensureCreated();
-    if (!state.outputTextHasUseTool && text.toLowerCase().includes("<use_tool")) {
-      state.outputTextHasUseTool = true;
-    }
-    choiceState.textParts.push(text);
-    writeEvent(OUTPUT_DELTA_EVENT, {
-      type: OUTPUT_DELTA_EVENT,
-      delta: text,
-      output_index: index,
-    });
   };
 
   const ensureToolCallTracking = (choiceState) => {
@@ -375,6 +464,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
           output_index: index,
           item: {
             id: existing.id,
+            call_id: existing.id,
             type: existing.type,
             name: existing.name,
             status: "in_progress",
@@ -423,6 +513,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
           output_index: index,
           item: {
             id: existing.id,
+            call_id: existing.id,
             type: existing.type,
             name: existing.name,
             status: "in_progress",
@@ -518,14 +609,15 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
             phase: "tool_call_arguments_done",
             endpoint_mode: res.locals?.endpoint_mode || "responses",
             req_id: res.locals?.req_id || ensureReqId(res),
-            copilot_trace_id: res.locals?.copilot_trace_id || null,
-            trace_id: res.locals?.trace_id || null,
+            trace_id: res.locals?.trace_id,
             route: res.locals?.routeOverride || RESPONSES_ROUTE,
             mode: res.locals?.modeOverride || res.locals?.mode || "responses_stream",
+            response_id: state.responseId,
             tool_call_id: existing.id,
             tool_name: existing.name,
             tool_args_bytes: argsBytes,
             tool_args_json_valid: jsonValid,
+            tool_args_hash: args ? sha256(args) : null,
             response_shape_version: RESPONSE_SHAPE_VERSION,
             ...debugExtras,
           });
@@ -536,7 +628,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
           response_id: responseId,
           output_index: index,
           item_id: existing.id,
-          arguments: argumentsText,
+          arguments: args,
         });
         existing.doneArguments = true;
       }
@@ -548,9 +640,10 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
           output_index: index,
           item: {
             id: existing.id,
+            call_id: existing.id,
             type: existing.type,
             name: existing.name,
-            arguments: argumentsText,
+            arguments: existing.lastArgs || "",
             status: "completed",
           },
         });
@@ -559,25 +652,11 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
     });
   };
 
-  const endStream = () => {
-    if (typeof res.end !== "function" || res.writableEnded) return;
-    return writeChain
-      .catch(() => {})
-      .finally(() => {
-        try {
-          res.end();
-        } catch (err) {
-          console.error("[proxy][responses.stream-adapter] failed to end SSE response", err);
-        }
-      });
-  };
-
   const emitFailure = (error) => {
+    if (res.writableEnded) return false;
     if (state.finished) return false;
     state.finished = true;
     ensureCreated();
-    res.locals = res.locals || {};
-    res.locals.adapter_failed_emitted = true;
     const message = error?.message || "stream adapter error";
     writeEvent("response.failed", {
       type: "response.failed",
@@ -594,110 +673,279 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
     if (streamCapture) streamCapture.finalize("failed");
     emitTransformSummary("failed");
     logEventSummary("failed", { message });
-    endStream();
+    scheduleEnd();
     return false;
   };
 
-  const handleChoices = (choices = []) => {
-    for (const choice of choices) {
-      if (!choice) continue;
-      const index = Number.isInteger(choice.index) ? choice.index : 0;
-      const choiceState = ensureChoiceState(index);
-      const delta = choice.delta || {};
-
-      if (delta.role) choiceState.role = delta.role;
-
-      if (Array.isArray(delta.content)) {
-        delta.content.forEach((part) => {
-          if (typeof part === "string") {
-            appendTextSegment(choiceState, index, part);
-          } else if (part && typeof part === "object" && typeof part.text === "string") {
-            appendTextSegment(choiceState, index, part.text);
-          }
-        });
-      } else if (typeof delta.content === "string") {
-        appendTextSegment(choiceState, index, delta.content);
-      } else if (
-        delta.content &&
-        typeof delta.content === "object" &&
-        typeof delta.content.text === "string"
-      ) {
-        appendTextSegment(choiceState, index, delta.content.text);
-      }
-
-      let deltaUpdated = false;
-      if (delta && typeof delta === "object") {
-        const result = toolCallAggregator.ingestDelta(delta, { choiceIndex: index });
-        deltaUpdated = Boolean(result?.updated);
-        if (deltaUpdated) {
-          ensureCreated();
-          emitToolCallDeltas(choiceState, index, result?.deltas);
-        }
-      }
-
-      if (!deltaUpdated && choice.message && typeof choice.message === "object") {
-        // Some upstream workers send a final aggregated message payload within the streaming
-        // channel instead of emitting deltas for each tool call. When the delta ingestion above
-        // didn't update the aggregator, fall back to the message payload so we still surface
-        // tool_calls in the completion snapshot.
-        const messageResult = toolCallAggregator.ingestMessage(choice.message, {
-          choiceIndex: index,
-          emitIfMissing: true,
-        });
-        if (messageResult?.updated) {
-          ensureCreated();
-          emitToolCallDeltas(choiceState, index, messageResult.deltas);
-        }
-      }
-
-      if (choice.finish_reason) {
-        choiceState.finishReason = choice.finish_reason;
-        state.finishReasons.add(choice.finish_reason);
-      }
-    }
-
-    state.status = mapFinishStatus(Array.from(state.finishReasons));
+  const nextToolCallId = () => {
+    state.toolCallSeq += 1;
+    return `fc_${String(state.toolCallSeq).padStart(3, "0")}`;
   };
 
-  const onChunk = (chunk) => {
+  const emitTextDelta = (choiceState, choiceIndex, text) => {
+    if (!isNonEmptyString(text)) return;
+    if (choiceState.textParts.length && !choiceState.mixedTextWarningEmitted) {
+      choiceState.mixedTextWarningEmitted = true;
+      logStructured(
+        {
+          component: "responses",
+          event: "responses_text_mixed",
+          level: "warn",
+          req_id: res?.locals?.req_id,
+          route: res?.locals?.routeOverride || RESPONSES_ROUTE,
+          mode: res?.locals?.modeOverride || res?.locals?.mode,
+          model: state.model || requestBody?.model,
+        },
+        {
+          choice_index: choiceIndex,
+          has_delta: true,
+          text_parts_seen: choiceState.textParts.length,
+        }
+      );
+    }
+    if (!state.outputTextHasUseTool && text.toLowerCase().includes("<use_tool")) {
+      state.outputTextHasUseTool = true;
+    }
+    choiceState.textDeltas.push(text);
+    choiceState.hasDelta = true;
+    ensureCreated();
+    writeEvent(OUTPUT_DELTA_EVENT, {
+      type: OUTPUT_DELTA_EVENT,
+      delta: text,
+      output_index: choiceIndex,
+    });
+  };
+
+  const emitTextPart = (choiceState, choiceIndex, text) => {
+    if (!isNonEmptyString(text)) return;
+    if (choiceState.hasDelta && !choiceState.mixedTextWarningEmitted) {
+      choiceState.mixedTextWarningEmitted = true;
+      logStructured(
+        {
+          component: "responses",
+          event: "responses_text_mixed",
+          level: "warn",
+          req_id: res?.locals?.req_id,
+          route: res?.locals?.routeOverride || RESPONSES_ROUTE,
+          mode: res?.locals?.modeOverride || res?.locals?.mode,
+          model: state.model || requestBody?.model,
+        },
+        {
+          choice_index: choiceIndex,
+          has_delta: true,
+          text_deltas_seen: choiceState.textDeltas.length,
+        }
+      );
+    }
+    choiceState.textParts.push(text);
+    if (!choiceState.hasDelta) {
+      emitTextDelta(choiceState, choiceIndex, text);
+    }
+  };
+
+  const emitToolCallComplete = (choiceState, choiceIndex, toolCall) => {
+    if (!toolCall || typeof toolCall !== "object") return;
+    const { toolCalls } = ensureToolCallTracking(choiceState);
+    const name = toolCall.function?.name || toolCall.name || toolCall.id || "tool";
+    const fallbackId = toolCall.id || `tool_${choiceIndex}_${toolCalls.size}`;
+    const existing = resolveToolCallState(choiceState, choiceIndex, {
+      id: toolCall.id,
+      ordinal: toolCalls.size,
+      fallbackId,
+      type: toolCall.type || "function",
+      name,
+    });
+
+    if (!existing.added) {
+      writeEvent("response.output_item.added", {
+        type: "response.output_item.added",
+        response_id: state.responseId,
+        output_index: choiceIndex,
+        item: {
+          id: existing.id,
+          call_id: existing.id,
+          type: existing.type,
+          name: existing.name,
+          status: "in_progress",
+        },
+      });
+      existing.added = true;
+    }
+
+    const argumentsText = toolCall.function?.arguments ?? toolCall.arguments ?? "";
+    if (argumentsText && argumentsText !== existing.lastArgs) {
+      writeEvent("response.function_call_arguments.delta", {
+        type: "response.function_call_arguments.delta",
+        response_id: state.responseId,
+        output_index: choiceIndex,
+        item_id: existing.id,
+        delta: argumentsText,
+      });
+      existing.lastArgs = argumentsText;
+    }
+
+    if (!existing.doneArguments) {
+      writeEvent("response.function_call_arguments.done", {
+        type: "response.function_call_arguments.done",
+        response_id: state.responseId,
+        output_index: choiceIndex,
+        item_id: existing.id,
+        arguments: argumentsText,
+      });
+      existing.doneArguments = true;
+    }
+
+    if (!existing.outputDone) {
+      writeEvent("response.output_item.done", {
+        type: "response.output_item.done",
+        response_id: state.responseId,
+        output_index: choiceIndex,
+        item: {
+          id: existing.id,
+          call_id: existing.id,
+          type: existing.type,
+          name: existing.name,
+          arguments: existing.lastArgs || "",
+          status: "completed",
+        },
+      });
+      existing.outputDone = true;
+    }
+  };
+
+  const handleParsedToolCalls = (choiceState, choiceIndex, parsedCalls = []) => {
+    if (!choiceState || !Array.isArray(parsedCalls) || parsedCalls.length === 0) return;
+    parsedCalls.forEach((call) => {
+      if (!call || typeof call !== "object") return;
+      const id = nextToolCallId();
+      const toolCall = {
+        id,
+        type: "function",
+        function: { name: call.name, arguments: call.arguments },
+      };
+      toolCallAggregator.ingestMessage({ tool_calls: [toolCall] }, { choiceIndex });
+      ensureCreated();
+      emitToolCallComplete(choiceState, choiceIndex, toolCall);
+    });
+  };
+
+  const shouldFailParserErrors = (errors = []) => errors.some((err) => err?.strict === true);
+
+  const handleEvent = (event) => {
     try {
-      if (!chunk || typeof chunk !== "object") return true;
-
-      state.chatCompletionId = chunk.id || state.chatCompletionId || `chatcmpl-${nanoid()}`;
-      if (!state.responseId) {
-        state.responseId = normalizeResponseId(state.chatCompletionId);
+      if (!event || typeof event !== "object") return true;
+      const choiceIndex = Number.isInteger(event.choiceIndex) ? event.choiceIndex : 0;
+      if (event.type === "text_delta") {
+        const choiceState = ensureChoiceState(choiceIndex);
+        if (!isNonEmptyString(event.delta)) return true;
+        if (toolCallParser) {
+          const parsed = toolCallParser.ingest(event.delta);
+          if (parsed.errors?.length && shouldFailParserErrors(parsed.errors)) {
+            return emitFailure(new Error("strict tool_call parse failure"));
+          }
+          parsed.visibleTextDeltas.forEach((chunk) =>
+            emitTextDelta(choiceState, choiceIndex, chunk)
+          );
+          handleParsedToolCalls(choiceState, choiceIndex, parsed.parsedToolCalls);
+          return true;
+        }
+        emitTextDelta(choiceState, choiceIndex, event.delta);
+        return true;
       }
-      if (chunk.model) state.model = chunk.model;
-
-      if (!state.createdEmitted) ensureCreated();
-
-      handleChoices(Array.isArray(chunk.choices) ? chunk.choices : []);
-
-      if (chunk.usage && typeof chunk.usage === "object") {
-        const promptTokens = chunk.usage.prompt_tokens ?? chunk.usage.input_tokens ?? 0;
-        const completionTokens = chunk.usage.completion_tokens ?? chunk.usage.output_tokens ?? 0;
-        const totalTokens = chunk.usage.total_tokens ?? promptTokens + completionTokens;
-        state.usage = {
-          prompt_tokens: promptTokens,
-          completion_tokens: completionTokens,
-          total_tokens: totalTokens,
-        };
+      if (event.type === "text") {
+        const choiceState = ensureChoiceState(choiceIndex);
+        if (!isNonEmptyString(event.text)) return true;
+        if (toolCallParser) {
+          const parsed = toolCallParser.ingest(event.text);
+          if (parsed.errors?.length && shouldFailParserErrors(parsed.errors)) {
+            return emitFailure(new Error("strict tool_call parse failure"));
+          }
+          parsed.visibleTextDeltas.forEach((chunk) =>
+            emitTextPart(choiceState, choiceIndex, chunk)
+          );
+          handleParsedToolCalls(choiceState, choiceIndex, parsed.parsedToolCalls);
+          return true;
+        }
+        emitTextPart(choiceState, choiceIndex, event.text);
+        return true;
       }
-
+      if (event.type === "tool_calls_delta") {
+        if (Array.isArray(event.tool_calls)) {
+          const choiceState = ensureChoiceState(choiceIndex);
+          const result = toolCallAggregator.ingestDelta(
+            { tool_calls: event.tool_calls },
+            { choiceIndex }
+          );
+          if (result?.updated) {
+            ensureCreated();
+            emitToolCallDeltas(choiceState, choiceIndex, result?.deltas);
+          }
+        }
+        return true;
+      }
+      if (event.type === "tool_calls") {
+        if (Array.isArray(event.tool_calls)) {
+          const choiceState = ensureChoiceState(choiceIndex);
+          const result = toolCallAggregator.ingestMessage(
+            { tool_calls: event.tool_calls },
+            { choiceIndex, emitIfMissing: true }
+          );
+          if (result?.updated) {
+            ensureCreated();
+            emitToolCallDeltas(choiceState, choiceIndex, result?.deltas);
+          }
+        }
+        return true;
+      }
+      if (event.type === "function_call_delta") {
+        if (event.function_call && typeof event.function_call === "object") {
+          const choiceState = ensureChoiceState(choiceIndex);
+          const result = toolCallAggregator.ingestDelta(
+            { function_call: event.function_call },
+            { choiceIndex }
+          );
+          if (result?.updated) {
+            ensureCreated();
+            emitToolCallDeltas(choiceState, choiceIndex, result?.deltas);
+          }
+        }
+        return true;
+      }
+      if (event.type === "function_call") {
+        if (event.function_call && typeof event.function_call === "object") {
+          const choiceState = ensureChoiceState(choiceIndex);
+          const result = toolCallAggregator.ingestMessage(
+            { function_call: event.function_call },
+            { choiceIndex, emitIfMissing: true }
+          );
+          if (result?.updated) {
+            ensureCreated();
+            emitToolCallDeltas(choiceState, choiceIndex, result?.deltas);
+          }
+        }
+        return true;
+      }
+      if (event.type === "usage" && event.usage && typeof event.usage === "object") {
+        state.usage = event.usage;
+        return true;
+      }
+      if (event.type === "finish") {
+        if (event.reason) state.finishReasons.add(event.reason);
+        state.status = mapFinishStatus(Array.from(state.finishReasons));
+        return true;
+      }
       return true;
     } catch (error) {
-      console.error("[proxy][responses.stream-adapter] onChunk error", error);
+      console.error("[proxy][responses.stream-adapter] handleEvent error", error);
       return emitFailure(error);
     }
   };
 
-  const onDone = () => {
+  const finalize = async () => {
     try {
       if (state.finished) return true;
       state.finished = true;
       ensureCreated();
-
-      writeEvent("response.output_text.done", { type: "response.output_text.done" });
 
       const indices = Array.from(choiceStates.keys()).sort((a, b) => a - b);
       if (indices.length === 0) {
@@ -706,38 +954,46 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
           index: 0,
           role: DEFAULT_ROLE,
           textParts: [],
-          finishReason: "stop",
+          textDeltas: [],
+          hasDelta: false,
           toolCalls: new Map(),
           toolCallOrdinals: new Map(),
         });
       }
 
-      const chatChoices = indices.map((index) => {
-        const choiceState = choiceStates.get(index);
-        const text = choiceState?.textParts.join("") || "";
-        const snapshot = toolCallAggregator.snapshot({ choiceIndex: index });
-        finalizeToolCalls(choiceState, index, snapshot);
-        return {
-          index,
-          message: {
-            role: choiceState?.role || DEFAULT_ROLE,
-            content: text,
-            ...(snapshot.length ? { tool_calls: snapshot } : {}),
-          },
-          finish_reason: choiceState?.finishReason || "stop",
-        };
-      });
+      const choiceState = choiceStates.get(0);
+      if (toolCallParser && choiceState) {
+        const parsed = toolCallParser.flush();
+        if (parsed.errors?.length && shouldFailParserErrors(parsed.errors)) {
+          return emitFailure(new Error("strict tool_call parse failure"));
+        }
+        const useTextParts = choiceState.textParts.length > 0;
+        parsed.visibleTextDeltas.forEach((chunk) =>
+          useTextParts ? emitTextPart(choiceState, 0, chunk) : emitTextDelta(choiceState, 0, chunk)
+        );
+        handleParsedToolCalls(choiceState, 0, parsed.parsedToolCalls);
+      }
 
-      const chatPayload = {
-        id: state.chatCompletionId || `chatcmpl-${nanoid()}`,
-        model: state.model,
-        choices: chatChoices,
+      writeEvent("response.output_text.done", { type: "response.output_text.done" });
+      const outputText =
+        choiceState && choiceState.textParts.length
+          ? choiceState.textParts.join("")
+          : (choiceState?.textDeltas?.join("") ?? "");
+      const functionCalls = toolCallAggregator.snapshot({ choiceIndex: 0 });
+
+      if (choiceState) {
+        finalizeToolCalls(choiceState, 0, functionCalls);
+      }
+
+      const responsePayload = buildResponsesEnvelope({
+        responseId: state.responseId || requestBody?.id,
+        created: state.createdAt,
+        model: state.model || requestBody?.model,
+        outputText,
+        functionCalls,
         usage: state.usage || undefined,
-      };
-
-      const responsePayload = convertChatResponseToResponses(chatPayload, requestBody);
-      responsePayload.id = state.responseId || responsePayload.id;
-      responsePayload.status = state.status || responsePayload.status || "completed";
+        status: state.status || "completed",
+      });
 
       emitTransformSummary("completed", responsePayload);
       writeEvent("response.completed", {
@@ -747,16 +1003,18 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
       writeEvent("done", "[DONE]");
       if (streamCapture) streamCapture.finalize("completed");
       logEventSummary("completed", { finish_reasons: Array.from(state.finishReasons) });
-      endStream();
+      await scheduleEnd();
       return true;
     } catch (error) {
-      console.error("[proxy][responses.stream-adapter] onDone error", error);
+      console.error("[proxy][responses.stream-adapter] finalize error", error);
       return emitFailure(error);
     }
   };
 
   return {
-    onChunk,
-    onDone,
+    handleEvent,
+    finalize,
+    fail: (error) => emitFailure(error),
+    toolCallAggregator,
   };
 }

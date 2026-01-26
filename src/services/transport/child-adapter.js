@@ -67,6 +67,16 @@ export class JsonRpcChildAdapter extends EventEmitter {
     try {
       const normalized = this.normalizedRequest || null;
       const turnPayload = normalized?.turn ? { ...normalized.turn } : undefined;
+      const messagePayload = normalized?.message ? { ...normalized.message } : {};
+      if (turnPayload && turnPayload.tools === undefined && messagePayload.tools !== undefined) {
+        turnPayload.tools = messagePayload.tools;
+      } else if (
+        turnPayload &&
+        turnPayload.tools !== undefined &&
+        messagePayload.tools === undefined
+      ) {
+        messagePayload.tools = turnPayload.tools;
+      }
       if (turnPayload) {
         turnPayload.items = normalizeInputItems(turnPayload.items, prompt);
         if (!Array.isArray(turnPayload.items) || turnPayload.items.length === 0) {
@@ -92,7 +102,6 @@ export class JsonRpcChildAdapter extends EventEmitter {
         return;
       }
       this.#wireContext(this.context);
-      const messagePayload = normalized?.message ? { ...normalized.message } : {};
       messagePayload.items = normalizeInputItems(messagePayload.items, prompt);
       if (!Array.isArray(messagePayload.items) || messagePayload.items.length === 0) {
         messagePayload.items = [createUserMessageItem(prompt)];

@@ -88,7 +88,7 @@ test("responses streaming enforces concurrency guard", async () => {
       body: JSON.stringify({
         model: "codex-5",
         stream: true,
-        messages: [{ role: "user", content: `hold-${iteration}` }],
+        input: `hold-${iteration}`,
       }),
     });
     expect(res1.ok).toBeTruthy();
@@ -120,7 +120,7 @@ test("responses streaming enforces concurrency guard", async () => {
         body: JSON.stringify({
           model: "codex-5",
           stream: true,
-          messages: [{ role: "user", content: `reject-${iteration}` }],
+          input: `reject-${iteration}`,
         }),
       });
       if (candidate.status === 429) {

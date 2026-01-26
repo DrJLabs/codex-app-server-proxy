@@ -79,18 +79,37 @@ describe("responses stream adapter", () => {
     const res = buildRes();
     const adapter = createResponsesStreamAdapter(res, { model: "gpt-test" });
 
-    adapter.onChunk({
-      id: "chatcmpl-1",
-      model: "gpt-test",
-      choices: [{ index: 0, delta: { content: "Hello" } }],
-    });
-    await adapter.onDone();
+    adapter.handleEvent({ type: "text_delta", delta: "Hello", choiceIndex: 0 });
+    await adapter.finalize();
     await waitForWrites();
 
     const entries = parseSSE(res.chunks.join(""));
     expect(entries[0]?.event).toBe("response.created");
     const deltas = entries.filter((entry) => entry.event === "response.output_text.delta");
     expect(deltas.map((entry) => entry.data.delta).join("")).toBe("Hello");
+  });
+
+  it("keeps <tool_call> text when no tools are declared", async () => {
+    const { createResponsesStreamAdapter } = await import(
+      "../../../../src/handlers/responses/stream-adapter.js"
+    );
+
+    const res = buildRes();
+    const adapter = createResponsesStreamAdapter(res, { model: "gpt-test" });
+    const sentinel = '<tool_call>{"name":"webSearch","arguments":"{}"}</tool_call>';
+
+    adapter.handleEvent({ type: "text_delta", delta: sentinel, choiceIndex: 0 });
+    await adapter.finalize();
+    await waitForWrites();
+
+    const entries = parseSSE(res.chunks.join(""));
+    const deltas = entries.filter((entry) => entry.event === "response.output_text.delta");
+    expect(deltas.map((entry) => entry.data.delta).join("")).toBe(sentinel);
+    const toolItems = entries.filter(
+      (entry) =>
+        entry.event === "response.output_item.added" && entry.data?.item?.type === "function"
+    );
+    expect(toolItems).toEqual([]);
   });
 
   it("emits tool call delta and done events", async () => {
@@ -127,12 +146,12 @@ describe("responses stream adapter", () => {
     const res = buildRes();
     const adapter = createResponsesStreamAdapter(res, { model: "gpt-test" });
 
-    adapter.onChunk({
-      id: "chatcmpl-2",
-      model: "gpt-test",
-      choices: [{ index: 0, delta: { tool_calls: [toolDelta] } }],
+    adapter.handleEvent({
+      type: "tool_calls_delta",
+      tool_calls: [toolDelta],
+      choiceIndex: 0,
     });
-    await adapter.onDone();
+    await adapter.finalize();
     await waitForWrites();
 
     const entries = parseSSE(res.chunks.join(""));
@@ -148,7 +167,7 @@ describe("responses stream adapter", () => {
     expect(outputDoneIndex).toBeGreaterThan(doneIndex);
   });
 
-  it("emits response.failed when onChunk throws", async () => {
+  it("emits response.failed when handleEvent encounters an error", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     createToolCallAggregator.mockReturnValue(
       buildAggregator({
@@ -157,6 +176,12 @@ describe("responses stream adapter", () => {
         }),
       })
     );
+    const toolDelta = {
+      id: "call_err",
+      index: 0,
+      type: "function",
+      function: { name: "fail", arguments: "{}" },
+    };
 
     const { createResponsesStreamAdapter } = await import(
       "../../../../src/handlers/responses/stream-adapter.js"
@@ -165,11 +190,7 @@ describe("responses stream adapter", () => {
     const res = buildRes();
     const adapter = createResponsesStreamAdapter(res, { model: "gpt-test" });
 
-    adapter.onChunk({
-      id: "chatcmpl-3",
-      model: "gpt-test",
-      choices: [{ index: 0, delta: {} }],
-    });
+    adapter.handleEvent({ type: "tool_calls_delta", tool_calls: [toolDelta], choiceIndex: 0 });
     await waitForWrites();
 
     const entries = parseSSE(res.chunks.join(""));
@@ -187,12 +208,9 @@ describe("responses stream adapter", () => {
     const res = buildRes();
     const adapter = createResponsesStreamAdapter(res, { model: "gpt-test" });
 
-    adapter.onChunk({
-      id: "chatcmpl-4",
-      model: "gpt-test",
-      choices: [{ index: 0, delta: { content: "Hello" }, finish_reason: "length" }],
-    });
-    await adapter.onDone();
+    adapter.handleEvent({ type: "text_delta", delta: "Hello", choiceIndex: 0 });
+    adapter.handleEvent({ type: "finish", reason: "length", trigger: "task_complete" });
+    await adapter.finalize();
     await waitForWrites();
 
     const entries = parseSSE(res.chunks.join(""));
@@ -208,17 +226,10 @@ describe("responses stream adapter", () => {
     const res = buildRes();
     const adapter = createResponsesStreamAdapter(res, { model: "gpt-test" });
 
-    adapter.onChunk({
-      id: "chatcmpl-5",
-      model: "gpt-test",
-      choices: [{ index: 0, delta: { content: ["A", { text: "B" }] } }],
-    });
-    adapter.onChunk({
-      id: "chatcmpl-5",
-      model: "gpt-test",
-      choices: [{ index: 0, delta: { content: { text: "C" } } }],
-    });
-    await adapter.onDone();
+    adapter.handleEvent({ type: "text_delta", delta: "A", choiceIndex: 0 });
+    adapter.handleEvent({ type: "text_delta", delta: "B", choiceIndex: 0 });
+    adapter.handleEvent({ type: "text_delta", delta: "C", choiceIndex: 0 });
+    await adapter.finalize();
     await waitForWrites();
 
     const entries = parseSSE(res.chunks.join(""));
@@ -257,12 +268,12 @@ describe("responses stream adapter", () => {
     const res = buildRes();
     const adapter = createResponsesStreamAdapter(res, { model: "gpt-test" });
 
-    adapter.onChunk({
-      id: "chatcmpl-6",
-      model: "gpt-test",
-      choices: [{ index: 0, delta: {}, message: { tool_calls: [toolDelta] } }],
+    adapter.handleEvent({
+      type: "tool_calls",
+      tool_calls: [toolDelta],
+      choiceIndex: 0,
     });
-    await adapter.onDone();
+    await adapter.finalize();
     await waitForWrites();
 
     const entries = parseSSE(res.chunks.join(""));
@@ -278,7 +289,7 @@ describe("responses stream adapter", () => {
     const res = buildRes();
     const adapter = createResponsesStreamAdapter(res, { model: "gpt-test" });
 
-    await adapter.onDone();
+    await adapter.finalize();
     await waitForWrites();
 
     const entries = parseSSE(res.chunks.join(""));
@@ -294,12 +305,9 @@ describe("responses stream adapter", () => {
     const res = buildRes();
     const adapter = createResponsesStreamAdapter(res, { model: "gpt-test" });
 
-    adapter.onChunk({
-      id: "chatcmpl-7",
-      model: "gpt-test",
-      choices: [{ index: 0, delta: { content: "Hello" }, finish_reason: "cancelled" }],
-    });
-    await adapter.onDone();
+    adapter.handleEvent({ type: "text_delta", delta: "Hello", choiceIndex: 0 });
+    adapter.handleEvent({ type: "finish", reason: "cancelled", trigger: "task_complete" });
+    await adapter.finalize();
     await waitForWrites();
 
     const entries = parseSSE(res.chunks.join(""));
@@ -315,13 +323,12 @@ describe("responses stream adapter", () => {
     const res = buildRes();
     const adapter = createResponsesStreamAdapter(res, { model: "gpt-test" });
 
-    adapter.onChunk({
-      id: "chatcmpl-8",
-      model: "gpt-test",
-      usage: { input_tokens: 3, output_tokens: 2 },
-      choices: [{ index: 0, delta: { content: "Hello" } }],
+    adapter.handleEvent({
+      type: "usage",
+      usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 },
     });
-    await adapter.onDone();
+    adapter.handleEvent({ type: "text_delta", delta: "Hello", choiceIndex: 0 });
+    await adapter.finalize();
     await waitForWrites();
 
     const entries = parseSSE(res.chunks.join(""));
@@ -345,12 +352,8 @@ describe("responses stream adapter", () => {
     const res = buildRes();
     const adapter = createResponsesStreamAdapter(res, { model: "gpt-test" });
 
-    adapter.onChunk({
-      id: "chatcmpl-9",
-      model: "gpt-test",
-      choices: [{ index: 0, delta: { content: "Hello" } }],
-    });
-    await adapter.onDone();
+    adapter.handleEvent({ type: "text_delta", delta: "Hello", choiceIndex: 0 });
+    await adapter.finalize();
     await waitForWrites();
 
     const protoEntry = appendProtoEventMock.mock.calls.find(
@@ -390,17 +393,114 @@ describe("responses stream adapter", () => {
     const res = buildRes();
     const adapter = createResponsesStreamAdapter(res, { model: "gpt-test" });
 
-    adapter.onChunk({
-      id: "chatcmpl-10",
-      model: "gpt-test",
-      choices: [{ index: 0, delta: { tool_calls: [toolDelta] } }],
+    adapter.handleEvent({
+      type: "tool_calls_delta",
+      tool_calls: [toolDelta],
+      choiceIndex: 0,
     });
-    await adapter.onDone();
+    await adapter.finalize();
     await waitForWrites();
 
     const protoEntry = appendProtoEventMock.mock.calls.find(
       ([payload]) => payload?.args_preview === "{bad"
     );
     expect(protoEntry).toBeTruthy();
+  });
+
+  it("parses <tool_call> blocks from text deltas", async () => {
+    const { createResponsesStreamAdapter } = await import(
+      "../../../../src/handlers/responses/stream-adapter.js"
+    );
+
+    const res = buildRes();
+    const adapter = createResponsesStreamAdapter(res, {
+      model: "gpt-test",
+      tools: [{ type: "function", name: "search", parameters: {} }],
+    });
+
+    adapter.handleEvent({
+      type: "text_delta",
+      delta: 'Hi <tool_call>{"name":"search","arguments":"{\\"query\\":\\"x\\"}"}</tool_call> ok',
+      choiceIndex: 0,
+    });
+    await adapter.finalize();
+    await waitForWrites();
+
+    const entries = parseSSE(res.chunks.join(""));
+    const output = entries
+      .filter((entry) => entry.event === "response.output_text.delta")
+      .map((entry) => entry.data.delta)
+      .join("");
+    expect(output).toBe("Hi  ok");
+
+    const events = entries.map((entry) => entry.event).filter(Boolean);
+    const addedIndex = events.indexOf("response.output_item.added");
+    const doneIndex = events.indexOf("response.function_call_arguments.done");
+    const outputDoneIndex = events.indexOf("response.output_item.done");
+
+    expect(addedIndex).toBeGreaterThan(-1);
+    expect(doneIndex).toBeGreaterThan(addedIndex);
+    expect(outputDoneIndex).toBeGreaterThan(doneIndex);
+
+    const added = entries.find((entry) => entry.event === "response.output_item.added");
+    expect(added?.data?.item?.type).toBe("function_call");
+    expect(added?.data?.item?.name).toBe("search");
+  });
+
+  it("keeps <tool_call> blocks as text without tool definitions", async () => {
+    const { createResponsesStreamAdapter } = await import(
+      "../../../../src/handlers/responses/stream-adapter.js"
+    );
+
+    const res = buildRes();
+    const adapter = createResponsesStreamAdapter(res, { model: "gpt-test" });
+
+    adapter.handleEvent({
+      type: "text_delta",
+      delta: 'Hi <tool_call>{"name":"search","arguments":"{\\"query\\":\\"x\\"}"}</tool_call> ok',
+      choiceIndex: 0,
+    });
+    await adapter.finalize();
+    await waitForWrites();
+
+    const entries = parseSSE(res.chunks.join(""));
+    const output = entries
+      .filter((entry) => entry.event === "response.output_text.delta")
+      .map((entry) => entry.data.delta)
+      .join("");
+    expect(output).toBe(
+      'Hi <tool_call>{"name":"search","arguments":"{\\"query\\":\\"x\\"}"}</tool_call> ok'
+    );
+
+    const added = entries.find(
+      (entry) =>
+        entry.event === "response.output_item.added" && entry.data?.item?.type === "function"
+    );
+    expect(added).toBeUndefined();
+  });
+
+  it("adds monotonically increasing sequence_number values", async () => {
+    const { createResponsesStreamAdapter } = await import(
+      "../../../../src/handlers/responses/stream-adapter.js"
+    );
+
+    const res = buildRes();
+    const adapter = createResponsesStreamAdapter(res, { model: "gpt-test" });
+
+    adapter.handleEvent({ type: "text_delta", delta: "Hello", choiceIndex: 0 });
+    await adapter.finalize();
+    await waitForWrites();
+
+    const entries = parseSSE(res.chunks.join(""));
+    const numbers = entries
+      .filter((entry) => entry.type === "data")
+      .map((entry) => entry.data?.sequence_number)
+      .filter((value) => Number.isInteger(value));
+
+    expect(numbers.length).toBeGreaterThan(0);
+    numbers.forEach((value, index) => {
+      if (index === 0) return;
+      expect(value).toBeGreaterThan(numbers[index - 1]);
+    });
   });
 });
