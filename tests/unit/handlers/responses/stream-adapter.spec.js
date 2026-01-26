@@ -167,6 +167,40 @@ describe("responses stream adapter", () => {
     expect(outputDoneIndex).toBeGreaterThan(doneIndex);
   });
 
+  it("does not duplicate tool calls when final text repeats tool_call", async () => {
+    const { createResponsesStreamAdapter } = await import(
+      "../../../../src/handlers/responses/stream-adapter.js"
+    );
+
+    const res = buildRes();
+    const adapter = createResponsesStreamAdapter(res, {
+      model: "gpt-test",
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "getFileTree",
+            parameters: { type: "object", properties: {}, additionalProperties: false },
+          },
+        },
+      ],
+    });
+
+    const toolCallText = '<tool_call>{"name":"getFileTree","arguments":"{}"}</tool_call>';
+    adapter.handleEvent({ type: "text_delta", delta: toolCallText, choiceIndex: 0 });
+    adapter.handleEvent({ type: "text", text: toolCallText, choiceIndex: 0 });
+    await adapter.finalize();
+    await waitForWrites();
+
+    const entries = parseSSE(res.chunks.join(""));
+    const added = entries.filter(
+      (entry) =>
+        entry.event === "response.output_item.added" &&
+        entry.data?.item?.type === "function_call"
+    );
+    expect(added).toHaveLength(1);
+  });
+
   it("emits response.failed when handleEvent encounters an error", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     createToolCallAggregator.mockReturnValue(

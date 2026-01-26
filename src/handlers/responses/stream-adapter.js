@@ -368,6 +368,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
         mixedTextWarningEmitted: false,
         toolCalls: new Map(),
         toolCallOrdinals: new Map(),
+        toolCallTextParsed: false,
       });
     }
     return choiceStates.get(index);
@@ -846,7 +847,10 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
           parsed.visibleTextDeltas.forEach((chunk) =>
             emitTextDelta(choiceState, choiceIndex, chunk)
           );
-          handleParsedToolCalls(choiceState, choiceIndex, parsed.parsedToolCalls);
+          if (parsed.parsedToolCalls.length && !choiceState.toolCallTextParsed) {
+            handleParsedToolCalls(choiceState, choiceIndex, parsed.parsedToolCalls);
+            choiceState.toolCallTextParsed = true;
+          }
           return true;
         }
         emitTextDelta(choiceState, choiceIndex, event.delta);
@@ -863,7 +867,10 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
           parsed.visibleTextDeltas.forEach((chunk) =>
             emitTextPart(choiceState, choiceIndex, chunk)
           );
-          handleParsedToolCalls(choiceState, choiceIndex, parsed.parsedToolCalls);
+          if (parsed.parsedToolCalls.length && !choiceState.toolCallTextParsed) {
+            handleParsedToolCalls(choiceState, choiceIndex, parsed.parsedToolCalls);
+            choiceState.toolCallTextParsed = true;
+          }
           return true;
         }
         emitTextPart(choiceState, choiceIndex, event.text);
@@ -958,6 +965,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
           hasDelta: false,
           toolCalls: new Map(),
           toolCallOrdinals: new Map(),
+          toolCallTextParsed: false,
         });
       }
 
@@ -971,7 +979,10 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
         parsed.visibleTextDeltas.forEach((chunk) =>
           useTextParts ? emitTextPart(choiceState, 0, chunk) : emitTextDelta(choiceState, 0, chunk)
         );
-        handleParsedToolCalls(choiceState, 0, parsed.parsedToolCalls);
+        if (parsed.parsedToolCalls.length && !choiceState.toolCallTextParsed) {
+          handleParsedToolCalls(choiceState, 0, parsed.parsedToolCalls);
+          choiceState.toolCallTextParsed = true;
+        }
       }
 
       writeEvent("response.output_text.done", { type: "response.output_text.done" });
