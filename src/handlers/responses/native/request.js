@@ -210,7 +210,7 @@ const buildToolInjectionText = (tools, toolChoice) => {
   lines.push('Bad: <tool_call>[{"name":"tool","arguments":"{...}"}]</tool_call>');
   lines.push("Never repeat the closing tag.");
   lines.push(
-    'Example (exact): <tool_call>{"name":"webSearch","arguments":"{\\"query\\":\\"example\\",\\"chatHistory\\":[]}"}<\/tool_call>'
+    'Example (exact): <tool_call>{"name":"webSearch","arguments":"{\\"query\\":\\"example\\",\\"chatHistory\\":[]}"}</tool_call>'
   );
   lines.push('The "arguments" field must be a JSON string.');
   lines.push('If a tool has no parameters, use arguments "{}".');
@@ -274,6 +274,8 @@ const buildToolInjectionText = (tools, toolChoice) => {
     }
     const required = new Set(Array.isArray(normalized.required) ? normalized.required : []);
     return propKeys.map((key) => {
+      // Keys come from Object.keys(props); safe for controlled schema objects.
+      // eslint-disable-next-line security/detect-object-injection
       const propSchema = sanitizeSchema(props[key]) || {};
       const requirement = required.has(key) ? "required" : "optional";
       const type = resolveSchemaType(propSchema);
@@ -305,6 +307,8 @@ const buildToolInjectionText = (tools, toolChoice) => {
       const props = normalized.properties || {};
       const example = {};
       Object.keys(props).forEach((key) => {
+        // Keys come from Object.keys(props); safe for controlled schema objects.
+        // eslint-disable-next-line security/detect-object-injection
         example[key] = exampleForSchema(props[key], depth + 1);
       });
       return example;

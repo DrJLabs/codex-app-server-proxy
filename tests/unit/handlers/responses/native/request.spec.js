@@ -228,7 +228,7 @@ describe("native responses request normalizer", () => {
     expect(text).toContain('Bad: <tool_call>[{"name":"tool","arguments":"{...}"}]</tool_call>');
     expect(text).toContain("Never repeat the closing tag.");
     expect(text).toContain(
-      'Example (exact): <tool_call>{"name":"webSearch","arguments":"{\\"query\\":\\"example\\",\\"chatHistory\\":[]}"}<\/tool_call>'
+      'Example (exact): <tool_call>{"name":"webSearch","arguments":"{\\"query\\":\\"example\\",\\"chatHistory\\":[]}"}</tool_call>'
     );
     expect(text).toContain('If a tool has no parameters, use arguments "{}".');
     expect(text).toContain("Available tools (schema):");
