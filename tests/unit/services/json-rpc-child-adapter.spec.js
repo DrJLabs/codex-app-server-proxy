@@ -361,6 +361,34 @@ describe("JsonRpcChildAdapter normalization", () => {
     await flushAsync();
   });
 
+  it("translates item/completed notifications into agent_message output", async () => {
+    const { adapter, emitter, resolvePromise, stdout } = await setupAdapter();
+
+    adapter.stdin.write(JSON.stringify({ prompt: "hello" }));
+    await flushAsync();
+
+    emitter.emit("notification", {
+      method: "codex/event/item/completed",
+      params: {
+        msg: {
+          item: {
+            type: "agentMessage",
+            content: [{ type: "output_text", text: "from item" }],
+          },
+        },
+      },
+    });
+    await flushAsync();
+
+    expect(stdout).toContainEqual({
+      type: "agent_message",
+      msg: { message: { content: "from item" } },
+    });
+
+    resolvePromise();
+    await flushAsync();
+  });
+
   it("emits stderr and exits on errors", async () => {
     const { adapter, resolvePromise, stderr, exits } = await setupAdapter();
 

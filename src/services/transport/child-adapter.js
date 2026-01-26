@@ -208,6 +208,40 @@ export class JsonRpcChildAdapter extends EventEmitter {
         }
       }
       if (
+        normalizedMethod === "item/completed" ||
+        normalizedMethod === "item_completed" ||
+        normalizedMethod === "itemCompleted"
+      ) {
+        const payload = params.msg && typeof params.msg === "object" ? params.msg : params;
+        const item =
+          payload && typeof payload === "object" && payload.item && typeof payload.item === "object"
+            ? payload.item
+            : null;
+        const itemType = typeof item?.type === "string" ? item.type.toLowerCase() : "";
+        const isAgentMessage = itemType === "agentmessage" || itemType === "agent_message";
+        if (isAgentMessage) {
+          let text = "";
+          if (typeof item?.text === "string") {
+            text = item.text;
+          } else if (Array.isArray(item?.content)) {
+            text = item.content
+              .map((part) => {
+                if (!part || typeof part !== "object") return "";
+                if (typeof part.text === "string") return part.text;
+                return "";
+              })
+              .join("");
+          }
+          if (text) {
+            const messagePayload = this.#normalizeMessage({ content: text });
+            if (messagePayload) {
+              this.#emitStdout({ type: "agent_message", msg: messagePayload });
+              return;
+            }
+          }
+        }
+      }
+      if (
         normalizedMethod === "agent_message_delta" ||
         normalizedMethod === "agent_message_content_delta" ||
         normalizedMethod === "agent_message" ||
