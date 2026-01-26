@@ -89,6 +89,28 @@ describe("responses stream adapter", () => {
     expect(deltas.map((entry) => entry.data.delta).join("")).toBe("Hello");
   });
 
+  it("keeps <tool_call> text when no tools are declared", async () => {
+    const { createResponsesStreamAdapter } = await import(
+      "../../../../src/handlers/responses/stream-adapter.js"
+    );
+
+    const res = buildRes();
+    const adapter = createResponsesStreamAdapter(res, { model: "gpt-test" });
+    const sentinel = '<tool_call>{"name":"webSearch","arguments":"{}"}</tool_call>';
+
+    adapter.handleEvent({ type: "text_delta", delta: sentinel, choiceIndex: 0 });
+    await adapter.finalize();
+    await waitForWrites();
+
+    const entries = parseSSE(res.chunks.join(""));
+    const deltas = entries.filter((entry) => entry.event === "response.output_text.delta");
+    expect(deltas.map((entry) => entry.data.delta).join("")).toBe(sentinel);
+    const toolItems = entries.filter(
+      (entry) => entry.event === "response.output_item.added" && entry.data?.item?.type === "function"
+    );
+    expect(toolItems).toEqual([]);
+  });
+
   it("emits tool call delta and done events", async () => {
     const toolDelta = {
       id: "call_1",
@@ -424,7 +446,7 @@ describe("responses stream adapter", () => {
     expect(added?.data?.item?.name).toBe("search");
   });
 
-  it("parses <tool_call> blocks without tool definitions", async () => {
+  it("keeps <tool_call> blocks as text without tool definitions", async () => {
     const { createResponsesStreamAdapter } = await import(
       "../../../../src/handlers/responses/stream-adapter.js"
     );
@@ -445,11 +467,14 @@ describe("responses stream adapter", () => {
       .filter((entry) => entry.event === "response.output_text.delta")
       .map((entry) => entry.data.delta)
       .join("");
-    expect(output).toBe("Hi  ok");
+    expect(output).toBe(
+      'Hi <tool_call>{"name":"search","arguments":"{\\"query\\":\\"x\\"}"}</tool_call> ok'
+    );
 
-    const added = entries.find((entry) => entry.event === "response.output_item.added");
-    expect(added?.data?.item?.type).toBe("function_call");
-    expect(added?.data?.item?.name).toBe("search");
+    const added = entries.find(
+      (entry) => entry.event === "response.output_item.added" && entry.data?.item?.type === "function"
+    );
+    expect(added).toBeUndefined();
   });
 
   it("adds monotonically increasing sequence_number values", async () => {

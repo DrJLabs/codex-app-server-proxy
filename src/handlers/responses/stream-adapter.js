@@ -109,6 +109,10 @@ const buildToolRegistry = (requestBody = {}) => {
   const toolSchemas = new Map(functionTools.map((tool) => [tool.name, tool.parameters ?? null]));
   const toolChoice = normalizeToolChoice(requestBody?.tool_choice ?? requestBody?.toolChoice);
 
+  if (!functionTools.length) {
+    return { allowedTools, strictTools, toolSchemas, toolChoice, enabled: false };
+  }
+
   if (toolChoice.mode === "none") {
     return { allowedTools: new Set(), strictTools, toolSchemas, toolChoice, enabled: false };
   }
@@ -963,7 +967,10 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
         if (parsed.errors?.length && shouldFailParserErrors(parsed.errors)) {
           return emitFailure(new Error("strict tool_call parse failure"));
         }
-        parsed.visibleTextDeltas.forEach((chunk) => emitTextPart(choiceState, 0, chunk));
+        const useTextParts = choiceState.textParts.length > 0;
+        parsed.visibleTextDeltas.forEach((chunk) =>
+          useTextParts ? emitTextPart(choiceState, 0, chunk) : emitTextDelta(choiceState, 0, chunk)
+        );
         handleParsedToolCalls(choiceState, 0, parsed.parsedToolCalls);
       }
 
