@@ -17,8 +17,8 @@ already present in logs or request shapes.
 ### Headers / UA
 - `user-agent` (examples observed in fixtures and logs):
   - `un/JS 6.5.0` (fixtures)
-  - `obsidian/... Electron/...` (prod log example)
-  - Sources: `tests/fixtures/obsidian-copilot/responses/*`, `docs/responses-endpoint/ingress-debug-obsidian-cross-chat-weather.md`
+  - `obsidian/... Electron/...` (prod log example; archived locally)
+  - Sources: `tests/fixtures/obsidian-copilot/responses/*`
 - Optional edge-injected trace header:
   - `x-copilot-trace-id` (documented for Traefik injection)
   - Source: `docs/deployment/production.md`
@@ -116,4 +116,3 @@ Add the new detection fields to:
 2. Enable in dev + staging, verify logs for false positives.
 3. Enable in prod with log-only mode for suspected tier.
 4. After validation, keep only high-confidence tier behavior changes.
-
