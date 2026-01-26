@@ -16,12 +16,7 @@ import { normalizeChatJsonRpcRequest } from "../../src/handlers/chat/request.js"
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PROJECT_ROOT = resolve(__dirname, "..", "..");
-const SCHEMA_PATH = resolve(
-  PROJECT_ROOT,
-  "docs",
-  "reference",
-  "app-server-protocol.schema.json"
-);
+const SCHEMA_PATH = resolve(PROJECT_ROOT, "docs", "reference", "app-server-protocol.schema.json");
 
 async function loadValidator() {
   const raw = await readFile(SCHEMA_PATH, "utf8");

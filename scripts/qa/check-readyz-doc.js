@@ -5,15 +5,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const docPath = path.join(
-  process.cwd(),
-  "docs",
-  "troubleshooting.md"
-);
-const requiredPatterns = [
-  /\/readyz/,
-  /\/healthz/,
-];
+const docPath = path.join(process.cwd(), "docs", "troubleshooting.md");
+const requiredPatterns = [/\/readyz/, /\/healthz/];
 
 function die(msg) {
   console.error(msg);
