@@ -6,7 +6,6 @@
 - **Owner:** ForwardAuth.
 - **Key files:**
   - `server.mjs` canonical Traefik ForwardAuth service (CORS + bearer verification).
-  - `server.js` legacy CJS entrypoint (disabled unless `ALLOW_LEGACY_AUTH=true`).
   - `package.json` (type: module).
 
 ## Architecture (high-level)
@@ -31,7 +30,7 @@
 
 ## Common pitfalls
 
-- Do not edit `server.js` unless intentionally enabling legacy builds; prefer `server.mjs`.
+- Do not add legacy entrypoints; keep `server.mjs` as the single canonical ForwardAuth service.
 - Do not change path names or ports without updating compose/Traefik configs and running smoke tests.
 - Ensure `PROXY_API_KEY` is set; missing secrets should fail closed (401).
 

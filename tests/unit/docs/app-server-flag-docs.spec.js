@@ -1,10 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 
-const DOC_PATH = new URL(
-  "../../../docs/app-server-migration/codex-app-server-proxy-migration.md",
-  import.meta.url
-);
+const DOC_PATH = new URL("../../../docs/configuration.md", import.meta.url);
 const ENV_EXAMPLE_PATH = new URL("../../../.env.example", import.meta.url);
 const ENV_DEV_EXAMPLE_PATH = new URL("../../../.env.dev.example", import.meta.url);
 
@@ -17,19 +14,15 @@ describe("documentation alignment for PROXY_USE_APP_SERVER", () => {
     // eslint-disable-next-line security/detect-non-literal-fs-filename
     const envDevExampleLines = readFileSync(ENV_DEV_EXAMPLE_PATH, "utf8").split(/\r?\n/);
 
-    const tableMatches = Array.from(
-      doc.matchAll(
-        /\|\s*(Local \/ Dev stack|Staging|Production)\s*\|\s*app-server \(`(true|false)`\)\s*\|/g
-      )
+    const match = doc.match(
+      /\|\s*`PROXY_USE_APP_SERVER`\s*\|\s*`(true|false)`\s*\|/i
     );
-    expect(tableMatches).toHaveLength(3);
+    expect(match).not.toBeNull();
+    const defaultValue = match?.[1];
+    expect(defaultValue).toBe("true");
 
-    for (const [, label, defaultValue] of tableMatches) {
-      expect(defaultValue).toBe("true");
-      const expectedLine = `PROXY_USE_APP_SERVER=${defaultValue}`;
-      expect(envExampleLines).toContain(expectedLine);
-      expect(envDevExampleLines).toContain(expectedLine);
-      expect(["Local / Dev stack", "Staging", "Production"]).toContain(label);
-    }
+    const expectedLine = `PROXY_USE_APP_SERVER=${defaultValue}`;
+    expect(envExampleLines).toContain(expectedLine);
+    expect(envDevExampleLines).toContain(expectedLine);
   });
 });

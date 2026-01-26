@@ -1,7 +1,0 @@
-{
-  "provider": "openai-compatible",
-  "base_url": "http://127.0.0.1:11435/v1",
-  "api_key": "codex-local-secret",
-  "model": "gpt-5",
-  "notes": "Use Roo Code settings: Provider=OpenAI Compatible; Base URL=http://127.0.0.1:11435/v1; API Key=codex-local-secret; Model=gpt-5; Reasoning effort=High"
-}

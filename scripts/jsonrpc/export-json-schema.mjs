@@ -10,7 +10,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PROJECT_ROOT = resolve(__dirname, "..", "..");
 const TSCONFIG_PATH = resolve(PROJECT_ROOT, "tsconfig.schema.json");
-const OUTPUT_DIR = resolve(PROJECT_ROOT, "docs", "app-server-migration");
+const OUTPUT_DIR = resolve(PROJECT_ROOT, "docs", "reference");
 const OUTPUT_PATH = resolve(OUTPUT_DIR, "app-server-protocol.schema.json");
 
 const settings = {

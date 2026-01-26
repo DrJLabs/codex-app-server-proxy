@@ -102,14 +102,13 @@ git commit -m "docs: align public docs index naming"
 - Modify: `docs/observability.md`
 - Modify: `docs/architecture.md`
 - Modify: `docs/codex-proxy-tool-calls.md`
-- Modify: `docs/app-server-migration/*`
 - Test: same as above
 
 **Step 1: Write the failing test**
 
 Run:
 ```
-rg -n "codex-completions-api|completions-api|completions api" docs/getting-started.md docs/configuration.md docs/deployment/production.md docs/troubleshooting.md docs/observability.md docs/architecture.md docs/codex-proxy-tool-calls.md docs/app-server-migration
+rg -n "codex-completions-api|completions-api|completions api" docs/getting-started.md docs/configuration.md docs/deployment/production.md docs/troubleshooting.md docs/observability.md docs/architecture.md docs/codex-proxy-tool-calls.md
 ```
 Expected: matches if legacy naming exists (RED).
 
@@ -134,7 +133,7 @@ Re-run the `rg` command. Expected: no matches.
 **Step 5: Commit**
 
 ```
-git add docs/getting-started.md docs/configuration.md docs/deployment/production.md docs/troubleshooting.md docs/observability.md docs/architecture.md docs/codex-proxy-tool-calls.md docs/app-server-migration
+git add docs/getting-started.md docs/configuration.md docs/deployment/production.md docs/troubleshooting.md docs/observability.md docs/architecture.md docs/codex-proxy-tool-calls.md
 git commit -m "docs: refresh public docs naming and framing"
 ```
 

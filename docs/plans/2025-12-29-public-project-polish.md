@@ -51,7 +51,7 @@
   How: `rg --files` to list; `rg -n "codex-completions-api|completions api|completions-api" .` to find stale name/positioning; confirm no internal-only references in public files.
   AC: All public-facing files reference `codex-app-server-proxy` and “responses-first” positioning; no public file links into `docs/internal/`.
 - [x] **Docs IA + content audit (public docs only).**
-  Paths: `docs/README.md`, `docs/README-root.md`, `docs/getting-started.md`, `docs/configuration.md`, `docs/deployment/production.md`, `docs/troubleshooting.md`, `docs/observability.md`, `docs/architecture.md`, `docs/codex-proxy-tool-calls.md`, `docs/app-server-migration/`.
+  Paths: `docs/README.md`, `docs/README-root.md`, `docs/getting-started.md`, `docs/configuration.md`, `docs/deployment/production.md`, `docs/troubleshooting.md`, `docs/observability.md`, `docs/architecture.md`, `docs/codex-proxy-tool-calls.md`.
   How: `rg -n "completions" docs` to update legacy framing; `rg -n "gpt-5" docs` to ensure `gpt-5.2`; check Quickstart includes port `11435`, login-link flow, and auth fallback.
   AC: Public docs are internally consistent, responses-first, show correct default model, and include the login-link flow + auth fallback.
 - [x] **Internal docs isolation (track locally, no public push).**

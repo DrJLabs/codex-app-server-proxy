@@ -117,10 +117,9 @@ See [external/README.md](../external/README.md) for details.
 - [docs/responses-endpoint/app-server-tools.md](responses-endpoint/app-server-tools.md) - tool manifest limitations
 - [docs/responses-endpoint/obsidian-tool-call-simulation.md](responses-endpoint/obsidian-tool-call-simulation.md) - OpenAI-parity tool-call simulation
 - [docs/responses-endpoint/prompt-injection.md](responses-endpoint/prompt-injection.md) - responses tool-call prompt injection matrix
-- [docs/responses-api/obsidian-system-prompt-rTJBYn4-dDSccFvZ6sOyb.md](responses-api/obsidian-system-prompt-rTJBYn4-dDSccFvZ6sOyb.md) - ingress evidence (system prompt)
 - [docs/responses-api/obsidian-system-prompt-lur1PQG76dSpMd4FPZij2.md](responses-api/obsidian-system-prompt-lur1PQG76dSpMd4FPZij2.md) - captured developer prompt
+- [docs/reference/app-server-protocol.schema.json](reference/app-server-protocol.schema.json) - JSON-RPC schema bundle
 - [docs/reference/app-server-schema-0.89-tools.md](reference/app-server-schema-0.89-tools.md) - app-server tools schema
-- [docs/app-server-migration/](app-server-migration/) - JSON-RPC schema exports + migration notes
 - [docs/logging-gaps/README.md](logging-gaps/README.md) - observability gap tracker
 - [docs/plans/2026-01-25-obsidian-tool-call-simulation-v2.md](plans/2026-01-25-obsidian-tool-call-simulation-v2.md) - tool-call simulation v2 plan
 

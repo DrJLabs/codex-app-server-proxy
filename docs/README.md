@@ -36,13 +36,12 @@ This folder is the canonical index for repository documentation. Update this fil
 - [`responses-endpoint/app-server-tools.md`](responses-endpoint/app-server-tools.md) — tool manifest limitations and MCP integration notes
 - [`responses-endpoint/obsidian-tool-call-simulation.md`](responses-endpoint/obsidian-tool-call-simulation.md) — OpenAI-parity tool-call simulation plan
 - [`responses-endpoint/prompt-injection.md`](responses-endpoint/prompt-injection.md) — `/v1/responses` tool-call prompt injection matrix
-- [`responses-api/obsidian-system-prompt-rTJBYn4-dDSccFvZ6sOyb.md`](responses-api/obsidian-system-prompt-rTJBYn4-dDSccFvZ6sOyb.md) — ingress evidence for Obsidian system prompt detection
 - [`responses-api/obsidian-system-prompt-lur1PQG76dSpMd4FPZij2.md`](responses-api/obsidian-system-prompt-lur1PQG76dSpMd4FPZij2.md) — captured Obsidian developer prompt
+- [`reference/app-server-protocol.schema.json`](reference/app-server-protocol.schema.json) — JSON-RPC schema bundle (Codex app-server)
 - [`reference/app-server-schema-0.89-tools.md`](reference/app-server-schema-0.89-tools.md) — schema extract for tool support (Codex 0.89.0)
 
 ## Deep dives and backlogs
 
-- [`app-server-migration/`](app-server-migration/) — JSON-RPC schema exports and migration notes
 - [`logging-gaps/README.md`](logging-gaps/README.md) — observability gap tracker
 
 ## Plans (working drafts)
@@ -51,7 +50,11 @@ This folder is the canonical index for repository documentation. Update this fil
 
 ## Internal docs (not published)
 
-- Internal planning/surveys/archives are maintained separately and are not part of the public distribution.
+- Internal planning/surveys are maintained separately and are not part of the public distribution.
+
+## Archive
+
+- `docs/_archive/` (gitignored) — local-only historical root snapshots; not authoritative for current setup.
 
 ## Doc hygiene
 

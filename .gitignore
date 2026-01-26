@@ -18,6 +18,8 @@ bmad-bak/
 .bmad-core/
 .bmad-infrastructure-devops/
 .bmad-ephemeral/
+# Local archives (not authoritative)
+docs/_archive/
 !docs/_archive/v4-backup/.bmad-core/
 !docs/_archive/v4-backup/.bmad-core/**
 !docs/_archive/v4-backup/.bmad-infrastructure-devops/

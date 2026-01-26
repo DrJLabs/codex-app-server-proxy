@@ -34,7 +34,7 @@
 - Preserve OpenAI-compatible streaming: role-first SSE deltas, terminate with `[DONE]`; update fixtures under `tests/` when behavior changes.
 - Backend mode and JSON-RPC transport must gate on `CODEX_HOME`/app-server availability; keep `assertSecureConfig` early in bootstrap.
 - Keep environment handling centralized in `src/config`; avoid scattering new env reads.
-- If changing response/JSON-RPC schemas, also refresh `docs/app-server-migration/*.schema.json` via `npm run jsonrpc:bundle` and re-run `npm run jsonrpc:verify`.
+- If changing response/JSON-RPC schemas, also refresh `docs/reference/app-server-protocol.schema.json` via `npm run jsonrpc:bundle` and re-run `npm run jsonrpc:verify`.
 - Prefer existing helpers in `services/sse`, `services/metrics`, and `services/tracing` instead of ad-hoc implementations.
 
 ## Common pitfalls

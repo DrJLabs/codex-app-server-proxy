@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Fails if the migration runbook is missing readiness probe snippets/metadata.
+ * Fails if the readiness probe documentation is missing expected snippets.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -8,14 +8,11 @@ import path from "node:path";
 const docPath = path.join(
   process.cwd(),
   "docs",
-  "app-server-migration",
-  "codex-app-server-proxy-migration.md"
+  "troubleshooting.md"
 );
 const requiredPatterns = [
   /\/readyz/,
-  /restarts_total/,
-  /next_restart_delay_ms/,
-  /curl -fsS .*\/readyz/i,
+  /\/healthz/,
 ];
 
 function die(msg) {

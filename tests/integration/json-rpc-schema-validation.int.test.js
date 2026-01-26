@@ -19,7 +19,7 @@ const PROJECT_ROOT = resolve(__dirname, "..", "..");
 const SCHEMA_PATH = resolve(
   PROJECT_ROOT,
   "docs",
-  "app-server-migration",
+  "reference",
   "app-server-protocol.schema.json"
 );
 
