@@ -106,7 +106,8 @@ describe("responses stream adapter", () => {
     const deltas = entries.filter((entry) => entry.event === "response.output_text.delta");
     expect(deltas.map((entry) => entry.data.delta).join("")).toBe(sentinel);
     const toolItems = entries.filter(
-      (entry) => entry.event === "response.output_item.added" && entry.data?.item?.type === "function"
+      (entry) =>
+        entry.event === "response.output_item.added" && entry.data?.item?.type === "function"
     );
     expect(toolItems).toEqual([]);
   });
@@ -472,7 +473,8 @@ describe("responses stream adapter", () => {
     );
 
     const added = entries.find(
-      (entry) => entry.event === "response.output_item.added" && entry.data?.item?.type === "function"
+      (entry) =>
+        entry.event === "response.output_item.added" && entry.data?.item?.type === "function"
     );
     expect(added).toBeUndefined();
   });
