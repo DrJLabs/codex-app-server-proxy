@@ -1,13 +1,14 @@
 {
   "metadata": {
-    "captured_at": "2025-12-21T01:10:44.062Z",
-    "scenario": "responses-2025-12-21t01-10-44-062z-8854e2a3-df8d-48b6-89fc-8dd67007c02d-stream",
+    "captured_at": "2026-01-25T19:18:47.397Z",
+    "scenario": "responses-2026-01-25t19-18-47-397z-c385c4d0-ac3a-4d40-94b6-d86b5f610f93-stream",
     "stream": true,
     "outcome": "completed",
     "route": "/v1/responses",
     "mode": "responses_stream",
     "endpoint_mode": "responses",
-    "output_mode_effective": "obsidian-xml",
+    "output_mode_effective": "openai-json",
+    "proxy_trace_id": "xicZiJNUD20mERtLfAINi",
     "copilot_trace_source": "generated",
     "copilot_trace_header": null,
     "copilot_trace_present": true,
@@ -16,13 +17,22 @@
       "has_instructions": false,
       "has_input": true,
       "input_is_array": true,
-      "input_item_count": 6,
-      "input_item_types": ["message"],
-      "input_message_count": 6,
-      "input_message_roles": ["assistant", "user"],
+      "input_item_count": 5,
+      "input_item_types": [
+        "message",
+        "function_call",
+        "function_call_output"
+      ],
+      "input_message_count": 3,
+      "input_message_roles": [
+        "developer",
+        "user",
+        "assistant"
+      ],
       "has_recent_conversations_tag": true,
-      "has_use_tool_tag": true,
-      "has_tool_result_marker": true,
+      "has_saved_memories_tag": false,
+      "has_use_tool_tag": false,
+      "has_tool_result_marker": false,
       "has_input_item_metadata": false,
       "input_item_metadata_keys": [],
       "input_item_metadata_keys_truncated": false,
@@ -30,9 +40,32 @@
       "metadata_keys": [],
       "metadata_keys_truncated": false,
       "has_session_like_metadata_key": false,
-      "has_tools": false,
+      "has_tools": true,
       "has_tool_choice": false,
       "has_previous_response_id": false,
+      "tool_count": 13,
+      "tool_types": [
+        "function"
+      ],
+      "tool_types_truncated": false,
+      "tool_names": [
+        "convertTimeBetweenTimezones",
+        "getCurrentTime",
+        "getFileTree",
+        "getTagList",
+        "getTimeInfoByEpoch",
+        "getTimeRangeMs",
+        "localSearch",
+        "readNote",
+        "replaceInFile",
+        "updateMemory",
+        "webSearch",
+        "writeToFile",
+        "youtubeTranscription"
+      ],
+      "tool_names_truncated": false,
+      "tool_function_name_present_count": 13,
+      "tool_function_name_missing_count": 0,
       "has_tool_output_items": false,
       "tool_output_bytes_total": null,
       "model": "gpt-5.2-codev-L",
@@ -45,20 +78,409 @@
   },
   "request": {
     "headers": {
-      "user-agent": "un/JS 6.5.0",
+      "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.9.7 Chrome/138.0.7204.157 Electron/37.2.4 Safari/537.36",
       "accept": "application/json",
-      "content-type": "application/json"
+      "content-type": "application/json",
+      "x-proxy-output-mode": "openai-json"
     },
     "body": {
       "model": "gpt-5.2-codev-L",
       "temperature": 1,
       "stream": true,
+      "tools": [
+        {
+          "type": "function",
+          "name": "localSearch",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "minLength": 1,
+                "description": "<redacted>"
+              },
+              "salientTerms": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "<redacted>"
+              },
+              "timeRange": {
+                "type": "object",
+                "properties": {
+                  "startTime": {
+                    "type": "number",
+                    "description": "<redacted>"
+                  },
+                  "endTime": {
+                    "type": "number",
+                    "description": "<redacted>"
+                  }
+                },
+                "required": [
+                  "<redacted>",
+                  "<redacted>"
+                ],
+                "additionalProperties": false,
+                "description": "<redacted>"
+              },
+              "_preExpandedQuery": {
+                "type": "object",
+                "properties": {
+                  "originalQuery": {
+                    "type": "string"
+                  },
+                  "salientTerms": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "expandedQueries": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "expandedTerms": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "recallTerms": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "<redacted>",
+                  "<redacted>",
+                  "<redacted>",
+                  "<redacted>",
+                  "<redacted>"
+                ],
+                "additionalProperties": false,
+                "description": "<redacted>"
+              }
+            },
+            "required": [
+              "<redacted>",
+              "<redacted>"
+            ],
+            "additionalProperties": false,
+            "$schema": "<redacted>"
+          },
+          "description": "<redacted>",
+          "strict": null
+        },
+        {
+          "type": "function",
+          "name": "webSearch",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "minLength": 1,
+                "description": "<redacted>"
+              },
+              "chatHistory": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "role": {
+                      "type": "string",
+                      "enum": [
+                        "<redacted>",
+                        "<redacted>"
+                      ]
+                    },
+                    "content": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "<redacted>",
+                    "<redacted>"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "<redacted>"
+              }
+            },
+            "required": [
+              "<redacted>",
+              "<redacted>"
+            ],
+            "additionalProperties": false,
+            "$schema": "<redacted>"
+          },
+          "description": "<redacted>",
+          "strict": null
+        },
+        {
+          "type": "function",
+          "name": "getCurrentTime",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "timezoneOffset": {
+                "type": "string",
+                "description": "<redacted>"
+              }
+            },
+            "additionalProperties": false,
+            "$schema": "<redacted>"
+          },
+          "description": "<redacted>",
+          "strict": null
+        },
+        {
+          "type": "function",
+          "name": "getTimeInfoByEpoch",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "epoch": {
+                "type": "number",
+                "description": "<redacted>"
+              }
+            },
+            "required": [
+              "<redacted>"
+            ],
+            "additionalProperties": false,
+            "$schema": "<redacted>"
+          },
+          "description": "<redacted>",
+          "strict": null
+        },
+        {
+          "type": "function",
+          "name": "getTimeRangeMs",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "timeExpression": {
+                "type": "string",
+                "description": "<redacted>"
+              }
+            },
+            "required": [
+              "<redacted>"
+            ],
+            "additionalProperties": false,
+            "$schema": "<redacted>"
+          },
+          "description": "<redacted>",
+          "strict": null
+        },
+        {
+          "type": "function",
+          "name": "convertTimeBetweenTimezones",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "time": {
+                "type": "string",
+                "description": "<redacted>"
+              },
+              "fromOffset": {
+                "type": "string",
+                "description": "<redacted>"
+              },
+              "toOffset": {
+                "type": "string",
+                "description": "<redacted>"
+              }
+            },
+            "required": [
+              "<redacted>",
+              "<redacted>",
+              "<redacted>"
+            ],
+            "additionalProperties": false,
+            "$schema": "<redacted>"
+          },
+          "description": "<redacted>",
+          "strict": null
+        },
+        {
+          "type": "function",
+          "name": "readNote",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "notePath": {
+                "type": "string",
+                "minLength": 1,
+                "description": "<redacted>"
+              },
+              "chunkIndex": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "<redacted>"
+              }
+            },
+            "required": [
+              "<redacted>"
+            ],
+            "additionalProperties": false,
+            "$schema": "<redacted>"
+          },
+          "description": "<redacted>",
+          "strict": null
+        },
+        {
+          "type": "function",
+          "name": "writeToFile",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "<redacted>"
+              },
+              "content": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": true
+                  }
+                ],
+                "description": "<redacted>"
+              },
+              "confirmation": {
+                "type": "boolean",
+                "default": true,
+                "description": "<redacted>"
+              }
+            },
+            "required": [
+              "<redacted>",
+              "<redacted>"
+            ],
+            "additionalProperties": false,
+            "$schema": "<redacted>"
+          },
+          "description": "<redacted>",
+          "strict": null
+        },
+        {
+          "type": "function",
+          "name": "replaceInFile",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "<redacted>"
+              },
+              "diff": {
+                "type": "string",
+                "description": "<redacted>"
+              }
+            },
+            "required": [
+              "<redacted>",
+              "<redacted>"
+            ],
+            "additionalProperties": false,
+            "$schema": "<redacted>"
+          },
+          "description": "<redacted>",
+          "strict": null
+        },
+        {
+          "type": "function",
+          "name": "youtubeTranscription",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "_userMessageContent": {
+                "type": "string",
+                "description": "<redacted>"
+              }
+            },
+            "additionalProperties": false,
+            "$schema": "<redacted>"
+          },
+          "description": "<redacted>",
+          "strict": null
+        },
+        {
+          "type": "function",
+          "name": "getFileTree",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false,
+            "$schema": "<redacted>"
+          },
+          "description": "<redacted>",
+          "strict": null
+        },
+        {
+          "type": "function",
+          "name": "getTagList",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "includeInline": {
+                "type": "boolean",
+                "description": "<redacted>"
+              },
+              "maxEntries": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5000,
+                "description": "<redacted>"
+              }
+            },
+            "additionalProperties": false,
+            "description": "<redacted>",
+            "$schema": "<redacted>"
+          },
+          "description": "<redacted>",
+          "strict": null
+        },
+        {
+          "type": "function",
+          "name": "updateMemory",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "statement": {
+                "type": "string",
+                "minLength": 1,
+                "description": "<redacted>"
+              }
+            },
+            "required": [
+              "<redacted>"
+            ],
+            "additionalProperties": false,
+            "$schema": "<redacted>"
+          },
+          "description": "<redacted>",
+          "strict": null
+        }
+      ],
       "text": {},
       "max_output_tokens": 65000,
       "input": [
         {
           "type": "message",
-          "role": "assistant",
+          "role": "developer",
           "content": "<redacted>"
         },
         {
@@ -69,22 +491,18 @@
         {
           "type": "message",
           "role": "assistant",
-          "content": "<redacted>"
+          "content": ""
         },
         {
-          "type": "message",
-          "role": "user",
-          "content": "<redacted>"
+          "type": "function_call",
+          "name": "webSearch",
+          "arguments": "<redacted>",
+          "call_id": "<redacted>"
         },
         {
-          "type": "message",
-          "role": "assistant",
-          "content": "<redacted>"
-        },
-        {
-          "type": "message",
-          "role": "user",
-          "content": "<redacted>"
+          "type": "function_call_output",
+          "call_id": "<redacted>",
+          "output": "<redacted>"
         }
       ]
     }
@@ -93,444 +511,48 @@
     {
       "type": "data",
       "event": "response.created",
+      "ts": 1769368838120,
       "data": {
         "type": "response.created",
         "response": {
           "id": "<id>",
           "status": "in_progress"
-        }
+        },
+        "sequence_number": 1
       }
     },
     {
       "type": "data",
       "event": "response.output_text.delta",
+      "ts": 1769368838121,
       "data": {
         "type": "response.output_text.delta",
         "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
-      }
-    },
-    {
-      "type": "data",
-      "event": "response.output_text.delta",
-      "data": {
-        "type": "response.output_text.delta",
-        "delta": "<redacted>",
-        "output_index": 0
+        "output_index": 0,
+        "sequence_number": 2
       }
     },
     {
       "type": "data",
       "event": "response.output_text.done",
+      "ts": 1769368838121,
       "data": {
-        "type": "response.output_text.done"
+        "type": "response.output_text.done",
+        "sequence_number": 3
       }
     },
     {
       "type": "data",
       "event": "response.completed",
+      "ts": 1769368838121,
       "data": {
         "type": "response.completed",
         "response": {
           "id": "<id>",
+          "object": "<redacted>",
+          "created": 1769368838,
           "status": "completed",
-          "model": "gpt-5.2-codev-l",
+          "model": "gpt-5.2-codev-L",
           "output": [
             {
               "id": "<id>",
@@ -544,12 +566,14 @@
               ]
             }
           ]
-        }
+        },
+        "sequence_number": 4
       }
     },
     {
       "type": "done",
-      "event": "done"
+      "event": "done",
+      "ts": 1769368838121
     }
   ]
 }

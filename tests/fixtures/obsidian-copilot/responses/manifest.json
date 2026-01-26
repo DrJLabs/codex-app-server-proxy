@@ -1,16 +1,16 @@
 {
   "source": "proxy-capture",
-  "generated_at": "2025-12-21T01:19:21.786Z",
+  "generated_at": "2026-01-26T08:54:25.065Z",
   "fixtures": [
     {
       "file": "responses-stream-text.json",
       "scenario": "responses-stream-text",
-      "capture_source": "responses-2025-12-21t01-10-44-062z-8854e2a3-df8d-48b6-89fc-8dd67007c02d-stream"
+      "capture_source": "responses-2026-01-25t19-18-47-397z-c385c4d0-ac3a-4d40-94b6-d86b5f610f93-stream"
     },
     {
       "file": "responses-stream-tool.json",
       "scenario": "responses-stream-tool",
-      "capture_source": "responses-2025-12-21t01-10-33-523z-e5f44836-4fd2-4b07-bc0b-6945116aa2a6-stream"
+      "capture_source": "responses-2026-01-26t05-21-00-804z-03099ba9-b204-4822-8621-0ac947572e7b-stream"
     }
   ]
 }
