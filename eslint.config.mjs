@@ -42,6 +42,7 @@ export default [
       ".bmad/**",
       "bmad-bak/**",
       "external/**",
+      "docs/_archive/**",
       "eslint.config.mjs",
     ],
   },
