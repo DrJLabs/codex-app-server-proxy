@@ -58,6 +58,14 @@ function buildSupervisorArgs() {
     pushConfig("parallel_tool_calls", quote("true"));
   }
 
+  if (CFG.PROXY_DISABLE_SHELL_TOOL) {
+    pushConfig("features.shell_tool", quote("false"));
+  }
+
+  if (CFG.PROXY_DISABLE_UNIFIED_EXEC) {
+    pushConfig("features.unified_exec", quote("false"));
+  }
+
   return args;
 }
 

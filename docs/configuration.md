@@ -46,6 +46,8 @@ Codex CLI reads `config.toml` and `AGENTS.md` from `CODEX_HOME`.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PROXY_ENABLE_RESPONSES` | `true` | Enable `/v1/responses` |
+| `PROXY_DISABLE_SHELL_TOOL` | `true` | Disable Codex `shell_tool` in app-server |
+| `PROXY_DISABLE_UNIFIED_EXEC` | `true` | Disable Codex `unified_exec` in app-server |
 | `PROXY_PROTECT_MODELS` | `false` | Require bearer for `/v1/models` |
 | `PROXY_USAGE_ALLOW_UNAUTH` | `false` | Allow unauthenticated access to `/v1/usage*` |
 | `PROXY_TEST_ENDPOINTS` | `false` | Enable `__test/*` endpoints (dev/CI only) |

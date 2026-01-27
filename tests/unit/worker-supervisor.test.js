@@ -53,6 +53,8 @@ beforeEach(async () => {
   process.env.WORKER_RESTART_MAX = "3";
   process.env.CODEX_FORCE_PROVIDER = "openai";
   process.env.PROXY_ENABLE_PARALLEL_TOOL_CALLS = "true";
+  process.env.PROXY_DISABLE_SHELL_TOOL = "true";
+  process.env.PROXY_DISABLE_UNIFIED_EXEC = "true";
 
   const module = await import("../../src/services/worker/supervisor.js");
   ensureWorkerSupervisor = module.ensureWorkerSupervisor;
@@ -72,6 +74,8 @@ afterEach(async () => {
   delete process.env.WORKER_RESTART_MAX;
   delete process.env.CODEX_FORCE_PROVIDER;
   delete process.env.PROXY_ENABLE_PARALLEL_TOOL_CALLS;
+  delete process.env.PROXY_DISABLE_SHELL_TOOL;
+  delete process.env.PROXY_DISABLE_UNIFIED_EXEC;
   vi.clearAllMocks();
 });
 
@@ -81,6 +85,12 @@ describe("CodexWorkerSupervisor health snapshots", () => {
     expect(args).toContain("app-server");
     expect(args).toContain('model_provider="openai"');
     expect(args).toContain('parallel_tool_calls="true"');
+  });
+
+  test("launch args disable shell_tool and unified_exec by default", () => {
+    const args = spawnCodexSpy.mock.calls[0]?.[0] ?? [];
+    expect(args).toContain('features.shell_tool="false"');
+    expect(args).toContain('features.unified_exec="false"');
   });
 
   test("readiness toggles on handshake and exit events", async () => {

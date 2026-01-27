@@ -195,8 +195,7 @@ describe("responses stream adapter", () => {
     const entries = parseSSE(res.chunks.join(""));
     const added = entries.filter(
       (entry) =>
-        entry.event === "response.output_item.added" &&
-        entry.data?.item?.type === "function_call"
+        entry.event === "response.output_item.added" && entry.data?.item?.type === "function_call"
     );
     expect(added).toHaveLength(1);
   });
