@@ -75,16 +75,18 @@ For production requirements (Traefik, Codex HOME, auth), see [docs/deployment/pr
 
 ## Minimal configuration
 
-| Variable                      | Default              | Purpose                                                                 |
-| ----------------------------- | -------------------- | ----------------------------------------------------------------------- |
-| `PROXY_API_KEY`               | `codex-local-secret` | Bearer token for protected routes                                       |
-| `PORT`                        | `11435`              | Listen port for `node server.js`/compose (dev script defaults to 18000) |
-| `PROXY_ENV`                   | `_(empty)_`          | Model advertising mode (`dev` -> `codev-*`)                             |
-| `PROXY_ENABLE_RESPONSES`      | `true`               | Enable `/v1/responses`                                                  |
-| `PROXY_DISABLE_SHELL_TOOL`    | `true`               | Disable Codex `shell_tool` in app-server                                |
-| `PROXY_DISABLE_UNIFIED_EXEC`  | `true`               | Disable Codex `unified_exec` in app-server                              |
-| `PROXY_OUTPUT_MODE`           | `obsidian-xml`       | Default output mode for `/v1/chat/completions`                          |
-| `PROXY_RESPONSES_OUTPUT_MODE` | `openai-json`        | Default output mode for `/v1/responses`                                 |
+| Variable                         | Default              | Purpose                                                                 |
+| -------------------------------- | -------------------- | ----------------------------------------------------------------------- |
+| `PROXY_API_KEY`                  | `codex-local-secret` | Bearer token for protected routes                                       |
+| `PORT`                           | `11435`              | Listen port for `node server.js`/compose (dev script defaults to 18000) |
+| `PROXY_ENV`                      | `_(empty)_`          | Model advertising mode (`dev` -> `codev-*`)                             |
+| `PROXY_ENABLE_RESPONSES`         | `true`               | Enable `/v1/responses`                                                  |
+| `PROXY_DISABLE_SHELL_TOOL`       | `true`               | Disable Codex `shell_tool` in app-server                                |
+| `PROXY_DISABLE_UNIFIED_EXEC`     | `true`               | Disable Codex `unified_exec` in app-server                              |
+| `PROXY_OUTPUT_MODE`              | `obsidian-xml`       | Default output mode for `/v1/chat/completions`                          |
+| `PROXY_RESPONSES_OUTPUT_MODE`    | `openai-json`        | Default output mode for `/v1/responses`                                 |
+| `PROXY_RESPONSES_SKIP_TURN`      | `false`              | Skip agent turn (`sendUserTurn`) for `/v1/responses`                    |
+| `PROXY_INCLUDE_APPLY_PATCH_TOOL` | `false`              | Include the `apply_patch` tool in Codex turns                           |
 
 Full configuration and defaults: [docs/configuration.md](docs/configuration.md).
 

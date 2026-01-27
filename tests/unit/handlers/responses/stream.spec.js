@@ -198,6 +198,18 @@ describe("responses stream handler", () => {
     expect(createJsonRpcChildAdapterMock).not.toHaveBeenCalled();
   });
 
+  it("does not enable apply_patch tool by default", async () => {
+    const { postResponsesStream } = await import("../../../../src/handlers/responses/stream.js");
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    await postResponsesStream(req, res);
+
+    expect(createJsonRpcChildAdapterMock).toHaveBeenCalledTimes(1);
+    const adapterOptions = createJsonRpcChildAdapterMock.mock.calls[0][0];
+    expect(adapterOptions.normalizedRequest.turn.includeApplyPatchTool).toBe(false);
+  });
+
   it("forwards function tools to backend tool payload", async () => {
     const definitions = [{ type: "function", function: { name: "lookup", parameters: {} } }];
     normalizeResponsesRequestMock.mockReturnValueOnce({

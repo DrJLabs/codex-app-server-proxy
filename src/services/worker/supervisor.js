@@ -59,11 +59,11 @@ function buildSupervisorArgs() {
   }
 
   if (CFG.PROXY_DISABLE_SHELL_TOOL) {
-    pushConfig("features.shell_tool", quote("false"));
+    pushConfig("features.shell_tool", "false");
   }
 
   if (CFG.PROXY_DISABLE_UNIFIED_EXEC) {
-    pushConfig("features.unified_exec", quote("false"));
+    pushConfig("features.unified_exec", "false");
   }
 
   return args;

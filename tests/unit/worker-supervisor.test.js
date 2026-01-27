@@ -89,8 +89,8 @@ describe("CodexWorkerSupervisor health snapshots", () => {
 
   test("launch args disable shell_tool and unified_exec by default", () => {
     const args = spawnCodexSpy.mock.calls[0]?.[0] ?? [];
-    expect(args).toContain('features.shell_tool="false"');
-    expect(args).toContain('features.unified_exec="false"');
+    expect(args).toContain("features.shell_tool=false");
+    expect(args).toContain("features.unified_exec=false");
   });
 
   test("readiness toggles on handshake and exit events", async () => {

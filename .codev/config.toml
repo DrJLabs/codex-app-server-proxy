@@ -10,6 +10,7 @@ streamable_shell = false
 unified_exec = false
 apply_patch_freeform = false
 view_image_tool = false
+shell_tool = false
 
 [tools]
 web_search = false

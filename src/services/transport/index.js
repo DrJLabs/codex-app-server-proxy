@@ -354,7 +354,7 @@ class JsonRpcTransport {
     return this.handshakePromise;
   }
 
-  async createChatRequest({ requestId, timeoutMs, signal, turnParams, trace }) {
+  async createChatRequest({ requestId, timeoutMs, signal, turnParams, trace, skipTurn = false }) {
     if (this.destroyed) throw new TransportError("transport destroyed", { retryable: true });
     if (!this.child)
       throw new TransportError("worker not available", {
@@ -418,7 +418,9 @@ class JsonRpcTransport {
       throw err;
     }
 
-    this.#sendUserTurn(context, turnParams);
+    if (!skipTurn) {
+      this.#sendUserTurn(context, turnParams);
+    }
     return context;
   }
 

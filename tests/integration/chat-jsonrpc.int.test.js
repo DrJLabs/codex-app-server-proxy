@@ -172,7 +172,7 @@ describe("chat JSON-RPC normalization", () => {
       return normalized || "never";
     })();
     expect(newConversationParams.approvalPolicy).toBe(expectedApproval);
-    expect(newConversationParams.includeApplyPatchTool).toBe(true);
+    expect(newConversationParams.includeApplyPatchTool).toBe(CFG.PROXY_INCLUDE_APPLY_PATCH_TOOL);
 
     const addListenerCapture = findCapture(server.captures, "addConversationListener");
     expect(addListenerCapture).toBeDefined();

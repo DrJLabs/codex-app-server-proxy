@@ -14,7 +14,7 @@ const redactInlineAuth = (value) =>
     : value;
 
 export class JsonRpcChildAdapter extends EventEmitter {
-  constructor({ reqId, timeoutMs, normalizedRequest = null, trace = null }) {
+  constructor({ reqId, timeoutMs, normalizedRequest = null, trace = null, skipTurn = false }) {
     super();
     this.reqId = reqId;
     this.timeoutMs = timeoutMs;
@@ -24,6 +24,7 @@ export class JsonRpcChildAdapter extends EventEmitter {
     this.started = false;
     this.normalizedRequest = normalizedRequest;
     this.trace = trace;
+    this.skipTurn = skipTurn;
 
     this.stdout = new EventEmitter();
     this.stderr = new EventEmitter();
@@ -89,6 +90,7 @@ export class JsonRpcChildAdapter extends EventEmitter {
         timeoutMs: this.timeoutMs,
         turnParams: turnPayload,
         trace: this.trace,
+        skipTurn: this.skipTurn,
       });
       if (this.closed) {
         this.transport.cancelContext(

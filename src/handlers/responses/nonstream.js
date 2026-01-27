@@ -338,7 +338,7 @@ export async function postResponsesNonStream(req, res) {
     approvalPolicy: APPROVAL_POLICY,
     sandboxPolicy: SANDBOX_MODE ? { type: SANDBOX_MODE } : undefined,
     summary: "auto",
-    includeApplyPatchTool: true,
+    includeApplyPatchTool: CFG.PROXY_INCLUDE_APPLY_PATCH_TOOL,
   };
   if (reasoningEffort) turn.effort = reasoningEffort;
   if (Number.isInteger(nValue) && nValue > 0) turn.choiceCount = nValue;
@@ -389,6 +389,7 @@ export async function postResponsesNonStream(req, res) {
     timeoutMs: REQ_TIMEOUT_MS,
     normalizedRequest,
     trace: { reqId, route: "/v1/responses", mode: "responses_nonstream" },
+    skipTurn: CFG.PROXY_RESPONSES_SKIP_TURN,
   });
 
   let responded = false;

@@ -297,6 +297,25 @@ describe("JsonRpcChildAdapter normalization", () => {
     await flushAsync();
   });
 
+  it("passes skipTurn to createChatRequest when configured", async () => {
+    const { adapter, resolvePromise } = await setupAdapter({ skipTurn: true });
+
+    adapter.stdin.write(JSON.stringify({ prompt: "hello" }));
+    await flushAsync();
+
+    expect(transport.createChatRequest).toHaveBeenCalledTimes(1);
+    expect(transport.createChatRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "req-test",
+        timeoutMs: 1000,
+        skipTurn: true,
+      })
+    );
+
+    resolvePromise();
+    await flushAsync();
+  });
+
   it("forwards unknown notifications and strips normalized text payloads", async () => {
     const { adapter, emitter, resolvePromise, stdout } = await setupAdapter({
       normalizedRequest: {

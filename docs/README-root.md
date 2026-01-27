@@ -85,6 +85,8 @@ For production requirements (Traefik, Codex HOME, auth), see [docs/deployment/pr
 | `PROXY_DISABLE_UNIFIED_EXEC`  | `true`               | Disable Codex `unified_exec` in app-server                              |
 | `PROXY_OUTPUT_MODE`           | `obsidian-xml`       | Default output mode for `/v1/chat/completions`                          |
 | `PROXY_RESPONSES_OUTPUT_MODE` | `openai-json`        | Default output mode for `/v1/responses`                                 |
+| `PROXY_RESPONSES_SKIP_TURN`   | `false`              | Skip agent turn (`sendUserTurn`) for `/v1/responses`                    |
+| `PROXY_INCLUDE_APPLY_PATCH_TOOL` | `false`           | Include the `apply_patch` tool in Codex turns                           |
 
 Full configuration and defaults: [docs/configuration.md](configuration.md).
 

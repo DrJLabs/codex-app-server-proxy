@@ -497,7 +497,7 @@ export const normalizeChatJsonRpcRequest = ({
     effort: turnEffort,
     summary: "auto",
     stream: !!stream,
-    includeApplyPatchTool: true,
+    includeApplyPatchTool: CFG.PROXY_INCLUDE_APPLY_PATCH_TOOL,
   };
 
   if (Number.isInteger(choiceCount) && choiceCount > 0) {
