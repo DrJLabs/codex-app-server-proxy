@@ -86,6 +86,11 @@ describe("responses stream adapter", () => {
     const entries = parseSSE(res.chunks.join(""));
     expect(entries[0]?.event).toBe("response.created");
     const deltas = entries.filter((entry) => entry.event === "response.output_text.delta");
+    deltas.forEach((entry) => {
+      expect(entry.data.output_index).toBe(0);
+    });
+    const done = entries.find((entry) => entry.event === "response.output_text.done");
+    expect(done?.data?.output_index).toBe(0);
     expect(deltas.map((entry) => entry.data.delta).join("")).toBe("Hello");
   });
 
@@ -165,6 +170,19 @@ describe("responses stream adapter", () => {
     expect(deltaIndex).toBeGreaterThan(addedIndex);
     expect(doneIndex).toBeGreaterThan(deltaIndex);
     expect(outputDoneIndex).toBeGreaterThan(doneIndex);
+
+    const added = entries.find((entry) => entry.event === "response.output_item.added");
+    const argsDelta = entries.find(
+      (entry) => entry.event === "response.function_call_arguments.delta"
+    );
+    const argsDone = entries.find(
+      (entry) => entry.event === "response.function_call_arguments.done"
+    );
+    const outputDone = entries.find((entry) => entry.event === "response.output_item.done");
+    expect(added?.data?.output_index).toBe(1);
+    expect(argsDelta?.data?.output_index).toBe(1);
+    expect(argsDone?.data?.output_index).toBe(1);
+    expect(outputDone?.data?.output_index).toBe(1);
   });
 
   it("emits response.failed when handleEvent encounters an error", async () => {

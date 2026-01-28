@@ -38,4 +38,42 @@ describe("native responses envelope builder", () => {
     expect(fnItem.name).toBe("lookup");
     expect(fnItem.arguments).toBe("42");
   });
+
+  it("keeps message output first and tool calls typed as function_call", () => {
+    const envelope = buildResponsesEnvelope({
+      responseId: "resp_2",
+      created: 2,
+      model: "gpt-4.1",
+      outputText: "hello",
+      functionCalls: [
+        { id: "call_1", function: { name: "lookup", arguments: "{}" } },
+        { id: "call_2", function: { name: "search", arguments: "{}" } },
+      ],
+      usage: null,
+      status: "completed",
+    });
+
+    expect(envelope.output[0].type).toBe("message");
+    expect(envelope.output[0].content[0].type).toBe("output_text");
+    expect(envelope.output.slice(1).every((item) => item.type === "function_call")).toBe(true);
+  });
+
+  it("normalizes function arguments without double-encoding", () => {
+    const envelope = buildResponsesEnvelope({
+      responseId: "resp_3",
+      created: 3,
+      model: "gpt-4.1",
+      outputText: "",
+      functionCalls: [
+        { id: "call_str", function: { name: "echo", arguments: '{"x":1}' } },
+        { id: "call_obj", function: { name: "echo", arguments: { x: 1 } } },
+      ],
+      usage: null,
+      status: "completed",
+    });
+
+    const [strItem, objItem] = envelope.output.slice(1);
+    expect(strItem.arguments).toBe('{"x":1}');
+    expect(objItem.arguments).toBe('{"x":1}');
+  });
 });

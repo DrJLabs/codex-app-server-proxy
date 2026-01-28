@@ -18,6 +18,8 @@ const DEFAULT_ROLE = "assistant";
 const OUTPUT_DELTA_EVENT = "response.output_text.delta";
 const RESPONSES_ROUTE = "/v1/responses";
 const RESPONSE_SHAPE_VERSION = "responses_v0_typed_sse_openai_json";
+const MESSAGE_OUTPUT_INDEX = 0;
+const toolOutputIndex = (ordinal) => MESSAGE_OUTPUT_INDEX + 1 + ordinal;
 
 const mapFinishStatus = (reasons) => {
   const normalized = new Set(
@@ -456,12 +458,13 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
         type: toolDelta.type,
         name: toolDelta.function?.name,
       });
+      const outputIndex = toolOutputIndex(existing.ordinal ?? fallbackOrdinal);
 
       if (!existing.added) {
         writeEvent("response.output_item.added", {
           type: "response.output_item.added",
           response_id: responseId,
-          output_index: index,
+          output_index: outputIndex,
           item: {
             id: existing.id,
             call_id: existing.id,
@@ -482,7 +485,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
           writeEvent("response.function_call_arguments.delta", {
             type: "response.function_call_arguments.delta",
             response_id: responseId,
-            output_index: index,
+            output_index: outputIndex,
             item_id: existing.id,
             delta: chunk,
           });
@@ -505,12 +508,13 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
         type: call.type,
         name: call.function?.name,
       });
+      const outputIndex = toolOutputIndex(existing.ordinal ?? ordinal);
 
       if (!existing.added) {
         writeEvent("response.output_item.added", {
           type: "response.output_item.added",
           response_id: responseId,
-          output_index: index,
+          output_index: outputIndex,
           item: {
             id: existing.id,
             call_id: existing.id,
@@ -530,7 +534,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
           writeEvent("response.function_call_arguments.delta", {
             type: "response.function_call_arguments.delta",
             response_id: responseId,
-            output_index: index,
+            output_index: outputIndex,
             item_id: existing.id,
             delta: chunk,
           });
@@ -626,7 +630,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
         writeEvent("response.function_call_arguments.done", {
           type: "response.function_call_arguments.done",
           response_id: responseId,
-          output_index: index,
+          output_index: outputIndex,
           item_id: existing.id,
           arguments: args,
         });
@@ -637,7 +641,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
         writeEvent("response.output_item.done", {
           type: "response.output_item.done",
           response_id: responseId,
-          output_index: index,
+          output_index: outputIndex,
           item: {
             id: existing.id,
             call_id: existing.id,
@@ -712,7 +716,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
     writeEvent(OUTPUT_DELTA_EVENT, {
       type: OUTPUT_DELTA_EVENT,
       delta: text,
-      output_index: choiceIndex,
+      output_index: MESSAGE_OUTPUT_INDEX,
     });
   };
 
@@ -756,11 +760,13 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
       name,
     });
 
+    const outputIndex = toolOutputIndex(existing.ordinal ?? toolCalls.size);
+
     if (!existing.added) {
       writeEvent("response.output_item.added", {
         type: "response.output_item.added",
         response_id: state.responseId,
-        output_index: choiceIndex,
+        output_index: outputIndex,
         item: {
           id: existing.id,
           call_id: existing.id,
@@ -777,7 +783,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
       writeEvent("response.function_call_arguments.delta", {
         type: "response.function_call_arguments.delta",
         response_id: state.responseId,
-        output_index: choiceIndex,
+        output_index: outputIndex,
         item_id: existing.id,
         delta: argumentsText,
       });
@@ -788,7 +794,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
       writeEvent("response.function_call_arguments.done", {
         type: "response.function_call_arguments.done",
         response_id: state.responseId,
-        output_index: choiceIndex,
+        output_index: outputIndex,
         item_id: existing.id,
         arguments: argumentsText,
       });
@@ -799,7 +805,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
       writeEvent("response.output_item.done", {
         type: "response.output_item.done",
         response_id: state.responseId,
-        output_index: choiceIndex,
+        output_index: outputIndex,
         item: {
           id: existing.id,
           call_id: existing.id,
@@ -974,7 +980,10 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
         handleParsedToolCalls(choiceState, 0, parsed.parsedToolCalls);
       }
 
-      writeEvent("response.output_text.done", { type: "response.output_text.done" });
+      writeEvent("response.output_text.done", {
+        type: "response.output_text.done",
+        output_index: MESSAGE_OUTPUT_INDEX,
+      });
       const outputText =
         choiceState && choiceState.textParts.length
           ? choiceState.textParts.join("")
