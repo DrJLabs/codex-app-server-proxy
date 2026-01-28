@@ -2,274 +2,193 @@
 
 ## Reasoning:
 - **Assumptions**
-  - `codex-app-server-proxy` constructs and sends a `newConversation` request (JSON-RPC or wrapper) during “conversation bootstrap”.
-  - Upstream has introduced a **v2 schema** that adds *optional* conversation-level fields:
-    - `baseInstructions`, `developerInstructions`
-    - `userProfile`, `conversationContext`, `toolConfig`
-  - The proxy must remain compatible with older upstreams that either **ignore** unknown keys or **reject** them.
+  - The proxy creates a Codex App Server conversation via JSON-RPC `newConversation` from the transport layer.
+  - Conversation-scoped parameters must match the Codex JSON-RPC schema implemented in `src/lib/json-rpc/schema.ts` (pinned to Codex CLI protocol v0.89.0).
+  - The transport should pass through only supported `NewConversationParams` fields and rely on `buildNewConversationParams()` for normalization (string trimming, enum normalization, dropping invalid values).
 - **Logic**
-  - Solve this as **schema evolution**: add v2 fields as *pass-through* and gate emission behind a capability/version check.
-  - Preserve prior semantics for existing fields (notably instructions + sandbox), because upstream validators are often strict.
+  - Keep schema ownership centralized in `schema.ts` and avoid duplicating validation logic in transport.
+  - Ensure transport forwards *all* supported conversation-scoped fields that clients/handlers may provide (`config`, `compactPrompt`), since `schema.ts` already supports them.
+  - Add unit tests for edge cases explicitly called out in the plan (invalid sandbox shapes, config passthrough, compactPrompt passthrough) to prevent regression.
 
 ---
 
-## Recommended strategy (best path)
-### 1) Centralize payload construction in a versioned builder
-Create one “source of truth” function:
+## Objective
 
-- `buildNewConversationParams(opts, serverCaps)` → `{ params, schemaVersionUsed }`
+Ensure the proxy's conversation bootstrap (`newConversation`) payload is fully aligned with the current `NewConversationParams` schema by:
 
-Rules:
-- **V2**: emit v2-only keys only when provided.
-- **V1**: omit v2-only keys. If you must preserve developer-instruction behavior, *merge* developer → base as a fallback.
-
-> Why: strict upstreams can hard-fail on unknown keys.
-
-### 2) Correct `sandbox` typing and instruction defaults
-**Do not treat `sandbox` as boolean.** Public Codex payloads show `sandbox` as a **string mode** (e.g., `"danger-full-access"`), and `baseInstructions` is commonly `null` rather than `""`.  
-Reference: openai/codex issue **#4541**, log payload in the description (view lines ~**218–221**).  
-
-Implications for the proxy:
-- `sandbox` should be an enum-like string type (e.g., `"read-only" | "workspace-write" | "danger-full-access"`).
-- Instructions should default to **omitted** / `undefined` (or `null` if your proxy previously used null), **not** `""`.
-
-### 3) Normalize conversation id from upstream responses
-Implement a helper that accepts:
-- `conversationId`
-- `conversation_id`
-(and returns a single internal `conversationId` string)
+- forwarding *all supported* conversation-scoped fields from the transport layer
+- preserving current normalization behavior (`sandbox`, `approvalPolicy`, instruction trimming)
+- forwarding `dynamicTools` (thread-start tool manifest) when provided
+- expanding unit tests to cover edge cases and optional fields
 
 ---
 
-## Alternatives (only if needed)
-### A) Always send v2 keys
-Fast but risky: if older upstream rejects unknown keys, conversation start fails.
+## Verified current state (repo)
 
-### B) Optimistic v2 then retry as v1 on failure
-Works even without an explicit handshake, but adds a second request path and needs careful “don’t double-create tasks” handling.
+### Schema support already exists
+`src/lib/json-rpc/schema.ts` already supports these conversation-scoped fields:
+
+- `config?: Record<string, unknown> | null`
+- `compactPrompt?: string | null`
+- `dynamicTools?: JsonValue[] | null` (v2 thread-start tool definitions)
+
+…and normalizes sandbox modes from either strings or `{ type | mode }` objects while dropping invalid types.
+
+### Transport is missing pass-through fields
+`src/services/transport/index.js` builds `conversationParams` for `newConversation` but currently does **not** forward:
+- `config`
+- `compactPrompt`
+
+Dynamic tool manifests **must** be forwarded via `dynamicTools` so they reach
+`newConversation` at thread start (per app-server 0.92 tools schema).
+
+So even though the schema supports these fields, they never reach the worker unless added at the call site.
+
+### Tests cover happy-path only
+`tests/unit/json-rpc-schema.test.ts` includes a basic `buildNewConversationParams` test, but does not cover:
+- `config` passthrough
+- `compactPrompt` passthrough
+- invalid `sandbox` types (e.g., boolean)
+- legacy sandbox policy objects (e.g., `{ type: "read-only" }`)
 
 ---
 
-## Where to look
-You need **repo-specific** `path:line` references for the actual patch. Generate them locally and paste into the table below.
+## Tasks
 
-```bash
-# 1) Who builds the request payload
-rg -n "newConversation" -S .
+### 1) Update transport mapping to include missing fields
+**File:** `src/services/transport/index.js`  
+**Location:** `JsonRpcTransport.#ensureConversation()` conversation bootstrap section (where `conversationParams` is built)
 
-# 2) The request/response types
-rg -n "NewConversationParams|ConversationBootstrap|Conversation.*Bootstrap" -S .
+Add `config` and `compactPrompt` (including snake_case alias for `compact_prompt`) to the `buildNewConversationParams()` call:
 
-# 3) Instruction mapping (system/developer → base/developer)
-rg -n "baseInstructions|developerInstructions|system.*instructions|developer.*instructions" -S .
+- `config: basePayload.config`
+- `compactPrompt: basePayload.compactPrompt ?? basePayload.compact_prompt`
+- `dynamicTools: basePayload.dynamicTools ?? basePayload.dynamic_tools`
 
-# 4) Response parsing (conversationId vs conversation_id)
-rg -n "conversationId|conversation_id" -S .
+Keep existing mapping for `sandbox` (`sandboxPolicy` or `sandbox`) and other fields.
 
-# 5) Tool flags that might move into toolConfig
-rg -n "includePlanTool|includeApplyPatchTool|applyPatchTool|toolConfig" -S .
+#### Optional: legacy instruction aliasing (only if needed)
+If you have any client path that can arrive at transport with legacy top-level instruction keys, you may also map:
+- `baseInstructions: basePayload.baseInstructions ?? basePayload.instructions ?? basePayload.system_prompt`
+
+**Note:** for `/v1/chat/completions` and `/v1/responses`, the repo already normalizes instructions earlier (in request normalizers). Do not add this aliasing unless you have evidence it is needed for a specific ingress path.
+
+---
+
+### 2) Expand unit tests for edge cases and new fields
+**File:** `tests/unit/json-rpc-schema.test.ts`  
+**Location:** near the existing `"builds newConversation params with normalized optional fields"` test
+
+Add tests to assert:
+
+- `config` object is preserved
+- `compactPrompt` is preserved
+- boolean sandbox is dropped (undefined)
+- legacy sandbox objects normalize to a valid mode string
+
+This locks in the behavior already implemented by `normalizeSandboxModeOption()` and `buildNewConversationParams()`.
+
+---
+
+### 3) Quick sanity validation
+Run unit tests and ensure no schema regression:
+
+- `npm run test:unit -- tests/unit/json-rpc-schema.test.ts`
+
+(If you rely on AJV schema validation integration tests, also run the integration suite that validates JSON-RPC payloads.)
+
+---
+
+## Suggested patch snippets
+
+### A) Transport: forward `config` and `compactPrompt`
+
+```js
+// src/services/transport/index.js
+// inside JsonRpcTransport.#ensureConversation()
+
+const conversationParams = buildNewConversationParams({
+  model: basePayload.model ?? undefined,
+  modelProvider: basePayload.modelProvider ?? basePayload.model_provider ?? undefined,
+  profile: basePayload.profile ?? undefined,
+  cwd: basePayload.cwd ?? undefined,
+  approvalPolicy: basePayload.approvalPolicy ?? basePayload.approval_policy ?? undefined,
+  sandbox: basePayload.sandboxPolicy ?? basePayload.sandbox ?? undefined,
+
+  // Added: supported by schema.ts but not forwarded previously
+  config: basePayload.config ?? undefined,
+  compactPrompt: basePayload.compactPrompt ?? basePayload.compact_prompt ?? undefined,
+
+  baseInstructions: basePayload.baseInstructions ?? undefined,
+  developerInstructions: basePayload.developerInstructions ?? undefined,
+  includeApplyPatchTool:
+    basePayload.includeApplyPatchTool ?? basePayload.include_apply_patch_tool ?? undefined,
+});
 ```
 
-### Fill-in table (replace placeholders with real hits)
-| Concern | File + line(s) to edit | Notes |
-|---|---|---|
-| `NewConversationParams` type definition | `PATH:LINE-LINE` | Add v2 optional fields + fix `sandbox` type |
-| Builder for `newConversation` params | `PATH:LINE-LINE` | Centralize mapping + gating |
-| Conversation bootstrap call site | `PATH:LINE-LINE` | Ensure builder is used consistently |
-| Response parsing / conversation id normalization | `PATH:LINE-LINE` | Support both `conversationId` and `conversation_id` |
-
 ---
 
-## V2 schema deltas to support
-### New optional fields (conversation scope)
-Add as optional pass-through:
+### B) Unit tests: add edge cases
 
-- `baseInstructions?: string | null`
-- `developerInstructions?: string | null`
-- `userProfile?: unknown`
-- `conversationContext?: unknown`
-- `toolConfig?: unknown`
-
-Recommendation: keep `userProfile`, `conversationContext`, and `toolConfig` typed as `unknown`/`Record<string, unknown>` initially to avoid overfitting to a moving schema.
-
-### Existing fields to preserve (typical)
-From public `newConversation` payloads, expect at least:
-- `cwd`, `model`, `config`, `approvalPolicy`, `sandbox`, `profile`
-- optional tool toggles like `includePlanTool`, `includeApplyPatchTool`  
-(Reference: openai/codex issue **#4541**, lines ~**218–221**.)
-
----
-
-## Suggested patch (TypeScript) — drop-in patterns
-
-### 1) Types: `rpcTypes.ts` (or equivalent)
 ```ts
-export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
-export type ApprovalPolicy = "untrusted" | "on-request" | "on-failure" | "never";
+// tests/unit/json-rpc-schema.test.ts
+// near the existing buildNewConversationParams test
 
-/**
- * Keep forward-compatible: upstream may expand toolConfig/userProfile shapes.
- */
-export interface NewConversationParams {
-  // existing/common
-  cwd?: string;
-  model?: string | null;
-  config?: Record<string, unknown>;
-  approvalPolicy?: ApprovalPolicy;
-  sandbox?: SandboxMode;
-  profile?: string | null;
+it("passes through optional config object", () => {
+  const config = { featureFlags: { experimental: true } };
+  const params = buildNewConversationParams({ config });
+  expect(params.config).toEqual(config);
+});
 
-  // tool toggles (keep if still used by your upstream)
-  includePlanTool?: boolean;
-  includeApplyPatchTool?: boolean | null;
+it("passes through compactPrompt", () => {
+  const params = buildNewConversationParams({ compactPrompt: "true" });
+  expect(params.compactPrompt).toBe("true");
+});
 
-  // v2 additions (pass-through)
-  baseInstructions?: string | null;
-  developerInstructions?: string | null;
-  userProfile?: unknown;
-  conversationContext?: unknown;
-  toolConfig?: unknown;
-}
-
-export interface ServerCapabilities {
-  // map this from your handshake/init response
-  schemaVersion?: 1 | 2;
-}
-```
-
-### 2) Builder: `conversationBootstrap.ts` (or equivalent)
-```ts
-import type { NewConversationParams, ServerCapabilities, SandboxMode } from "./rpcTypes";
-
-// Avoid sending undefined keys (important for strict upstream validators)
-function compact<T extends Record<string, unknown>>(obj: T): T {
-  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined)) as T;
-}
-
-function mergeInstructionsForV1(base?: string | null, dev?: string | null): string | null | undefined {
-  const parts = [base, dev].filter((x): x is string => typeof x === "string" && x.trim().length > 0);
-  if (parts.length === 0) return base ?? dev; // preserve null/undefined semantics
-  return parts.join("\n\n");
-}
-
-export function buildNewConversationParams(
-  opts: {
-    cwd?: string;
-    model?: string | null;
-    config?: Record<string, unknown>;
-    approvalPolicy?: NewConversationParams["approvalPolicy"];
-    sandbox?: SandboxMode;
-    profile?: string | null;
-
-    // instructions
-    baseInstructions?: string | null;
-    developerInstructions?: string | null;
-
-    // v2 extras
-    userProfile?: unknown;
-    conversationContext?: unknown;
-    toolConfig?: unknown;
-
-    // legacy toggles
-    includePlanTool?: boolean;
-    includeApplyPatchTool?: boolean | null;
-  },
-  caps: ServerCapabilities
-): { params: NewConversationParams; schemaVersionUsed: 1 | 2 } {
-  const schemaVersionUsed: 1 | 2 = caps.schemaVersion === 2 ? 2 : 1;
-
-  // V1 baseline (safe for older upstreams)
-  const paramsV1: NewConversationParams = compact({
-    cwd: opts.cwd,
-    model: opts.model,
-    config: opts.config,
-    approvalPolicy: opts.approvalPolicy,
-    sandbox: opts.sandbox,
-    profile: opts.profile,
-
-    includePlanTool: opts.includePlanTool,
-    includeApplyPatchTool: opts.includeApplyPatchTool,
-
-    // V1 fallback behavior
-    baseInstructions: mergeInstructionsForV1(opts.baseInstructions, opts.developerInstructions),
+it("drops invalid sandbox types (e.g. boolean)", () => {
+  const params = buildNewConversationParams({
+    // @ts-expect-error testing runtime validation
+    sandbox: true,
   });
+  expect(params.sandbox).toBeUndefined();
+});
 
-  if (schemaVersionUsed === 1) return { params: paramsV1, schemaVersionUsed };
-
-  // V2: separation + pass-through extras
-  const paramsV2: NewConversationParams = compact({
-    ...paramsV1,
-    baseInstructions: opts.baseInstructions,
-    developerInstructions: opts.developerInstructions,
-    userProfile: opts.userProfile,
-    conversationContext: opts.conversationContext,
-    toolConfig: opts.toolConfig,
+it("extracts sandbox mode from legacy policy object", () => {
+  const params = buildNewConversationParams({
+    // @ts-expect-error testing legacy object shape support
+    sandbox: { type: "read-only" },
   });
-
-  return { params: paramsV2, schemaVersionUsed };
-}
-```
-
-### 3) Response normalization helper
-```ts
-export function normalizeConversationId(result: any): string | undefined {
-  return result?.conversationId ?? result?.conversation_id ?? result?.conversation?.id;
-}
+  expect(params.sandbox).toBe("read-only");
+});
 ```
 
 ---
 
 ## Acceptance criteria
-### Functional
-- **V2 upstream**: `newConversation` succeeds when any subset of v2 optional fields is provided:
-  - `baseInstructions`, `developerInstructions`, `userProfile`, `conversationContext`, `toolConfig`
-- **V1 upstream**:
-  - Conversation creation still succeeds.
-  - No v2-only keys are emitted.
-  - If developer instructions are present, behavior is preserved via merge-into-base fallback (or explicitly documented if you choose to drop dev instructions in v1).
-- **Instruction semantics**
-  - system → `baseInstructions`
-  - developer → `developerInstructions` (v2) or merged (v1 fallback)
-  - no accidental empty-string injection
-- **Response parsing**
-  - Both `conversationId` and `conversation_id` are accepted and normalized.
 
-### Non-functional
-- No regression for “no-tools” conversations.
-- Debug logging (if present) indicates schema v1 vs v2 used.
+- `newConversation` params include `config` and `compactPrompt` when provided by upstream handlers/clients.
+- No change in existing normalization behavior:
+  - sandbox mode normalization still accepts string or `{ type | mode }` and drops invalid types.
+  - instruction strings are trimmed; empty strings collapse to null/undefined per `schema.ts`.
+- Unit tests cover the new passthrough fields and sandbox edge cases.
 
 ---
 
-## Suggested tests
-Use your repo’s existing runner (Jest/Vitest/node:test).
+## Status checklist
 
-### Unit tests: `buildNewConversationParams`
-1. **V1 gating**
-   - `caps.schemaVersion = 1` → no `developerInstructions`, `userProfile`, `conversationContext`, `toolConfig` keys.
-2. **V1 merge behavior**
-   - base `"A"`, dev `"B"` → `baseInstructions === "A\n\nB"` and no `developerInstructions`.
-3. **V2 separation**
-   - `caps.schemaVersion = 2` → keep both `baseInstructions` + `developerInstructions`.
-4. **Compaction**
-   - `undefined` inputs are absent from serialized JSON.
-5. **Sandbox modes**
-   - Ensure only allowed string modes can be set (runtime validation optional).
-
-### Unit tests: `normalizeConversationId`
-- Accept `{ conversationId: "abc" }`
-- Accept `{ conversation_id: "abc" }`
-- Accept `{ conversation: { id: "abc" } }` if relevant.
-
-### Contract snapshot test (recommended)
-- Snapshot v1 payload vs v2 payload for the same input.
-
-### Integration test (if you already mock upstream)
-- Mock v1 strict mode (reject unknown keys) to verify gating.
-- Mock v2 mode to verify new keys are accepted and forwarded.
+- `config` forwarded by transport: **TODO**
+- `compactPrompt` forwarded by transport: **TODO**
+- `dynamicTools` forwarded by transport: **DONE**
+- Unit tests for `config`/`compactPrompt`: **TODO**
+- Unit tests for sandbox edge cases: **TODO**
+- Schema definition in `schema.ts`: **DONE**
+- Conversation ID normalization (`conversation_id` vs `conversationId`): **DONE** (existing transport behavior)
 
 ---
 
 ## Deliverable
-- Updated `NewConversationParams` type(s) + builder + response id normalization.
-- Tests covering v1/v2 gating, instruction mapping, sandbox typing, and id normalization.
-- Documentation note describing the instruction mapping and v1 fallback behavior.
+
+A PR that:
+- updates `src/services/transport/index.js` to forward `config` + `compactPrompt`
+- adds the unit tests above to `tests/unit/json-rpc-schema.test.ts`
+- passes unit/integration suites

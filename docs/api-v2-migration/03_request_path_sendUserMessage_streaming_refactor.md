@@ -1,377 +1,352 @@
-# Subtask 03 — Request Path: `sendUserTurn` vs `sendUserMessage` (V2 streaming refactor)
+# 03 — Request Path: `sendUserTurn` vs `sendUserMessage` (v2 streaming refactor)
 
-## Reasoning:
-- **Assumptions**
-  - `codex-app-server-proxy` speaks to a Codex app-server over **JSON-RPC**, and exposes an **OpenAI-compatible** HTTP surface (e.g., `/v1/responses`, possibly `/v1/chat/completions`).
-  - The proxy currently uses (or still contains) a `sendUserTurn` path to kick off a “turn”, but **v2 semantics treat `sendUserMessage` as the canonical “start a turn” submission**, with `sendUserTurn` being legacy/compat-only.
-  - Streaming to the HTTP client is implemented via SSE, and the app-server provides an event stream (typically via a “listener/subscription” RPC + notifications) that the proxy forwards.
-- **Logic**
-  - The lowest-risk refactor is: **keep the existing event subscription/streaming machinery unchanged**, and swap only the “submit user input” method from `sendUserTurn` → `sendUserMessage` behind a capability gate/feature flag.
-  - Tools/tool_choice/parallel_tool_calls must be **forwarded as metadata** (if the app-server supports per-request tool injection) but the proxy must **never execute tools**—only surface tool calls back to the caller.
+This plan is **Codex-hand-off ready**: it uses **repo-path references**, **function names**, and **ripgrep commands** instead of blob/line citations.
 
 ---
 
-## Objective
-Align request flow with v2 semantics:
-- Prefer the **v2-supported submission** mechanism: `sendUserMessage` (streaming handled via the existing event stream/subscription pattern).
-- Preserve backward compatibility (temporary) via a **feature flag + runtime fallback**.
-- Ensure per-request **tool injection + tool_choice + parallel_tool_calls** are forwarded (but tool execution remains client-side).
+## Scope
+
+Refactor the JSON-RPC request pipeline so that:
+
+1. **Streaming is explicitly driven by `sendUserMessage(stream:true)`** (not implied).
+2. **Non-stream endpoints remain correct** even if upstream prefers/only supports streaming.
+3. Tool schemas are **declared at thread start** via `dynamicTools` (proxy does **not** execute tools), and per-request tool payloads are removed.
+4. Conversation bootstrap/system prompts remain intact (no loss of `baseInstructions`).
 
 ---
 
-## Protocol references (ground truth fields & JSON shapes)
+## Verified codebase facts (anchor points)
 
-> These line references are to the upstream protocol types so the proxy implementation can be validated against actual wire shapes.
+### JSON-RPC transport lifecycle (core)
+- File: `src/services/transport/index.js`
+- Key functions:
+  - `createChatRequest(...)` → ensures conversation + listener, then currently calls `#sendUserTurn(...)`.
+  - `sendUserMessage(context, payload)` → builds `SendUserMessageParams`, sends RPC, and completion is gated by **result + final message**.
+  - `#handleNotification(...)` routes:
+    - `agentMessageDelta` / `agent_message_delta` / `agent_message_content_delta` → `context.addDelta(...)`
+    - `agentMessage` / `agent_message` → `context.setFinalMessage(...)`, triggers completion check
+    - `tokenCount` / `token_count` → `context.setUsage(...)`
+    - `taskComplete` / `task_complete` → `context.setResult(...)`, triggers completion check
 
-### `SendUserMessageParams` vs `SendUserTurnParams`
-- `SendUserMessageParams` is minimal: `{ conversationId, items }`  
-  - `codex-app-server-protocol/src/protocol/v1.rs` **L846–L849**
-- `SendUserTurnParams` includes per-turn overrides (cwd/policies/model/etc.)  
-  - `codex-app-server-protocol/src/protocol/v1.rs` **L852–L861**
-- `SendUserMessageResponse` and `SendUserTurnResponse` are empty structs (turn output is delivered via events/notifications)  
-  - `SendUserTurnResponse`: **L862–L865**  
-  - `SendUserMessageResponse`: **L877–L880**
-- `InputItem` enum wire format uses `type` + `data` (serde `tag`/`content`)  
-  - `InputItem`: **L893–L900**
-- Listener/subscription params (likely the existing streaming backbone)  
-  - `AddConversationListenerParams`: **L882–L886**
-- Interrupt support (needed for client disconnect + AbortController semantics)  
-  - `InterruptConversationParams`: **L868–L875**
-
----
-
-## Where to look in `codex-app-server-proxy` (replace with exact file+line refs in your repo)
-
-### Search strings
-- `sendUserTurn` / `SendUserTurnParams`
-- `sendUserMessage` / `SendUserMessageParams`
-- `addConversationListener` / `subscription_id` / `experimental_raw_events`
-- `interruptConversation`
-- `createChatRequest` / `createResponsesRequest` / `/v1/responses`
-- `SSE` / `text/event-stream` / `EventSource` / `res.write`
-
-### Recommended commands (to capture **real** file:line refs)
+**Codex search:**
 ```bash
-# 1) Find the submission call sites
-rg -n "sendUserTurn\b|SendUserTurnParams\b" .
-rg -n "sendUserMessage\b|SendUserMessageParams\b" .
-
-# 2) Find the streaming backbone
-rg -n "addConversationListener\b|RemoveConversationListener\b|subscription_id\b" .
-
-# 3) Find tools/tool_choice plumbing
-rg -n "toolsPayload\b|tool_choice\b|parallel_tool_calls\b|parallelToolCalls\b" .
-
-# 4) Find interrupt/cancel behavior
-rg -n "interruptConversation\b|AbortController\b|req\.on\('close'\)" .
+rg "createChatRequest\(|sendUserMessage\(|#handleNotification\(" src/services/transport/index.js
 ```
 
-> **Deliverable requirement**: After running the searches above, paste the exact file:line ranges into the “Patch map” section below.
+### JsonRpcChildAdapter submission format (handlers use this)
+- File: `src/services/transport/child-adapter.js`
+- Key behavior:
+  - Adapter accepts a single `stdin.write(...)` payload and extracts prompt from either:
+    - `submission.op.items[0].text`, **or**
+    - `submission.prompt`
+  - Then it calls:
+    - `transport.createChatRequest({ turnParams })`
+    - `transport.sendUserMessage(context, messagePayload)`
+
+  - Adapter no longer needs to align per-request tool payloads; **dynamicTools** live on the turn payload and are only read by `newConversation`.
+
+**Codex search (tools plumbing):**
+```bash
+rg "dynamicTools|newConversation" src/services/transport/index.js
+```
+
+
+**Codex search:**
+```bash
+rg "#extractPrompt\(|createChatRequest\(|sendUserMessage\(" src/services/transport/child-adapter.js
+```
+
+### Chat request normalization (where `stream` is currently asymmetric)
+- File: `src/handlers/chat/request.js`
+- Key behavior:
+  - `normalizeChatJsonRpcRequest(...)` produces `{ turn, message }`
+  - `turn.stream` is set from handler `stream` flag
+  - **`message.stream` is NOT set today** → streaming is currently implicit for chat path
+
+**Codex search:**
+```bash
+rg "normalizeChatJsonRpcRequest\(" -n src/handlers/chat/request.js
+rg "turn\s*=\s*\{" -n src/handlers/chat/request.js
+rg "messagePayload\s*=\s*\{" -n src/handlers/chat/request.js
+```
+
+### Responses native stream currently builds a “user_input” op manually
+- File: `src/handlers/responses/stream.js`
+- It creates `JsonRpcChildAdapter(...)` with a `normalizedRequest = { turn, message }`
+- It then submits input via a manual op envelope:
+  - `{ op: { type: "user_input", items: [...] } }`
+
+**Important:** `JsonRpcChildAdapter` already supports the simpler `{ prompt: "..." }` envelope (see `#extractPrompt`), so we can eliminate the op-shape construction.
+
+**Codex search:**
+```bash
+rg "user_input|child\.stdin\.write" src/handlers/responses/stream.js
+```
 
 ---
 
-## Patch map (fill in exact file+line refs after inventory)
+## Problems to solve
 
-### A) HTTP request handler path
-- **File:** `[...]`  
-  **Lines:** `[...]`  
-  **Purpose:** Receives `/v1/responses` (and/or `/v1/chat/completions`) and chooses the app-server submission path.
+### P0 — Streaming is not explicit for chat
+Even when the external chat endpoint is `stream:true`, `sendUserMessage` can be invoked without `stream:true` because the chat normalizer does not carry it into the message payload.
 
-### B) JSON-RPC client wrapper
-- **File:** `[...]`  
-  **Lines:** `[...]`  
-  **Purpose:** Owns `rpc.call(method, params)` and any response/notification routing.
+### P0 — Nonstream should not assume upstream supports “nonstream mode”
+If app-server increasingly expects streaming semantics (common for v2 event models), nonstream handlers must be able to **buffer** stream events and emit a single JSON response.
 
-### C) Streaming bridge (app-server events → SSE)
-- **File:** `[...]`  
-  **Lines:** `[...]`  
-  **Purpose:** Translates app-server notifications into OpenAI-compatible SSE events.
+### P1 — Avoid inline “CLI submission op” construction in handlers
+Handlers should not hand-build submission JSON envelopes if the adapter already supports a simpler/safer format.
 
-### D) Tools mapping
-- **File:** `[...]`  
-  **Lines:** `[...]`  
-  **Purpose:** Maps OpenAI request `{ tools, tool_choice, parallel_tool_calls }` → app-server tool payload (if supported).
+### P1 — Per-request tool payloads are no longer valid in v2
+`SendUserMessageParams` does **not** accept tool manifests. Tools must be declared once per thread via `dynamicTools` on `newConversation`.
+
+### P0 — Dynamic tool manifests must be attached at thread start
+Client-defined tools must reach `newConversation(dynamicTools)` and **must not** be forwarded on `sendUserTurn`/`sendUserMessage`.
 
 ---
 
-## Recommended implementation strategy (best option)
+## Strategy (optimized for this repo)
 
-### 1) Introduce a single “submit user input” adapter
-Create a single internal function that the HTTP handlers call:
+### Decision: Make `sendUserMessage(stream:true)` the canonical streaming trigger
 
-- `submitUserInput({ conversationId, items, stream, toolSpec, turnOverrides })`
-- It chooses the method (`sendUserMessage` vs `sendUserTurn`) based on:
-  1) **Feature flag** (opt-in at first), and
-  2) **Runtime fallback** (retry on “method not found” / “invalid params”)
+We do **not** need to eliminate `sendUserTurn` immediately (it is currently used in `createChatRequest()`), but we must ensure:
 
-**Key point:** the rest of the pipeline (listener setup, SSE forwarding) stays the same.
+- streaming handlers always set `message.stream = true`
+- nonstream handlers can still succeed if upstream wants to stream
+- long-term: allow skipping `sendUserTurn` via a feature flag once parity is validated
 
-#### Example (TypeScript)
-```ts
-type InputItem =
-  | { type: "text"; data: { text: string } }
-  | { type: "image"; data: { imageUrl: string } }
-  | { type: "localImage"; data: { path: string } };
+---
 
-// Narrowly model only what you actually send.
-// Keep experimental fields optional so you can omit them if the server rejects them.
-type SendUserMessageParams = {
-  conversationId: string;
-  items: InputItem[];
-  // Optional/experimental v2 extensions (ONLY include if negotiated/supported):
-  stream?: boolean;
-  tools?: {
-    definitions?: unknown[];
-    choice?: unknown;
-    parallelToolCalls?: boolean;
-  };
+## Implementation Tasks
+
+### Task 1 — Make chat streaming explicit: set `message.stream`
+**File:** `src/handlers/chat/request.js`
+
+**Change:** when `normalizeChatJsonRpcRequest(..., stream=true)` is called, set `messagePayload.stream = true`.
+
+**Snippet (illustrative; place inside `normalizeChatJsonRpcRequest`)**
+```js
+// after messagePayload is created
+if (stream) messagePayload.stream = true;
+```
+
+---
+
+### Task 2 (Optional) — Nonstream robustness: allow stream-buffering fallback
+
+#### 2A) Chat nonstream (`/v1/chat/completions` stream=false)
+**File:** `src/handlers/chat/nonstream.js`
+
+This handler already consumes structured events via `JsonRpcChildAdapter` and tool aggregators; do not regress to “wait for exit only”.
+
+**Add an explicit plan requirement:**
+- Introduce an opt-in flag:
+  - `PROXY_FORCE_JSONRPC_STREAM_FOR_NONSTREAM=true` → force `normalizedRequest.message.stream = true` even for nonstream endpoints.
+- When enabled, keep buffering deltas/tool calls and return JSON only after completion is observed.
+
+This avoids changing semantics prematurely while giving a production escape hatch. Treat this as **optional** unless production traces show upstream only supports streaming.
+
+#### 2B) Responses nonstream (`/v1/responses` non-stream JSON)
+**File:** `src/handlers/responses/nonstream.js`
+
+This path already uses `runNativeResponses(...)` + envelope builder. Ensure it tolerates always-streaming upstream by buffering events until completion.
+
+---
+
+### Task 2.5 — Thread-start dynamic tools (v2)
+
+**Why this exists:** API v2 app-server accepts **tool manifests only at thread start** via `newConversation.dynamicTools`. Per-request tool payloads must be removed.
+
+#### 2.5A) Map OpenAI tools → `dynamicTools` on the turn
+**Files:**
+- `src/handlers/chat/request.js`
+- `src/handlers/responses/stream.js`
+- `src/handlers/responses/nonstream.js`
+
+**Requirement:** When tools are present on the incoming request, build `dynamicTools` (function tools only) and attach to the **turn** payload. Do **not** send per-request `tools` on turn/message.
+
+**Codex search:**
+```bash
+rg "dynamicTools|buildDynamicTools|turn\.dynamicTools" src/handlers/{chat,responses} -g'*.js'
+```
+
+#### 2.5B) Forward `dynamicTools` to `newConversation`
+**File:** `src/services/transport/index.js`
+
+**Requirement:** Pass `dynamicTools` (and `dynamic_tools` alias) into `buildNewConversationParams(...)`. This is the only valid tool manifest entry point for v2.
+
+#### 2.5C) Map dynamic tool call events to OpenAI tool deltas
+**Files:**
+- `src/handlers/chat/stream-event-router.js`
+- `src/handlers/chat/nonstream.js`
+
+**Requirement:** Translate `dynamic_tool_call_request` events into `tool_calls` deltas so OpenAI clients receive tool call events in the expected shape.
+
+
+---
+
+### Task 3 — Replace raw “user_input op” writes where unnecessary
+
+#### 3A) Responses stream submission
+**File:** `src/handlers/responses/stream.js`
+
+Replace:
+```js
+const submission = {
+  id: reqId,
+  op: { type: "user_input", items: [{ type: "text", text: prompt }] },
 };
-
-type SendUserTurnParams = {
-  conversationId: string;
-  items: InputItem[];
-  cwd: string;
-  approvalPolicy: unknown;
-  sandboxPolicy: unknown;
-  model: string;
-  effort?: unknown;
-  summary: unknown;
-};
-
-async function submitUserInput(
-  rpc: { call: (m: string, p: any) => Promise<any> },
-  args: {
-    conversationId: string;
-    items: InputItem[];
-    stream: boolean;
-    tools?: SendUserMessageParams["tools"];
-    // If your proxy currently supports per-request overrides, keep them here for sendUserTurn fallback:
-    turnOverrides?: Partial<Omit<SendUserTurnParams, "conversationId" | "items">>;
-    flags: { preferSendUserMessage: boolean };
-  },
-) {
-  // Prefer v2 path.
-  if (args.flags.preferSendUserMessage) {
-    const params: SendUserMessageParams = {
-      conversationId: args.conversationId,
-      items: args.items,
-      ...(args.stream ? { stream: true } : {}),
-      ...(args.tools ? { tools: args.tools } : {}),
-    };
-
-    try {
-      return await rpc.call("sendUserMessage", params);
-    } catch (err: any) {
-      // If server doesn’t recognize fields/method, fall through to legacy.
-      // (Match your app-server error shape here.)
-      if (!isRetryableProtocolMismatch(err)) throw err;
-    }
-  }
-
-  // Legacy/compat path: sendUserTurn
-  if (!args.turnOverrides) {
-    throw new Error("sendUserTurn fallback requires turnOverrides (cwd/policies/model/summary).");
-  }
-
-  const legacyParams: SendUserTurnParams = {
-    conversationId: args.conversationId,
-    items: args.items,
-    cwd: String(args.turnOverrides.cwd ?? process.cwd()),
-    approvalPolicy: args.turnOverrides.approvalPolicy ?? "ask",
-    sandboxPolicy: args.turnOverrides.sandboxPolicy ?? "default",
-    model: String(args.turnOverrides.model ?? "gpt-5-codex"),
-    effort: args.turnOverrides.effort,
-    summary: args.turnOverrides.summary ?? "auto",
-  };
-
-  return rpc.call("sendUserTurn", legacyParams);
-}
-
-function isRetryableProtocolMismatch(err: any): boolean {
-  const msg = String(err?.message ?? "");
-  return (
-    msg.includes("Method not found") ||
-    msg.includes("Unknown method") ||
-    msg.includes("invalid params") ||
-    msg.includes("unknown field")
-  );
-}
+child.stdin.write(JSON.stringify(submission) + "\n");
 ```
 
-**Why this is optimized:** You isolate risk to one small compatibility seam and avoid refactoring the rest of your streaming pipeline.
+With:
+```js
+child.stdin.write(JSON.stringify({ prompt }) + "\n");
+```
+
+**Why:** The adapter’s `#extractPrompt` supports `submission.prompt` directly. This reduces coupling to “CLI-ish op envelope” shapes.
+
+> Optional follow-up: add `child.submitPrompt(prompt)` on `JsonRpcChildAdapter` to eliminate raw writes entirely, but not required.
 
 ---
 
-### 2) Streaming: keep the subscription-first pattern
-For streaming requests, do **not** depend on `sendUserMessage(stream=true)` unless you have confirmed the app-server supports it. Instead:
+### Task 4 — Clarify `function_call_output` scope (input vs output)
 
-1. **Add listener/subscription** for the conversation.
-2. **Submit user input** (`sendUserMessage` preferred).
-3. **Forward notifications** as SSE deltas.
-4. **On client disconnect**, call `interruptConversation`.
+**Correct scope in this repo:**
+- `function_call_output` is an **input item type** you may need to send **to** app-server when a client returns tool results (for full `/v1/responses` parity).
+- App-server tool calls are currently represented in **notifications** as `tool_calls` / `function_call` fields rather than a `function_call_output` content item.
 
-#### Example SSE guard for disconnect
-```ts
-function wireAbortToInterrupt(req: any, rpc: any, conversationId: string) {
-  const onClose = async () => {
-    try {
-      await rpc.call("interruptConversation", { conversationId });
-    } catch {
-      // swallow: client is gone; best-effort interrupt
-    }
-  };
-  req.on("close", onClose);
-  req.on("aborted", onClose);
-}
-```
+Therefore:
+- Keep (or add) `function_call_output` to the **InputItem union** in `src/lib/json-rpc/schema.ts` (input side).
+- Do **not** assume the server “returns function_call_output items” unless a fixture proves it.
+- If server output evolves, extend the **event mapping layer** (e.g., `native/execute.js`, `stream-adapter.js`), not only schema typing.
 
 ---
 
-### 3) Tools forwarding (without proxy executing tools)
-**Goal:** if a caller sends tools/tool_choice/parallel_tool_calls, preserve those semantics.
+### Task 5 — Tool schema typing improvements (low-risk, optional)
+**File:** `src/lib/json-rpc/schema.ts`
 
-Because app-server tool schemas can vary, implement a **typed mapping layer** that:
-- Accepts OpenAI `/v1/responses` request fields.
-- Produces an internal canonical `ToolSpec`.
-- Then maps that to the app-server’s expected shape (v2 if supported; otherwise store for later or ignore with a controlled warning).
+Introduce a minimal type alias to prevent accidental shape drift:
 
-#### Example canonicalization
 ```ts
-type ResponsesTool = unknown; // Replace with your request schema
-type ToolChoice = "auto" | "none" | { type: "function"; function: { name: string } };
-
-type CanonicalToolSpec = {
-  definitions: ResponsesTool[];
-  choice?: ToolChoice;
+export type ToolsPayload = {
+  definitions?: Array<unknown>;
+  choice?: "auto" | "none" | "required" | { type: "function"; function: { name: string } };
   parallelToolCalls?: boolean;
 };
+```
 
-function canonicalizeTools(req: any): CanonicalToolSpec | undefined {
-  const hasAny =
-    (Array.isArray(req.tools) && req.tools.length > 0) ||
-    req.tool_choice != null ||
-    req.parallel_tool_calls != null;
+Then use `tools?: ToolsPayload` on both turn/message param builders.
 
-  if (!hasAny) return undefined;
+---
 
-  return {
-    definitions: Array.isArray(req.tools) ? req.tools : [],
-    choice: req.tool_choice,
-    parallelToolCalls: req.parallel_tool_calls,
+### Task 6 — System prompt preservation (guardrail)
+
+System prompts are currently converted into `baseInstructions` on the **turn payload**.
+
+**Requirement:**
+- Any future refactor that skips `sendUserTurn` must still pass `baseInstructions` into `newConversation` (because `sendUserMessage` does not carry it in v2).
+- If you introduce `createChatRequestWithoutTurn(...)`, ensure conversation params still include `baseInstructions`.
+
+
+## Acceptance Criteria
+
+### A) Chat streaming parity
+- `/v1/chat/completions` with `stream:true`:
+  - continues to emit deltas and tool call deltas
+  - stop-after-tools behavior unchanged
+  - JSON-RPC `sendUserMessage` params include `stream:true`
+
+### B) Nonstream robustness (Optional)
+- `/v1/chat/completions` with `stream:false`:
+  - returns one JSON response
+  - works even if upstream prefers streaming (via buffering fallback flag)
+
+- `/v1/responses` non-stream:
+  - returns canonical envelope after buffering events
+  - tool calls appear in canonical output items as expected by envelope builder
+
+### C) Handler submission simplification
+- `src/handlers/responses/stream.js` no longer constructs `{ op: { type:"user_input"... } }` envelopes.
+- Adapter accepts `{ prompt }` and behavior matches existing stream behavior.
+
+
+### D) Dynamic tool injection
+- `/v1/responses` (stream + nonstream) with `tools` and `tool_choice`:
+  - tools are preserved through normalization and forwarded into JSON-RPC `sendUserMessage` params (no silent drops)
+  - `tool_choice` and `parallel_tool_calls` mapping preserved
+  - proxy does **not** execute tools; it only forwards + surfaces tool-call events
+
+---
+
+## Tests to add / update
+
+### 1) Unit — chat normalizer sets `message.stream`
+**File:** add `tests/unit/handlers/chat/request.spec.js` (or extend existing normalizer coverage).
+
+Test:
+- call `normalizeChatJsonRpcRequest({ stream:true, ... })`
+- assert `result.message.stream === true`
+
+### 2) Unit — JsonRpcChildAdapter forwards tools payload
+**File:** `tests/unit/services/json-rpc-child-adapter.spec.js`
+
+Add coverage for tool forwarding:
+- given `normalizedRequest.message.tools`, assert `transport.sendUserMessage` receives `tools`
+- given only `normalizedRequest.turn.tools`, assert adapter copies tools onto the message payload
+
+Illustrative test shape:
+```js
+it("forwards tools from normalizedRequest", async () => {
+  const tools = {
+    definitions: [{ type: "function", function: { name: "t" } }],
+    choice: "auto",
   };
-}
+  const { adapter, context, resolvePromise } = await setupAdapter({
+    normalizedRequest: { turn: { items: [], tools }, message: { items: [] } },
+  });
+
+  adapter.stdin.write(JSON.stringify({ prompt: "hello" }));
+  await flushAsync();
+
+  expect(transport.sendUserMessage).toHaveBeenCalledWith(
+    context,
+    expect.objectContaining({ tools })
+  );
+
+  resolvePromise();
+  await flushAsync();
+});
 ```
 
-#### Example mapping into `sendUserMessage` params
-```ts
-function mapCanonicalToolsToAppServer(spec?: CanonicalToolSpec) {
-  if (!spec) return undefined;
-  return {
-    definitions: spec.definitions,
-    choice: spec.choice,
-    parallelToolCalls: spec.parallelToolCalls,
-  };
-}
+### 3) Unit — responses stream uses `{ prompt }` submission
+**File:** `tests/unit/handlers/responses/stream.spec.js` (extend)
+- mock `createJsonRpcChildAdapter` and assert `.stdin.write(...)` receives JSON containing `"prompt"` and not `"op"`.
+
+### 4) Unit — JSON-RPC schema builder already supports stream
+**File:** `tests/unit/json-rpc-schema.test.ts`
+- existing coverage builds `sendUserMessage` params with `stream:true`
+- add assertions only if you change types (Task 5)
+
+### 5) Integration / E2E
+Run existing suites after changes:
+```bash
+npm run test:unit
+npm run test:integration
+npm test
 ```
 
----
-
-### 4) Tool-call handling behavior in streaming
-When the app-server emits a **tool call** item/event:
-- **Emit** an OpenAI-compatible “tool_call” output item to the client.
-- **Stop streaming** further assistant output for that request.
-- Leave it to the client to call back with tool results in a follow-up request.
-
-#### Suggested behavior (SSE pseudocode)
-```ts
-function onAppServerEvent(ev: any, sse: any, state: any) {
-  if (ev.type === "tool_call") {
-    sse.send("response.output_item.added", { item: mapToolCall(ev) });
-    sse.send("response.completed", { status: "requires_action" });
-    state.close(); // end SSE stream
-    return;
-  }
-
-  // Normal token deltas
-  if (ev.type === "assistant_text_delta") {
-    sse.send("response.output_text.delta", { delta: ev.delta });
-  }
-}
-```
-
----
-
-## Alternative strategies (only if needed)
-
-### Alternative A — Keep `sendUserTurn` as the default, add `sendUserMessage` only for v2 servers
-Use this if you discover (via real traffic) that older app-server versions reject `sendUserMessage` for turns or don’t emit equivalent streaming events.
-
-### Alternative B — Two-step compatibility shim
-If the legacy path sets per-turn policy/model via `sendUserTurn`, but v2 wants session-level config:
-- On the first request, set config via `newConversation` or a `setDefaultModel`/config RPC (if present),
-- Then only use `sendUserMessage` for subsequent turns.
-
----
-
-## Acceptance criteria
-1. **Streaming parity**
-   - A streaming `/v1/responses` call produces SSE deltas as before (no missing/duplicated chunks).
-2. **Non-streaming parity**
-   - A non-streaming request returns a complete JSON response consistent with the proxy’s previous behavior.
-3. **Correct method selection**
-   - With the feature flag enabled, proxy prefers `sendUserMessage`.
-   - If the app-server rejects the method/params, proxy **falls back** to `sendUserTurn` (and logs a structured warning).
-4. **Tools forwarding**
-   - If request includes `tools`, `tool_choice`, `parallel_tool_calls`, they are forwarded (or explicitly rejected with a clear error), and never silently dropped.
-5. **Tool calls are surfaced, not executed**
-   - When a tool call is produced, the proxy returns it to the client and ends the stream with a “requires_action”-style termination.
-6. **Cancellation works**
-   - Client disconnect triggers `interruptConversation` best-effort.
-7. **No double-send**
-   - No duplicate “assistant start” / “completed” events due to old two-step flows.
-
----
-
-## Suggested tests (add/expand as needed)
-
-### Unit tests
-- **Tool mapping**
-  - Given a `/v1/responses` request with `tools`, `tool_choice`, `parallel_tool_calls`, verify the canonicalized tool spec and the mapped app-server payload.
-- **InputItem serialization**
-  - Given user text/image inputs, verify the JSON produced matches the `InputItem` `type`+`data` shape (Text/Image/LocalImage).
-- **Method selection fallback**
-  - Simulate `rpc.call("sendUserMessage")` throwing “method not found”; verify proxy calls `sendUserTurn` next.
-
-### Integration tests (recommended: mock JSON-RPC app-server)
-Build a tiny in-process JSON-RPC stub that:
-- Accepts `addConversationListener`, returns a subscription id.
-- On `sendUserMessage` or `sendUserTurn`, emits a scripted sequence of notifications:
-  - text deltas
-  - optional tool call event
-  - completed
-
-Test matrix:
-1. `stream=true` + no tools → emits deltas → completes
-2. `stream=false` + no tools → returns aggregated response
-3. `stream=true` + tools, tool call occurs → emits tool_call → terminates stream with requires_action
-4. client disconnect mid-stream → proxy calls `interruptConversation`
-
-### Regression test
-- Existing `sendUserTurn` path remains functional when the feature flag is off.
+Prioritize:
+- `tests/integration/responses.contract.streaming.int.test.js`
+- `tests/integration/responses.contract.nonstream.int.test.js`
+- `tests/unit/services/json-rpc-transport.spec.js`
+- `tests/unit/services/json-rpc-child-adapter.spec.js`
 
 ---
 
 ## Rollout plan
-1. **Phase 1 (opt-in)**
-   - Add `preferSendUserMessage` flag (env var/config).
-   - Enable only in CI or a dev environment.
-2. **Phase 2 (default-on with fallback)**
-   - Default to `sendUserMessage` while retaining automatic fallback.
-3. **Phase 3 (cleanup)**
-   - Remove `sendUserTurn` usage when all supported app-server versions have v2 semantics.
 
----
-
-## Deliverable
-- Updated request pipeline (submission adapter + wiring), plus test coverage from the matrix above.
-- This doc updated with **real file:line references** in the Patch map section.
+1. Land Task 1 (`message.stream`) + unit test.
+2. Land Task 2.5 (thread-start dynamic tools + event mapping) + unit test.
+3. Land Task 3 (responses stream submission simplification) + unit test.
+4. Add optional nonstream fallback flag (Task 2) only if needed in production traces.
+5. Consider skipping `sendUserTurn` under a feature flag as a separate, later PR.
