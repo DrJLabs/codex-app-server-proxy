@@ -18,14 +18,9 @@
       "has_input": true,
       "input_is_array": true,
       "input_item_count": 2,
-      "input_item_types": [
-        "message"
-      ],
+      "input_item_types": ["message"],
       "input_message_count": 2,
-      "input_message_roles": [
-        "developer",
-        "user"
-      ],
+      "input_message_roles": ["developer", "user"],
       "has_recent_conversations_tag": true,
       "has_saved_memories_tag": false,
       "has_use_tool_tag": false,
@@ -41,9 +36,7 @@
       "has_tool_choice": true,
       "has_previous_response_id": false,
       "tool_count": 13,
-      "tool_types": [
-        "function"
-      ],
+      "tool_types": ["function"],
       "tool_types_truncated": false,
       "tool_names": [
         "convertTimeBetweenTimezones",
@@ -117,10 +110,7 @@
                       "description": "<redacted>"
                     }
                   },
-                  "required": [
-                    "<redacted>",
-                    "<redacted>"
-                  ],
+                  "required": ["<redacted>", "<redacted>"],
                   "additionalProperties": false,
                   "description": "<redacted>"
                 },
@@ -166,10 +156,7 @@
                   "description": "<redacted>"
                 }
               },
-              "required": [
-                "<redacted>",
-                "<redacted>"
-              ],
+              "required": ["<redacted>", "<redacted>"],
               "additionalProperties": false,
               "$schema": "<redacted>"
             },
@@ -196,28 +183,19 @@
                     "properties": {
                       "role": {
                         "type": "string",
-                        "enum": [
-                          "<redacted>",
-                          "<redacted>"
-                        ]
+                        "enum": ["<redacted>", "<redacted>"]
                       },
                       "content": {
                         "type": "string"
                       }
                     },
-                    "required": [
-                      "<redacted>",
-                      "<redacted>"
-                    ],
+                    "required": ["<redacted>", "<redacted>"],
                     "additionalProperties": false
                   },
                   "description": "<redacted>"
                 }
               },
-              "required": [
-                "<redacted>",
-                "<redacted>"
-              ],
+              "required": ["<redacted>", "<redacted>"],
               "additionalProperties": false,
               "$schema": "<redacted>"
             },
@@ -256,9 +234,7 @@
                   "description": "<redacted>"
                 }
               },
-              "required": [
-                "<redacted>"
-              ],
+              "required": ["<redacted>"],
               "additionalProperties": false,
               "$schema": "<redacted>"
             },
@@ -278,9 +254,7 @@
                   "description": "<redacted>"
                 }
               },
-              "required": [
-                "<redacted>"
-              ],
+              "required": ["<redacted>"],
               "additionalProperties": false,
               "$schema": "<redacted>"
             },
@@ -308,11 +282,7 @@
                   "description": "<redacted>"
                 }
               },
-              "required": [
-                "<redacted>",
-                "<redacted>",
-                "<redacted>"
-              ],
+              "required": ["<redacted>", "<redacted>", "<redacted>"],
               "additionalProperties": false,
               "$schema": "<redacted>"
             },
@@ -338,9 +308,7 @@
                   "description": "<redacted>"
                 }
               },
-              "required": [
-                "<redacted>"
-              ],
+              "required": ["<redacted>"],
               "additionalProperties": false,
               "$schema": "<redacted>"
             },
@@ -378,10 +346,7 @@
                   "description": "<redacted>"
                 }
               },
-              "required": [
-                "<redacted>",
-                "<redacted>"
-              ],
+              "required": ["<redacted>", "<redacted>"],
               "additionalProperties": false,
               "$schema": "<redacted>"
             },
@@ -405,10 +370,7 @@
                   "description": "<redacted>"
                 }
               },
-              "required": [
-                "<redacted>",
-                "<redacted>"
-              ],
+              "required": ["<redacted>", "<redacted>"],
               "additionalProperties": false,
               "$schema": "<redacted>"
             },
@@ -488,9 +450,7 @@
                   "description": "<redacted>"
                 }
               },
-              "required": [
-                "<redacted>"
-              ],
+              "required": ["<redacted>"],
               "additionalProperties": false,
               "$schema": "<redacted>"
             },
