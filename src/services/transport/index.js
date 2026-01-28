@@ -1016,6 +1016,16 @@ class JsonRpcTransport {
         context.setUsage(usagePayload);
         break;
       }
+      case "response.output_item.added":
+      case "response.output_item.done":
+      case "response.function_call_arguments.delta":
+      case "response.function_call_arguments.done": {
+        if (payload && typeof payload === "object" && !payload.type) {
+          payload.type = method;
+        }
+        context.addDelta(payload);
+        break;
+      }
       case "requestTimeout":
         this.#failContext(
           context,

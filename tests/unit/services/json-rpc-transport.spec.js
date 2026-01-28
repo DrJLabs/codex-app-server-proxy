@@ -851,6 +851,44 @@ describe("JsonRpcTransport request lifecycle", () => {
     await context.promise.catch(() => {});
   });
 
+  it("routes v2 tool lifecycle notifications as deltas", async () => {
+    const child = createMockChild();
+    const responses = {
+      initialize: { result: {} },
+      newConversation: { result: { conversation_id: "server-conv" } },
+      addConversationListener: { result: { subscription_id: "sub-1" } },
+      sendUserTurn: { result: { conversation_id: "server-conv" } },
+    };
+    wireJsonResponder(child, (message) => {
+      if (Object.prototype.hasOwnProperty.call(responses, message.method)) {
+        writeRpcResult(child, message.id, responses[message.method]);
+      }
+    });
+    __setChild(child);
+
+    const transport = getJsonRpcTransport();
+    const context = await transport.createChatRequest({ requestId: "req-v2-delta" });
+    context.promise.catch(() => {});
+    const deltas = [];
+    context.emitter.on("delta", (payload) => deltas.push(payload));
+    context.emitter.on("error", () => {});
+
+    writeRpcNotification(child, "codex/event/response.function_call_arguments.delta", {
+      conversation_id: "server-conv",
+      msg: { delta: '{"x":' },
+    });
+    await flushAsync();
+
+    expect(deltas).toHaveLength(1);
+    expect(deltas[0]).toMatchObject({
+      type: "response.function_call_arguments.delta",
+      delta: '{"x":',
+    });
+
+    transport.cancelContext(context);
+    await context.promise.catch(() => {});
+  });
+
   it("collects content deltas and completes on task notifications", async () => {
     const child = createMockChild();
     const responses = {
