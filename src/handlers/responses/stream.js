@@ -36,6 +36,7 @@ import {
 import { applyCors as applyCorsUtil, normalizeModel } from "../../utils.js";
 import { acceptedModelIds } from "../../config/models.js";
 import { setSSEHeaders, computeKeepaliveMs, startKeepalives } from "../../services/sse.js";
+import { buildDynamicTools } from "../../lib/tools/dynamic-tools.js";
 
 const DEFAULT_MODEL = CFG.CODEX_MODEL;
 const ACCEPTED_MODEL_IDS = acceptedModelIds(DEFAULT_MODEL);
@@ -75,24 +76,7 @@ const normalizeChoiceCount = (raw) => {
 
 const applyCors = (req, res) => applyCorsUtil(req, res, CORS_ENABLED, CORS_ALLOWED);
 
-const buildToolsPayload = ({ definitions, toolChoice, parallelToolCalls }) => {
-  const payload = {};
-  if (definitions) payload.definitions = definitions;
-  if (toolChoice !== undefined) payload.choice = toolChoice;
-  if (parallelToolCalls !== undefined) payload.parallelToolCalls = parallelToolCalls;
-  return Object.keys(payload).length ? payload : undefined;
-};
-
-const countToolDefinitions = (payload) => {
-  if (!payload || typeof payload !== "object") return 0;
-  const defs =
-    payload.definitions ||
-    payload.tools ||
-    payload.tool_definitions ||
-    payload.toolDefinitions ||
-    payload.functions;
-  return Array.isArray(defs) ? defs.length : 0;
-};
+const countDynamicTools = (dynamicTools) => (Array.isArray(dynamicTools) ? dynamicTools.length : 0);
 
 const buildPromptFromItems = (items) => {
   if (!Array.isArray(items)) return "";
@@ -263,11 +247,7 @@ export async function postResponsesStream(req, res) {
 
   const fallbackMax = Number(CFG.PROXY_RESPONSES_DEFAULT_MAX_TOKENS || 0);
   const maxOutputTokens = normalized.maxOutputTokens ?? (fallbackMax > 0 ? fallbackMax : undefined);
-  const toolsPayload = buildToolsPayload({
-    definitions: toolDefinitions.length ? toolDefinitions : undefined,
-    toolChoice: toolDefinitions.length ? normalized.toolChoice : undefined,
-    parallelToolCalls: toolDefinitions.length ? normalized.parallelToolCalls : undefined,
-  });
+  const dynamicTools = buildDynamicTools(functionTools, normalized.toolChoice);
   const includeUsage = Boolean(originalBody?.stream_options?.include_usage);
 
   const turn = {
@@ -280,7 +260,7 @@ export async function postResponsesStream(req, res) {
     includeApplyPatchTool: true,
   };
   if (Number.isInteger(nValue) && nValue > 0) turn.choiceCount = nValue;
-  if (toolsPayload) turn.tools = toolsPayload;
+  if (dynamicTools !== undefined) turn.dynamicTools = dynamicTools;
   if (normalized.developerInstructions) {
     turn.developerInstructions = normalized.developerInstructions;
   }
@@ -294,16 +274,15 @@ export async function postResponsesStream(req, res) {
     stream: true,
   };
   if (maxOutputTokens !== undefined) message.maxOutputTokens = maxOutputTokens;
-  if (toolsPayload) message.tools = toolsPayload;
   if (normalized.responseFormat !== undefined) message.responseFormat = normalized.responseFormat;
   if (normalized.finalOutputJsonSchema !== undefined) {
     message.finalOutputJsonSchema = normalized.finalOutputJsonSchema;
   }
 
-  const ingressToolCount = toolDefinitions.length;
-  const turnToolCount = countToolDefinitions(turn.tools);
-  const messageToolCount = countToolDefinitions(message.tools);
-  const toolsMismatch = ingressToolCount !== turnToolCount || ingressToolCount !== messageToolCount;
+  const ingressToolCount = functionTools.length;
+  const turnToolCount = countDynamicTools(turn.dynamicTools);
+  const messageToolCount = countDynamicTools(message.dynamicTools);
+  const toolsMismatch = ingressToolCount !== turnToolCount;
   logStructured(
     {
       component: "responses",

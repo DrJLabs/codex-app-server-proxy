@@ -1,6 +1,7 @@
 import { invalidRequestBody } from "../../lib/errors.js";
 import { createUserMessageItem } from "../../lib/json-rpc/schema.ts";
 import { config as CFG } from "../../config/index.js";
+import { buildDynamicTools } from "../../lib/tools/dynamic-tools.js";
 
 class ChatJsonRpcNormalizationError extends Error {
   constructor(body, statusCode = 400) {
@@ -218,14 +219,6 @@ const normalizeLegacyFunctionCall = (rawChoice) => {
     return { type: "function", function: { name } };
   }
   return rawChoice;
-};
-
-const buildToolsPayload = ({ definitions, toolChoice, parallelToolCalls }) => {
-  const payload = {};
-  if (definitions) payload.definitions = definitions;
-  if (toolChoice !== undefined) payload.choice = toolChoice;
-  if (parallelToolCalls !== undefined) payload.parallelToolCalls = parallelToolCalls;
-  return Object.keys(payload).length ? payload : undefined;
 };
 
 const assertAllowedMessageRoles = (messages) => {
@@ -478,11 +471,7 @@ export const normalizeChatJsonRpcRequest = ({
   const turnItems = [createUserMessageItem(combinedText)];
   const messageItems = turnItems.map((item) => ({ ...item }));
   const { responseFormat, finalOutputJsonSchema } = normalizeResponseFormat(body.response_format);
-  const toolsPayload = buildToolsPayload({
-    definitions,
-    toolChoice,
-    parallelToolCalls,
-  });
+  const dynamicTools = buildDynamicTools(definitions, toolChoice);
   const { turnEffort, reasoningPayload } = normalizeReasoningControls(
     reasoningEffort,
     body.reasoning
@@ -508,8 +497,8 @@ export const normalizeChatJsonRpcRequest = ({
     turn.baseInstructions = baseInstructions;
   }
 
-  if (toolsPayload) {
-    turn.tools = toolsPayload;
+  if (dynamicTools !== undefined) {
+    turn.dynamicTools = dynamicTools;
   }
 
   if (finalOutputJsonSchema !== undefined) {
@@ -528,9 +517,6 @@ export const normalizeChatJsonRpcRequest = ({
   if (temperature !== undefined) messagePayload.temperature = temperature;
   if (topP !== undefined) messagePayload.topP = topP;
   if (maxOutputTokens !== undefined) messagePayload.maxOutputTokens = maxOutputTokens;
-  if (toolsPayload) {
-    messagePayload.tools = toolsPayload;
-  }
   if (responseFormat !== undefined) {
     messagePayload.responseFormat = responseFormat;
   }

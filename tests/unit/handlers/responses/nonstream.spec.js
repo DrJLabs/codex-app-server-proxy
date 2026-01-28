@@ -314,7 +314,7 @@ describe("responses nonstream handler", () => {
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ object: "response" }));
   });
 
-  it("forwards function tools to backend tool payload", async () => {
+  it("forwards function tools as dynamicTools on the turn payload", async () => {
     const definitions = [{ type: "function", function: { name: "lookup", parameters: {} } }];
     normalizeResponsesRequestMock.mockReturnValueOnce({
       instructions: "",
@@ -337,13 +337,11 @@ describe("responses nonstream handler", () => {
 
     expect(createJsonRpcChildAdapterMock).toHaveBeenCalled();
     const [{ normalizedRequest }] = createJsonRpcChildAdapterMock.mock.calls[0];
-    expect(normalizedRequest.turn.tools).toEqual(
-      expect.objectContaining({
-        definitions,
-        choice: "auto",
-        parallelToolCalls: true,
-      })
-    );
+    expect(normalizedRequest.turn.dynamicTools).toEqual([
+      { name: "lookup", description: "", inputSchema: {} },
+    ]);
+    expect(normalizedRequest.turn.tools).toBeUndefined();
+    expect(normalizedRequest.message.tools).toBeUndefined();
   });
 
   it("strips <tool_call> blocks from output text and emits function calls", async () => {

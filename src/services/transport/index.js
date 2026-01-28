@@ -456,6 +456,7 @@ class JsonRpcTransport {
       compactPrompt: basePayload.compactPrompt ?? basePayload.compact_prompt ?? undefined,
       baseInstructions: basePayload.baseInstructions ?? undefined,
       developerInstructions: basePayload.developerInstructions ?? undefined,
+      dynamicTools: basePayload.dynamicTools ?? basePayload.dynamic_tools ?? undefined,
       includeApplyPatchTool:
         basePayload.includeApplyPatchTool ?? basePayload.include_apply_patch_tool ?? undefined,
     });

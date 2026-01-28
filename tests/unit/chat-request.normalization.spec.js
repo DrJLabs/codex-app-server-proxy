@@ -67,14 +67,13 @@ describe("normalizeChatJsonRpcRequest", () => {
       messages,
     });
 
-    expect(normalized.turn.tools?.definitions?.[0]).toMatchObject({
-      type: "function",
-      function: { name: "do_it" },
-    });
-    expect(normalized.turn.tools?.choice).toMatchObject({
-      type: "function",
-      function: { name: "do_it" },
-    });
+    expect(normalized.turn.dynamicTools).toEqual([
+      {
+        name: "do_it",
+        description: "does it",
+        inputSchema: { type: "object", properties: { path: { type: "string" } } },
+      },
+    ]);
   });
 
   it("validates tool_choice strings", () => {
@@ -148,7 +147,10 @@ describe("normalizeChatJsonRpcRequest", () => {
     });
 
     expect(normalized.turn.items).toEqual(normalized.message.items);
-    expect(normalized.turn.tools).toEqual(normalized.message.tools);
+    expect(normalized.turn.dynamicTools).toEqual([
+      { name: "build", description: "", inputSchema: { type: "object" } },
+    ]);
+    expect(normalized.message.tools).toBeUndefined();
     expect(normalized.turn.finalOutputJsonSchema).toEqual(normalized.message.finalOutputJsonSchema);
     expect(normalized.turn.effort).toBe("low");
     expect(normalized.message.reasoning).toMatchObject({ effort: "low" });
@@ -243,8 +245,8 @@ describe("normalizeChatJsonRpcRequest", () => {
       messages,
     });
 
-    expect(normalized.turn.tools?.parallelToolCalls).toBe(true);
-    expect(normalized.message.tools?.parallelToolCalls).toBe(true);
+    expect(normalized.turn.dynamicTools).toBeUndefined();
+    expect(normalized.message.tools).toBeUndefined();
   });
 
   it("rejects invalid tool definitions", () => {
@@ -294,10 +296,9 @@ describe("normalizeChatJsonRpcRequest", () => {
       messages,
     });
 
-    expect(normalized.turn.tools?.choice).toMatchObject({
-      type: "function",
-      function: { name: "do_it" },
-    });
+    expect(normalized.turn.dynamicTools).toEqual([
+      { name: "do_it", description: "", inputSchema: { type: "object" } },
+    ]);
   });
 
   it("rejects legacy functions without a name", () => {
@@ -546,6 +547,7 @@ describe("normalizeChatJsonRpcRequest", () => {
       messages,
     });
 
-    expect(normalized.turn.tools?.parallelToolCalls).toBe(false);
+    expect(normalized.turn.dynamicTools).toBeUndefined();
+    expect(normalized.message.tools).toBeUndefined();
   });
 });

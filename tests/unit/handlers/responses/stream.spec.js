@@ -194,7 +194,7 @@ describe("responses stream handler", () => {
     expect(createJsonRpcChildAdapterMock).not.toHaveBeenCalled();
   });
 
-  it("forwards function tools to backend tool payload", async () => {
+  it("forwards function tools as dynamicTools on the turn payload", async () => {
     const definitions = [{ type: "function", function: { name: "lookup", parameters: {} } }];
     normalizeResponsesRequestMock.mockReturnValueOnce({
       instructions: "",
@@ -216,13 +216,11 @@ describe("responses stream handler", () => {
 
     expect(createJsonRpcChildAdapterMock).toHaveBeenCalled();
     const [{ normalizedRequest }] = createJsonRpcChildAdapterMock.mock.calls[0];
-    expect(normalizedRequest.turn.tools).toEqual(
-      expect.objectContaining({
-        definitions,
-        choice: "auto",
-        parallelToolCalls: true,
-      })
-    );
+    expect(normalizedRequest.turn.dynamicTools).toEqual([
+      { name: "lookup", description: "", inputSchema: {} },
+    ]);
+    expect(normalizedRequest.turn.tools).toBeUndefined();
+    expect(normalizedRequest.message.tools).toBeUndefined();
   });
 
   it("submits prompt payload without op envelope", async () => {

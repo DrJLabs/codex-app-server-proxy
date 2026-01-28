@@ -528,6 +528,48 @@ describe("JsonRpcTransport request lifecycle", () => {
     await pending;
   });
 
+  it("passes dynamicTools to newConversation when provided on the turn", async () => {
+    const child = createMockChild();
+    let newConversationParams = null;
+    wireJsonResponder(child, (message) => {
+      if (message.method === "initialize") {
+        writeRpcResult(child, message.id, { result: {} });
+      }
+      if (message.method === "newConversation") {
+        newConversationParams = message.params;
+        writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
+      }
+      if (message.method === "addConversationListener") {
+        writeRpcResult(child, message.id, { result: { subscription_id: "sub-1" } });
+      }
+      if (message.method === "sendUserTurn") {
+        writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
+      }
+    });
+    __setChild(child);
+
+    const transport = getJsonRpcTransport();
+    const context = await transport.createChatRequest({
+      requestId: "req-dynamic-tools",
+      turnParams: {
+        items: [{ type: "text", data: { text: "hello" } }],
+        dynamicTools: [{ name: "lookup", description: "", inputSchema: { type: "object" } }],
+      },
+    });
+    context.emitter.on("error", () => {});
+    const pending = context.promise.catch(() => {});
+
+    expect(newConversationParams?.dynamicTools).toEqual([
+      { name: "lookup", description: "", inputSchema: { type: "object" } },
+    ]);
+
+    transport.cancelContext(
+      context,
+      new TransportError("request aborted", { code: "request_aborted", retryable: false })
+    );
+    await pending;
+  });
+
   it("continues when addConversationListener returns no subscription id", async () => {
     const child = createMockChild();
     wireJsonResponder(child, (message) => {
