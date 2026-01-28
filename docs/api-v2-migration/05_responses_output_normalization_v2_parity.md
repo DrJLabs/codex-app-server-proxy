@@ -1,385 +1,339 @@
-# Subtask 05 — `/v1/responses` Output Normalization: V2 → OpenAI parity
+# Subtask 05 - /v1/responses output normalization (V2) - codex-app-server-proxy to OpenAI parity
 
-## Reasoning:
-- **Assumptions**
-  - `codex-app-server-proxy` currently responds on **`POST /v1/responses`** but its *outbound* JSON/SSE deviates from OpenAI’s Responses API in at least one of:
-    - extra wrapper/envelope (e.g. `{ response: {...} }`)
-    - missing/renamed top-level fields (common bug: `created` vs `created_at`)
-    - `output[]` flattened to only text/message content (dropping tool calls)
-    - streaming SSE event names/order don’t match the Responses API event contract
-  - This task is about **output parity** (what clients receive) rather than “model quality” or upstream routing.
+## Objective
+Bring the proxy's egress for `/v1/responses` into parity with OpenAI Responses for:
 
-- **Logic**
-  - Codex and other Responses clients treat `output[]` as the canonical “what happened” log. It must include **tool invocations as first-class items** (e.g. `type:"function_call"`) so clients can append tool calls + tool outputs into future `input` arrays (agent loop). See OpenAI’s description of how Codex consumes `response.*` SSE events and appends `reasoning` + `function_call` output items into the next request payload. (Spec refs below.)
+- Non-stream JSON envelope shape (top-level fields + `output[]`)
+- Typed SSE event shapes + ordering
+- Tool call representation as `output[]` items (`type: "function_call"`) with string `arguments`
 
----
+This plan uses repo paths + function/identifier anchors (no blob URLs, and no brittle line ranges).
 
-## Recommended approach (best): One normalizer for both non-streaming + streaming
-
-Implement a single, shared normalization layer:
-
-- **Non-streaming**: normalize the final JSON `Response` object **once** right before returning.
-- **Streaming**: normalize SSE events via a streaming transform **and** assemble a final `response.completed` payload that matches the non-streaming normalizer.
-
-This prevents drift where the “final JSON” path and the “SSE path” diverge.
-
-### Alternative approaches (when you want less surface area)
-- **Alt A — “Pass-through”**: if upstream is already OpenAI Responses, forward bytes untouched and only inject headers/auth. Lowest risk, but no ability to correct upstream quirks.
-- **Alt B — “Minimal patch”**: remove wrapper + stop stripping tool calls, without full spec alignment. Faster, but tends to regress later when new item types appear.
-- **Alt C — “Translate from Chat Completions”**: if upstream is Chat Completions, build a full Responses shim (bigger effort; only do if required by architecture).
+## Out of scope
+- Request normalization (`src/handlers/responses/native/request.js`)
+- Upstream transport mechanics / JSON-RPC child adapter wiring (`src/services/transport/...`)
+- Any `/v1/chat/completions` compatibility work
 
 ---
 
-## Spec anchors (authoritative) — use these as the parity contract
+## Repo anchors (stable references Codex can navigate)
 
-> These line references are from the OpenAI docs snapshots captured during this analysis (Jan 2026).
+### Envelope builder (single source of truth)
+File: `src/handlers/responses/native/envelope.js`
 
-### Response object fields
-- **Top-level Response fields** like `id`, `object:"response"`, `created_at`, `status`, `model`, `output`, `usage`, etc.  
-  Spec: OpenAI *Responses API Reference → “The response object”* (lines **1808–1974** in docs snapshot).
+Jump-to symbols:
+- `mapUsage`
+- `normalizeFunctionArguments`
+- `buildMessageOutputItem`
+- `buildFunctionCallOutputItems`
+- `buildResponsesEnvelope`
 
-### Streaming event names + shapes
-- **`response.output_item.added`** example + required fields `output_index`, `item`, `sequence_number` (lines **829–883**).  
-- **`response.output_item.done`** example (lines **886–952**).  
-- **`response.content_part.added/done`** examples (lines **956–1090**).  
-- **`response.output_text.delta/done`** examples (lines **1093–1223**).  
-- **`response.function_call_arguments.delta/done`** examples (lines **1346–1451**).  
-  Spec: OpenAI *Responses API Reference → “Streaming events”*.
-
-### Why tool calls must be output items (Codex agent loop behavior)
-- Codex consumes SSE events such as `response.output_item.added`, `response.output_text.delta`, and uses output items (incl. `type=function_call`) as prefix input for the next request.  
-  Spec: OpenAI blog *“Unrolling the Codex agent loop”* (lines **475–620** in docs snapshot).
-
----
-
-## Where to look in `codex-app-server-proxy` (fill in exact file:line refs)
-
-> I don’t have direct filesystem access to your `codex-app-server-proxy` repository in this environment, so I can’t pre-fill exact repo line numbers. Below is the exact *search plan* that will produce those file+line refs quickly; once you run it, replace the placeholders with the results.
-
-### High-signal search commands
-Run these from repo root:
-
+Fast local nav:
 ```bash
-rg -n "POST\s+/v1/responses|/v1/responses" .
-rg -n "response\.completed|response\.output_item|output_item\.done|output_text\.delta" .
-rg -n "buildResponsesEnvelope|ResponsesEnvelope|normalize.*response|output\s*:" .
-rg -n "function_call|function_call_arguments|tool_calls|finish_reason" .
+rg -n "export const buildResponsesEnvelope|mapUsage\s*\(|normalizeFunctionArguments|buildMessageOutputItem|buildFunctionCallOutputItems" src/handlers/responses/native/envelope.js
 ```
 
-### Expected hotspots to annotate with file+line refs
-- `POST /v1/responses` route handler (request parsing, upstream forwarding, response writing)
-- any “envelope builder” (e.g., `buildResponsesEnvelope(...)`)
-- streaming/SSE transform (anything that writes `data: {...}\n\n`)
-- any code that:
-  - rewrites `output`
-  - flattens `message.content`
-  - drops unknown output item types
+### Non-stream handler
+File: `src/handlers/responses/nonstream.js`
+
+Key anchors:
+- `postResponsesNonStream`
+- `buildResponsesEnvelope(` call site
+- `parseToolCallText` / `<tool_call>` stripping path
+
+Fast local nav:
+```bash
+rg -n "postResponsesNonStream|buildResponsesEnvelope\(|parseToolCallText|tool_call" src/handlers/responses/nonstream.js
+```
+
+### Stream adapter (typed SSE)
+File: `src/handlers/responses/stream-adapter.js`
+
+Key anchors:
+- `createResponsesStreamAdapter`
+- `ensureCreated`
+- `writeEventInternal`
+- `emitTextDelta` / `emitTextPart`
+- `emitToolCallDeltas`
+- `finalizeToolCalls`
+- `finalize` (terminal ordering + `response.completed`)
+
+Fast local nav:
+```bash
+rg -n "createResponsesStreamAdapter|ensureCreated|writeEventInternal|emitTextDelta|emitToolCallDeltas|finalizeToolCalls|const finalize" src/handlers/responses/stream-adapter.js
+```
+
+### Existing unit tests that already cover pieces of this
+- `tests/unit/handlers/responses/native/envelope.spec.js`
+- `tests/unit/handlers/responses/nonstream.spec.js`
+
+---
+
+## Verify the proposed updates (accuracy + what we adopt)
+
+### 1) Remove brittle line references
+Accurate requirement. We will rely on function anchors + `rg` commands. Line numbers drift and should not be authoritative.
+
+### 2) Force `usage` to always exist (default zeros)
+Accurate observation about current behavior: `mapUsage(...)` returns `undefined` when usage is absent/empty, which omits `usage` from the final payload.
+
+Not adopted as the default parity target, because this is a behavioral contract change. Streaming usage is commonly gated by `stream_options.include_usage` and/or upstream emission of a `usage` event.
+
+Plan decision:
+- Default: keep usage omitted unless provided (recommended)
+- Optional: add a strict-defaulting mode (documented below)
+
+### 3) Wire `finish_reason` into the envelope
+Accurate observation: `buildResponsesEnvelope(...)` does not accept or emit a finish reason today.
+
+Plan decision (parity-oriented):
+- Do not add `finish_reason` to the Responses envelope by default.
+- If needed for debugging, add it as a proxy-only extension that strict clients can ignore (details below).
+
+### 4) Verify streaming sequence: output_text.done then tool done events then response.completed
+Accurate. We will lock this ordering with a unit test (so clients do not get surprised by reordering).
+
+### 5) Lock output item typing; no mixed items
+Accurate, and already the design intent in this repo. We will explicitly test:
+- `buildMessageOutputItem` only emits `type: "message"` items
+- `buildFunctionCallOutputItems` only emits `type: "function_call"` items
+
+---
+
+## Critical parity decision to lock before coding
+
+### D1) SSE `output_index` semantics
+Current risk pattern: the stream adapter uses `output_index` like a "choice index" (and `/v1/responses` enforces `n=1`), so tool events and text events can collide on index 0.
+
+Recommended parity target: `output_index` should map to the index within final `response.output[]`.
+
+Given the envelope builder emits:
+- `output[0]` = message item
+- `output[1..]` = function_call items
+
+Then SSE should use:
+- Text events: `output_index = 0`
+- Tool events: `output_index = 1 + toolOrdinal`
+
+This is the highest leverage change for strict SSE consumers.
+
+### D2) Tool-call ID stability across SSE and final envelope
+Recommended: keep `item.id` and `item.call_id` stable and consistent across:
+- `response.output_item.added` / `response.output_item.done`
+- `response.completed.response.output[]`
+
+Pick a canonical: `call_id` is usually the canonical tool-call identifier. If upstream emits both, mirror into both fields unless you have a reason to split them.
+
+### D3) Usage behavior policy
+Lock one of these policies:
+
+- Policy A (recommended / current-contract friendly):
+  - Non-stream: include `usage` only if upstream provided it
+  - Stream: include `usage` only if requested and upstream provided it
+
+- Policy B (strict defaulting):
+  - Always include `usage` with zeros when unknown
+
+If you choose Policy B, update tests and document this as a proxy deviation.
 
 ---
 
 ## Tasks (exact operations)
 
-### 1) Normalize the top-level `Response` object (non-streaming)
-**Goal:** return a JSON object that matches the Responses API “Response object” contract.
+### Task 1 - Verify and lock output item typing (no mixed items)
+Goal: keep the envelope representation strict and unambiguous.
+- assistant text lives in a `type: "message"` item only
+- each tool call is a separate `type: "function_call"` item only
 
-**Do**
-- Return a **`Response` object directly** (no wrapper such as `{ response: ... }`).
-- Ensure fields align to Responses naming:
-  - ✅ `created_at` (not `created`)
-  - ✅ `completed_at` when `status:"completed"` (can be `null` otherwise)
-  - ✅ `object:"response"`
-  - ✅ `output: []` is always present (even if empty)
-  - ✅ `error` + `incomplete_details` preserved if present
-- Preserve unknown/new fields from upstream whenever possible (forward-compat).
+Where:
+- `src/handlers/responses/native/envelope.js` (`buildMessageOutputItem`, `buildFunctionCallOutputItems`)
 
-**Avoid**
-- Adding **SDK-only** convenience fields like `output_text` (the JS/Python SDK computes that locally).
+Add/confirm tests in:
+- `tests/unit/handlers/responses/native/envelope.spec.js`
 
-#### Patch pattern (TypeScript)
-```ts
-type ResponseV2 = {
-  id: string;
-  object: "response";
-  created_at: number;
-  status: "completed" | "failed" | "in_progress" | "cancelled" | "queued" | "incomplete";
-  model: string;
-  output: Array<any>;
-  usage: null | {
-    input_tokens: number;
-    output_tokens: number;
-    total_tokens: number;
-    // plus optional breakdowns if you have them
-  };
-  // keep-through fields:
-  error?: any;
-  incomplete_details?: any;
-  completed_at?: number | null;
-  metadata?: Record<string, string>;
-  // ...and any other upstream fields you’re already forwarding
-};
+Assertions:
+- `output[0].type === "message"`
+- `output[0].content[0].type === "output_text"`
+- every subsequent tool item is `type === "function_call"`
+- tool item has `id`, `call_id`, `name`, and `arguments` (string)
 
-import { randomUUID } from "crypto";
+### Task 2 - Normalize SSE `output_index` to map to `response.output[]`
+Goal: make SSE `output_index` match final `response.output[]` indices.
 
-export function normalizeResponseObject(upstream: any): ResponseV2 {
-  const created_at =
-    typeof upstream.created_at === "number" ? upstream.created_at :
-    typeof upstream.created === "number" ? upstream.created : // legacy field you may have
-    Math.floor(Date.now() / 1000);
+Where:
+- `src/handlers/responses/stream-adapter.js`
 
-  // Preserve upstream id if present; otherwise generate stable-ish id.
-  const id = typeof upstream.id === "string" ? upstream.id : `resp_proxy_${randomUUID()}`;
+Implementation notes:
+- Introduce:
+  - `const MESSAGE_OUTPUT_INDEX = 0`
+  - `const toolOutputIndex = (ordinal) => 1 + ordinal`
 
-  return {
-    ...upstream, // start with upstream to keep unknown fields
-    id,
-    object: "response",
-    created_at,
-    status: upstream.status ?? "completed",
-    model: upstream.model ?? "unknown",
-    output: Array.isArray(upstream.output) ? upstream.output : [],
-    usage: upstream.usage ?? null,
-  };
-}
+Update:
+- `emitTextDelta(...)` and `emitTextPart(...)`: set `output_index: 0`
+- `emitToolCallDeltas(...)`, `finalizeToolCalls(...)`, `emitToolCallComplete(...)`:
+  - compute `outIdx = 1 + existing.ordinal`
+  - use `outIdx` for all tool-related events
+
+Patch sketch:
+```js
+const MESSAGE_OUTPUT_INDEX = 0;
+const toolOutputIndex = (ordinal) => 1 + ordinal;
+
+// text
+writeEvent("response.output_text.delta", {
+  type: "response.output_text.delta",
+  delta: text,
+  output_index: MESSAGE_OUTPUT_INDEX,
+});
+
+// tool
+const outIdx = toolOutputIndex(existing.ordinal);
+writeEvent("response.output_item.added", {
+  type: "response.output_item.added",
+  response_id: responseId,
+  output_index: outIdx,
+  item: {
+    id: existing.id,
+    call_id: existing.id,
+    type: existing.type,
+    name: existing.name,
+    status: "in_progress",
+  },
+});
 ```
 
-### 2) Ensure `output[]` includes tool calls as `type:"function_call"`
-**Goal:** if the model/tooling path results in tool invocation requests, they must show up in `output[]` as discrete output items.
+### Task 3 - Lock streaming terminal ordering
+Goal: ensure end-of-stream ordering is deterministic:
 
-#### What “good” looks like (input continuation)
-Codex expects to be able to append something like:
+1. `response.created`
+2. zero+ `response.output_text.delta`
+3. `response.output_text.done`
+4. tool call done events
+5. `response.completed` (contains final envelope)
+6. `done: [DONE]`
 
-```json
-{
-  "type": "function_call",
-  "name": "shell",
-  "arguments": "{\"command\":\"cat README.md\"}",
-  "call_id": "call_8675309..."
-}
-```
+Where:
+- `src/handlers/responses/stream-adapter.js` (`finalize()`)
 
-…and then later:
+### Task 4 - Usage accounting behavior (explicit policy)
+Pick Policy A or B (see D3), then implement + test.
 
-```json
-{
-  "type": "function_call_output",
-  "call_id": "call_8675309...",
-  "output": "..."
-}
-```
+Policy A (recommended):
+- Keep `mapUsage(...)` returning `undefined` when nothing is known.
+- Keep `payload.usage` omitted unless a valid usage object exists.
+- Document: if usage was requested (stream) but no `usage` event arrived, usage may be omitted.
 
-#### Patch pattern: normalize function-call item
-```ts
-type UpstreamToolCall = {
-  id?: string;          // chat.completions tool_calls[].id OR similar
-  call_id?: string;     // responses call id
-  name: string;
-  arguments: string | object;
-};
+Policy B (optional strict defaulting):
+- Change `mapUsage(...)` so missing/invalid usage returns `{ input_tokens: 0, output_tokens: 0, total_tokens: 0 }`.
+- Always attach `payload.usage`.
+- Update any tests that assert omission when usage is not provided.
 
-function stableJSONStringify(value: unknown): string {
-  // Minimal “stable” stringify to avoid key-order diffs in fixtures.
-  // Replace with a library if you already use one.
-  const normalize = (v: any): any => {
-    if (v === null || typeof v !== "object") return v;
-    if (Array.isArray(v)) return v.map(normalize);
-    const out: Record<string, any> = {};
-    for (const k of Object.keys(v).sort()) out[k] = normalize(v[k]);
-    return out;
-  };
-  return JSON.stringify(normalize(value));
-}
+### Task 5 - Finish reason handling (parity first; optional debug-only extension)
+Default parity goal: do not emit `finish_reason` in the Responses envelope.
 
-import { randomUUID } from "crypto";
+Optional debug-only extension (choose one):
+- HTTP response header (example: `x-proxy-finish-reason: stop|tool_calls|...`)
+- logging only (preferred if you want zero client impact)
+- opt-in namespaced field, e.g. `_proxy.finish_reason` (ONLY in a debug output mode)
 
-export function asFunctionCallItem(call: UpstreamToolCall) {
-  const call_id = call.call_id ?? call.id ?? `call_${randomUUID()}`;
+If you implement `_proxy.finish_reason`:
+- do not put it under `usage`
+- do not put it inside `output[]`
+- keep it namespaced and opt-in to avoid breaking strict clients
 
-  const args =
-    typeof call.arguments === "string"
-      ? call.arguments
-      : stableJSONStringify(call.arguments);
+### Task 6 - Tool-call arguments normalization (avoid double encoding)
+Goal: `function_call.arguments` is always a string and never double-encoded.
 
-  return {
-    type: "function_call",
-    call_id,
-    name: call.name,
-    arguments: args, // must be a JSON string (avoid double-encoding)
-  };
-}
-```
+Where:
+- `src/handlers/responses/native/envelope.js` (`normalizeFunctionArguments`)
+- the non-stream text-parser path in `src/handlers/responses/nonstream.js`
 
-#### Guardrails (avoid common bugs)
-- **Don’t double-encode**:
-  - Bad: `"\"{\\\"a\\\":1}\""`
-  - Good: `"{\"a\":1}"`
-- If upstream already gives a string, do **not** `JSON.stringify` it again.
-
-### 3) Streaming SSE parity (Responses-style SSE)
-**Goal:** the SSE event stream uses Responses event names and payload shapes.
-
-Minimum event set to support Codex UI:
-- `response.created`
-- `response.in_progress`
-- `response.output_item.added`
-- `response.content_part.added` (optional but recommended)
-- `response.output_text.delta`
-- `response.output_text.done`
-- `response.output_item.done`
-- `response.completed`
-
-#### SSE writer helper
-```ts
-function writeSSE(res: import("http").ServerResponse, evt: any) {
-  res.write(`data: ${JSON.stringify(evt)}\n\n`);
-}
-
-let seq = 0;
-const nextSeq = () => ++seq;
-```
-
-#### State machine sketch (stream normalizer)
-```ts
-type OutputItem = any;
-
-class ResponseStreamState {
-  response: any;
-  output: OutputItem[] = [];
-  byItemId = new Map<string, OutputItem>();
-
-  constructor(initResponse: any) {
-    this.response = initResponse;
-  }
-
-  addOutputItem(output_index: number, item: OutputItem) {
-    this.output[output_index] = item;
-    if (item?.id) this.byItemId.set(item.id, item);
-  }
-
-  appendTextDelta(item_id: string, content_index: number, delta: string) {
-    const item = this.byItemId.get(item_id);
-    if (!item) return;
-    const part = item.content?.[content_index];
-    if (part?.type === "output_text") part.text = (part.text ?? "") + delta;
-  }
-
-  appendFunctionArgsDelta(item_id: string, delta: string) {
-    const item = this.byItemId.get(item_id);
-    if (!item) return;
-    if (item.type === "function_call") item.arguments = (item.arguments ?? "") + delta;
-  }
-
-  finalizeResponse() {
-    return normalizeResponseObject({
-      ...this.response,
-      output: this.output.filter(Boolean),
-      status: "completed",
-      completed_at: Math.floor(Date.now() / 1000),
-    });
-  }
-}
-```
-
-**Implementation notes**
-- If upstream already emits Responses SSE events, prefer **pass-through + minimal fixups** rather than re-synthesizing.
-- If upstream emits something else (e.g., Chat Completions deltas), translate into the above event set and update state as you stream.
-
-### 4) Remove Chat-Completions-only concerns
-The current task doc mentions `finish_reason`. That’s **Chat Completions** vocabulary; the Responses API contract relies on:
-- `response.status`
-- `response.incomplete_details` when incomplete
-- output item completion via `response.output_item.done` (streaming)
-
-So:
-- **Delete/ignore** any “finish_reason parity” requirements unless you are also serving Chat Completions.
-
-### 5) Usage normalization
-If you can’t compute usage, `usage: null` is acceptable; but don’t return malformed partial objects.
-
-If you *do* map usage from another upstream schema, ensure:
-- `input_tokens`, `output_tokens`, `total_tokens` are integers
-- keep any upstream “breakdown” fields if present
+Rules:
+- if args are already a string, pass through unchanged
+- if args are object/number/bool/null, stringify once
+- if args are undefined, lock either `""` (current) or `"{}"` (stricter), and test it
 
 ---
 
 ## Acceptance criteria
 
-### Non-streaming
-- [ ] `POST /v1/responses` returns a **top-level Response object** (`object:"response"`) with **`created_at`** and **`output`** fields present.
-- [ ] No extra wrapper key (e.g., no `{ response: ... }`).
-- [ ] When the model requests a tool, the response includes at least one output item with:
-  - [ ] `type:"function_call"`
-  - [ ] `name`
-  - [ ] `arguments` as a JSON **string** (not object, not double-encoded)
-  - [ ] `call_id`
-- [ ] Unknown/new output item types are preserved (don’t drop them).
+### A) Non-stream JSON envelope
+Response JSON includes:
+- `object: "response"`
+- `id` (stable string)
+- `created` (unix seconds integer)
+- `status` in `{ completed, incomplete, failed }`
+- `model` (string)
+- `output` (array)
+  - `output[0].type === "message"`
+  - `output[0].content[0].type === "output_text"`
+  - tool calls are separate items with `type === "function_call"`
+  - tool items have `id`, `call_id`, `name`, `arguments` (string)
 
-### Streaming
-- [ ] Event `type` values match the Responses API naming (e.g. `response.output_item.added`, `response.output_text.delta`, `response.completed`).
-- [ ] Every emitted event contains a monotonic `sequence_number` integer.
-- [ ] For text streaming:
-  - [ ] `response.output_item.added` emitted before `response.output_text.delta`
-  - [ ] `response.output_text.done` emitted before `response.output_item.done`
-- [ ] If function-call arguments stream, emit `response.function_call_arguments.delta/done` and assemble a final `function_call` output item containing full `arguments`.
+Usage:
+- Policy A: `usage` present only when upstream provided it
+- Policy B: `usage` always present, zeros when unknown
 
----
+### B) Streaming typed SSE
+Ordering:
+1. `response.created`
+2. optional `response.output_text.delta`
+3. `response.output_text.done`
+4. tool call item events
+5. `response.completed`
+6. terminal `done: [DONE]`
 
-## Suggested tests (add/extend as needed)
+Indexing (after Task 2):
+- text events use `output_index === 0`
+- tool events use `output_index === 1 + ordinal`
 
-### 1) Golden contract tests (recommended)
-**Goal:** compare proxy output to OpenAI Responses for the same request shape.
-
-- Record fixtures from OpenAI:
-  - `simple_text_response.json`
-  - `tool_call_response.json`
-  - `tool_call_stream.sse` (raw)
-- Run the same prompts through your proxy with the same inputs; compare after stripping nondeterministic fields:
-  - ids (`resp_*`, `msg_*`, `call_*`)
-  - timestamps (`created_at`, `completed_at`)
-  - usage (if upstream doesn’t provide)
-
-**Assertion:** structural equality of:
-- event `type` set + ordering constraints
-- presence/shape of `output[]` items
-- `arguments` string semantics (JSON parseable)
-
-### 2) Unit tests for normalization helpers
-- `normalizeResponseObject()`
-  - maps `created` → `created_at`
-  - guarantees `output` array
-- `asFunctionCallItem()`
-  - string arguments unchanged
-  - object arguments stringify once
-  - generated `call_id` is stable format
-
-### 3) Streaming state machine tests
-Feed a synthetic sequence:
-- output_item.added(message)
-- content_part.added(output_text)
-- output_text.delta × N
-- output_text.done
-- output_item.done
-- response.completed
-
-Assert final assembled response:
-- output[0].content[0].text equals concatenated delta
-
-Also test tool-call streaming:
-- output_item.added(function_call)
-- function_call_arguments.delta × N
-- function_call_arguments.done
-- output_item.done
-- response.completed
-
-### 4) End-to-end smoke test (Codex client compatibility)
-Run a Codex CLI or Codex SDK request through the proxy that triggers a tool call, and confirm:
-- the client receives a `function_call` output item
-- the client can append a `function_call_output` item and continue the loop without schema errors
+Stability:
+- `sequence_number` is monotonic per event (already implemented in SSE writer)
 
 ---
 
-## Deliverable
-- Updated `/v1/responses` implementation with a shared normalizer for JSON + SSE output
-- A contract/golden test suite proving parity for:
-  - plain text completion
-  - tool call (single + multi-call)
-  - streaming (text + tool-call-arguments)
+## Suggested tests (additions)
+
+### 1) Extend envelope unit tests
+File: `tests/unit/handlers/responses/native/envelope.spec.js`
+
+Add cases:
+- `mapUsage` maps `{ prompt_tokens, completion_tokens, total_tokens }` to `{ input_tokens, output_tokens, total_tokens }`
+- `normalizeFunctionArguments`:
+  - string passthrough
+  - object stringify
+  - undefined behavior locked ("" or "{}")
+
+### 2) Add stream-adapter unit test (new)
+Create: `tests/unit/handlers/responses/stream-adapter.spec.js`
+
+Test goals:
+- capture emitted SSE events (mock `writeSseChunk`)
+- feed:
+  - text delta events
+  - tool_calls_delta events with growing argument strings
+  - finish, then `finalize()`
+
+Assertions:
+- ordering:
+  - `response.output_text.done` occurs before `response.output_item.done`
+  - `response.completed` occurs after all `.done` events
+  - `[DONE]` is last
+- indexing:
+  - text events use output_index 0
+  - tool events use output_index 1..N (by ordinal)
+
+### 3) Non-stream regression tests
+File: `tests/unit/handlers/responses/nonstream.spec.js`
+
+Add/strengthen:
+- tool-only output still includes message item at `output[0]`
+- `<tool_call>` stripping does not double-encode arguments
+
+---
+
+## Codex hand-off checklist
+- Implement Task 2 first (SSE output_index semantics) and lock with a new unit test.
+- Keep Task 4 (usage) and Task 5 (finish_reason) as explicit policy decisions, not accidental changes.
+- Use the `rg` commands in this doc to jump to exact code sites quickly.
+

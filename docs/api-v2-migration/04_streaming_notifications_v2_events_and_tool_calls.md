@@ -1,290 +1,177 @@
 # Subtask 04 — Streaming Notifications: v2 `response.*` events + tool-call streaming
 
+## Reasoning
+Assumptions + logic:
+- There are **two different “v2 event” contexts** in this repo:
+  1) **Ingress (worker → proxy)**: JSON-RPC notifications handled by `src/services/transport/index.js`.
+  2) **Egress (proxy → client)**: `/v1/responses` SSE output produced by `src/handlers/responses/stream-adapter.js`.
+- The v2 `response.*` tool-call lifecycle is already supported by:
+  - `src/lib/tool-call-aggregator.js` (parses v2 tool-call events), and
+  - `src/handlers/responses/stream-adapter.js` (synthesizes v2 `response.*` egress events).
+- The only **true correctness risk** is *dropping* v2 signals if they arrive as unexpected ingress shapes, or *swallowing* text deltas if we naively “route all `response.*`” through the tool-call aggregator.
+
+---
+
+## Verification of suggested updates
+
+### Confirmed accurate
+- **Aggregator supports v2 tool-call events**: `collectFragments(...)` explicitly handles:
+  - `response.output_item.added` / `response.output_item.done` with `item.type === "function_call"` (`src/lib/tool-call-aggregator.js:L291–L305`).
+  - `response.function_call_arguments.delta` (`L305–L314`).
+  - `response.function_call_arguments.done` (`L314–L324`).
+- **Responses stream adapter synthesizes v2 egress events**:
+  - Tool-call egress emission is implemented in `emitToolCallDeltas(...)` (`src/handlers/responses/stream-adapter.js:L442–L492`) and `finalizeToolCalls(...)` (`L494–L653`).
+  - The adapter ingests *normalized internal events* (`text_delta`, `tool_calls_delta`, etc.) in `handleEvent(...)` (`L833–L941`) and finalizes the stream in `finalize(...)` (`L943–L1019`).
+- **Transport drops unknown notification methods**:
+  - `JsonRpcTransport.#handleNotification(...)` normalizes the JSON-RPC method name and uses a switch with a `default: break` (`src/services/transport/index.js:L953–L1062`).
+
+### Correctness nuance
+- Calling Transport Patch B **“mandatory”** is accurate **only if** the worker emits v2 events as JSON-RPC notification methods (e.g. `codex/event/response.output_item.added`).
+- If the worker never emits `response.*` as notification methods, adding Transport Patch B is not required for correctness, but it is still a safe forward-compatible hardening.
+
+### Confirmed risk: “Patch A can swallow text deltas”
+- If we add a blanket ingress rule like `if (event.type.startsWith("response.")) { ingestDelta(...); return true; }`, then `response.output_text.delta` would be consumed.
+- The tool-call aggregator intentionally ignores non-tool events, so `ingestDelta(...)` would return `{ updated: false }`, and the adapter would drop the text.
+- Therefore: **either** explicitly handle `response.output_text.delta` **or** restrict raw `response.*` ingress handling to tool-lifecycle event types only.
+
+---
+
 ## Objective
-
-Ensure **codex-app-server-proxy** handles (or safely ignores) *all* v2 streaming notifications emitted by **Codex app-server**, with correct OpenAI-compatible streaming semantics for:
-
-- normal assistant text streaming
-- output item lifecycle events
-- tool calls (function call items + arguments deltas/done)
-- turn completion markers / stream termination
+Ensure the proxy handles (or safely ignores) **all relevant v2 tool-call lifecycle events** with correct semantics:
+- Preserve text streaming
+- Preserve tool-call reconstruction and ordering
+- Clean, single termination (`response.completed` then `done: [DONE]`)
 
 ---
 
-## Reasoning: assumptions + approach
+## Where to look (actual file+line refs)
 
-Assumptions (based on the task template and existing proxy patterns):
+### Ingress: JSON-RPC notification router
+- `src/services/transport/index.js`
+  - `JsonRpcTransport.#handleNotification(...)`: `L953–L1062`
+  - Legacy handled methods include: `agent_message_delta`, `task_complete`, `item_completed`, etc. (`L970–L1058`)
 
-- The proxy consumes **app-server “notifications”** that include a `type` discriminator (e.g. `response.output_item.added`).
-- The proxy **emits Chat Completions–style SSE** to clients (e.g. VS Code extensions), including the terminal `[DONE]` marker.
-- Tool calls are surfaced via an internal `ToolCallAggregator` that reconstructs a *single* tool call (or multiple tool calls) from `response.*` deltas.
+### Tool-call assembly
+- `src/lib/tool-call-aggregator.js`
+  - v2 event parsing: `L291–L324`
+  - Public API factory: `createToolCallAggregator(...)`: `L556–L731`
 
-Core approach:
-
-- Treat **all v2 `response.*` notifications as first-class inputs** to the streaming pipeline.
-- Centralize logic into a **normalization + routing layer**, keeping the main handler readable and preventing drift as new `response.*` events appear.
-- Make tool-call streaming **idempotent, bounded, and testable** by replaying recorded notification streams and asserting emitted SSE frames.
-
----
-
-## Line references to the original task template
-
-The attached template was ~70 lines long. These are the key line ranges that were expanded/clarified in this revision:
-
-- **L11–L23**: “Where to look” placeholder list → replaced with a structured, fill-in *file+line* checklist + a single ripgrep command.
-- **L27–L42**: “Tasks” outline → expanded into a concrete event matrix + step-by-step operations.
-- **L45–L57**: patch snippet → expanded into multiple copy/paste snippets (router + aggregator + SSE chunks).
-- **L61–L66**: validation checklist → promoted into explicit **Acceptance criteria**.
-- **L69–L70**: deliverable → expanded into **Deliverable** + recommended tests.
+### Egress: `/v1/responses` SSE adapter
+- `src/handlers/responses/stream-adapter.js`
+  - `handleEvent(...)`: `L833–L941`
+  - Tool-call egress: `emitToolCallDeltas(...)`: `L442–L492`
+  - Tool-call finalize egress: `finalizeToolCalls(...)`: `L494–L653`
+  - Stream finalize: `finalize(...)`: `L943–L1019`
 
 ---
 
-## Where to look (fill with exact file+line refs from this repo)
+## Decision gate (must be settled first)
 
-> This section is intentionally structured so you can paste in **exact file paths + line ranges** after running repository search.
-> 
-> Suggested command to generate references:
-> - `rg -n "handleNotification|agentMessageDelta|item_completed|task_complete|ToolCallAggregator|ingestDelta|response\.output_item\.added|response\.function_call_arguments\.(delta|done)|response\.output_item\.done" -S .`
+### Do we ever receive v2 `response.*` as JSON-RPC notification *method names*?
+If yes, Transport must not drop them.
 
-### Primary handler(s): notification routing & SSE emission
-
-- **`<<FILL>>`** — `handleNotification(...)` switch / router: `<<path>>:L<<start>>-L<<end>>`
-- **`<<FILL>>`** — SSE writer / chunk builder (ChatCompletions chunk schema): `<<path>>:L<<start>>-L<<end>>`
-- **`<<FILL>>`** — “turn done” / `[DONE]` emission: `<<path>>:L<<start>>-L<<end>>`
-
-### Tool call reconstruction
-
-- **`<<FILL>>`** — `ToolCallAggregator` class definition: `<<path>>:L<<start>>-L<<end>>`
-- **`<<FILL>>`** — `ToolCallAggregator.ingestDelta(...)`: `<<path>>:L<<start>>-L<<end>>`
-- **`<<FILL>>`** — any state reset / cleanup paths: `<<path>>:L<<start>>-L<<end>>`
-
-### Legacy / v1 notification support (for compatibility checks)
-
-- **`<<FILL>>`** — legacy `agentMessageDelta` / `agent_message_delta`: `<<path>>:L<<start>>-L<<end>>`
-- **`<<FILL>>`** — `item_completed` / `task_complete`: `<<path>>:L<<start>>-L<<end>>`
-
----
-
-## Event handling matrix (v2 `response.*` family)
-
-> Goal: every event is either **handled** or **explicitly ignored** with a safe default.
-
-| Notification `type` | Expected payload (high-level) | Action in proxy | Output impact |
-|---|---|---|---|
-| `response.output_text.delta` (or equivalent) | incremental assistant text | forward as `delta.content` | SSE chunk(s) |
-| `response.output_item.added` | output item created; for tool calls: `type=function_call` and identifiers | if tool-call item: create tool call in aggregator; else ignore or map | may start tool-call mode |
-| `response.function_call_arguments.delta` | JSON-string fragment | append to tool call args buffer | emits `delta.tool_calls[].function.arguments` |
-| `response.function_call_arguments.done` | done marker (optional final args) | finalize args string | stops args buffering |
-| `response.output_item.done` | output item finished | finalize tool call (and/or mark finished) | emits finish chunk with `finish_reason: "tool_calls"` |
-| `response.completed` / `response.done` (if present) | response finished | end stream | `[DONE]` |
-| `response.failed` / `response.error` (if present) | error info | surface as error + end | error SSE + `[DONE]` |
-| any other `response.*` | unknown / future | ignore + debug log once | none |
+How to prove quickly (no guesswork):
+- Capture a real worker notification line (stdout JSON) and confirm `payload.method`.
+- Look for `codex/event/response.` prefixes.
 
 ---
 
 ## Tasks (exact operations)
 
-### 1) Inventory current notification handling
+### 1) Inventory ingress notification methods
+- Enumerate all observed `normalizeNotificationMethod(message.method)` values in `#handleNotification`.
+- If any begin with `response.`:
+  - classify as `text`, `tool_lifecycle`, or `other`.
 
-- Enumerate all `notif.type` values currently handled.
-- Categorize them into:
-  - **text streaming**
-  - **tool-call streaming**
-  - **lifecycle / completion**
-  - **legacy / v1**
-  - **unknown (default case)**
+### 2) Harden transport to preserve v2 tool-call lifecycle methods
+Applies when ingress includes v2 methods (and is safe even if it does not).
 
-Deliverable: a short list of handled types + notes on what each emits downstream.
+### 3) (Optional) Accept raw `response.*` ingress in `/v1/responses` adapter
+Only needed if upstream pipelines can feed raw v2 events into `createResponsesStreamAdapter.handleEvent`. This is **optional** unless you observe raw `response.*` events bypassing normalization.
 
-### 2) Add explicit routing for v2 tool-call notifications
+If you do this, you **must**:
+- Handle `response.output_text.delta` explicitly, OR
+- Restrict raw `response.*` handling to tool-lifecycle events.
 
-**Plan of record (recommended):** route all tool-call-related v2 events through `ToolCallAggregator.ingestDelta(...)`.
-
-Key points:
-
-- Ensure `response.output_item.added` creates a tool call **only when** the added item is a function call output item.
-- Ensure argument deltas are appended **in order**, and are **never truncated**.
-- Ensure `.done` events produce a clean finalize, even if `.delta` never arrived (edge-case).
-
-### 3) Confirm ToolCallAggregator completeness and bounds
-
-The aggregator must correctly handle:
-
-- creation of call state on `output_item.added` (function_call)
-- accumulation of arguments on `function_call_arguments.delta`
-- finalization on `function_call_arguments.done`
-- completion on `output_item.done`
-- **multiple tool calls per response** (if the app-server can emit them)
-- bounded memory growth (cap arguments buffer; evict finished calls)
-
-> If the existing aggregator only supports a single active tool call, extend to support multiple via `Map<call_id, ...>`.
-
-### 4) Stream termination semantics (OpenAI parity)
-
-When a tool call completes:
-
-- emit a final chunk with `finish_reason: "tool_calls"`
-- then emit `[DONE]`
-- enforce “drop assistant text after tool call start”:
-  - once the proxy sees the first tool-call `output_item.added`, **stop forwarding any subsequent text deltas** (if any appear)
-
-### 5) Non-tool `response.*` notifications
-
-For turn-level markers (e.g. `turn_started`, `turn_completed`, or response lifecycle markers):
-
-- Prefer **explicit ignore + debug log** if they do not map cleanly to downstream SSE.
-- Add mapping only if downstream clients depend on them.
+### 4) Add tests
+- Unit tests for `createToolCallAggregator` v2 event ingestion.
+- Integration tests to ensure transport preserves `response.*` methods.
+- Integration tests to ensure adapter never drops `response.output_text.delta`.
 
 ---
 
-## Suggested patch snippets (copy/paste patterns)
+## Patch patterns
 
-### A) Minimal routing: send tool-call v2 events into the aggregator
+### Patch B (Transport): Required *if* ingress includes v2 `response.*` methods
+Location: `src/services/transport/index.js` inside `#handleNotification` switch (`L970–L1062`).
 
-```ts
-// inside handleNotification(...) or equivalent
-switch (notif.type) {
-  case "response.output_item.added":
-  case "response.function_call_arguments.delta":
-  case "response.function_call_arguments.done":
-  case "response.output_item.done": {
-    toolCallAggregator.ingestDelta(notif);
-    break;
+Goal: don’t drop v2 tool lifecycle methods.
+
+```js
+// src/services/transport/index.js
+case "response.output_item.added":
+case "response.output_item.done":
+case "response.function_call_arguments.delta":
+case "response.function_call_arguments.done": {
+  // `payload` is derived from params.msg when present; ensure it carries `type`
+  if (payload && typeof payload === "object" && !payload.type) {
+    payload.type = method; // method is already normalized (e.g. "response.output_item.added")
   }
-
-  // ...existing cases for text deltas, completion, etc...
-
-  default: {
-    // Safe default: ignore unknown v2 notifications.
-    // Prefer: log once per type to avoid spam.
-    debugUnknownNotificationTypeOnce(notif.type);
-    break;
-  }
+  context.addDelta(payload);
+  break;
 }
 ```
 
-### B) ToolCallAggregator core shape (supports multiple calls)
+Notes:
+- The aggregator’s v2 parsing relies on `node.type` (`src/lib/tool-call-aggregator.js:L291–L324`).
+- Injecting `payload.type = method` is a robustness measure in case upstream uses method-name-only typing.
 
-```ts
-type ToolCallState = {
-  id: string;              // call_id (stable)
-  name: string;            // function name
-  index: number;           // tool_calls index in the downstream array
-  args: string;            // accumulated JSON string
-  argsDone: boolean;
-  outputItemDone: boolean;
-};
+### Patch A (Adapter): Safe handling for raw `response.*` ingress
+Location: `src/handlers/responses/stream-adapter.js` inside `handleEvent(...)` (`L833–L941`).
 
-export class ToolCallAggregator {
-  private callsById = new Map<string, ToolCallState>();
-  private nextIndex = 0;
+**Do NOT** blindly swallow all `response.*`.
 
-  ingestDelta(notif: { type: string; [k: string]: any }) {
-    switch (notif.type) {
-      case "response.output_item.added": {
-        const item = notif.item ?? notif.output_item ?? notif.outputItem;
-        if (item?.type !== "function_call") return;
+Option A1 (recommended): only accept tool-lifecycle `response.*` ingress
+```js
+if (typeof event.type === "string") {
+  const t = event.type;
+  const isToolLifecycle =
+    t === "response.output_item.added" ||
+    t === "response.output_item.done" ||
+    t === "response.function_call_arguments.delta" ||
+    t === "response.function_call_arguments.done";
 
-        const callId = item.call_id ?? item.id;
-        const name = item.name ?? item.function?.name;
-        if (!callId || !name) return; // or throw if invariant
-
-        if (!this.callsById.has(callId)) {
-          this.callsById.set(callId, {
-            id: callId,
-            name,
-            index: this.nextIndex++,
-            args: "",
-            argsDone: false,
-            outputItemDone: false,
-          });
-          // Optionally notify downstream that tool call has started.
-        }
-        break;
-      }
-
-      case "response.function_call_arguments.delta": {
-        const callId = notif.call_id ?? notif.item_id ?? notif.id;
-        const delta = notif.delta ?? notif.arguments_delta ?? "";
-        const st = callId ? this.callsById.get(callId) : undefined;
-        if (!st || st.argsDone) return;
-
-        // Hard cap to prevent unbounded growth.
-        if (st.args.length + delta.length > 1_000_000) {
-          throw new Error("tool call arguments exceeded 1MB cap");
-        }
-
-        st.args += delta;
-        break;
-      }
-
-      case "response.function_call_arguments.done": {
-        const callId = notif.call_id ?? notif.item_id ?? notif.id;
-        const st = callId ? this.callsById.get(callId) : undefined;
-        if (!st) return;
-        st.argsDone = true;
-        break;
-      }
-
-      case "response.output_item.done": {
-        const item = notif.item ?? notif.output_item ?? notif.outputItem;
-        const callId = item?.call_id ?? item?.id ?? notif.call_id;
-        const st = callId ? this.callsById.get(callId) : undefined;
-        if (!st) return;
-        st.outputItemDone = true;
-        break;
-      }
+  if (isToolLifecycle) {
+    const choiceState = ensureChoiceState(choiceIndex);
+    const result = toolCallAggregator.ingestDelta(event, { choiceIndex });
+    if (result?.updated) {
+      ensureCreated();
+      emitToolCallDeltas(choiceState, choiceIndex, result.deltas);
     }
+    return true;
   }
+}
+```
 
-  // Use this to produce downstream SSE tool_call deltas (and cleanup).
-  drainCompletedCalls(): ToolCallState[] {
-    const completed: ToolCallState[] = [];
-    for (const [id, st] of this.callsById) {
-      if (st.outputItemDone) {
-        completed.push(st);
-        this.callsById.delete(id);
-      }
+Option A2: accept all `response.*`, but explicitly forward `response.output_text.delta`
+```js
+if (typeof event.type === "string" && event.type.startsWith("response.")) {
+  const choiceState = ensureChoiceState(choiceIndex);
+
+  if (event.type === "response.output_text.delta") {
+    if (isNonEmptyString(event.delta)) {
+      emitTextDelta(choiceState, choiceIndex, event.delta);
     }
-    return completed.sort((a, b) => a.index - b.index);
+    return true;
   }
+
+  const result = toolCallAggregator.ingestDelta(event, { choiceIndex });
+  if (result?.updated) {
+    ensureCreated();
+    emitToolCallDeltas(choiceState, choiceIndex, result.deltas);
+  }
+  return true;
 }
-```
-
-### C) Downstream SSE chunk: tool_call delta (Chat Completions streaming shape)
-
-```ts
-function makeToolCallDeltaChunk(call: { id: string; name: string; args: string; index: number }) {
-  return {
-    object: "chat.completion.chunk",
-    choices: [
-      {
-        index: 0,
-        delta: {
-          tool_calls: [
-            {
-              index: call.index,
-              id: call.id,
-              type: "function",
-              function: {
-                name: call.name,
-                arguments: call.args,
-              },
-            },
-          ],
-        },
-      },
-    ],
-  };
-}
-```
-
-### D) Finish + DONE after tool call completion
-
-```ts
-// After you emit the final tool_calls delta chunk(s):
-writeSse({ object: "chat.completion.chunk", choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] });
-writeDone(); // emits `data: [DONE]\n\n`
 ```
 
 ---
@@ -292,77 +179,44 @@ writeDone(); // emits `data: [DONE]\n\n`
 ## Acceptance criteria
 
 ### Functional
+- No tool-lifecycle events are silently dropped when ingress emits `response.*` methods.
+- Tool call lifecycle is complete:
+  - `output_item.added` emitted once per call
+  - `function_call_arguments.delta` emitted for growth
+  - `function_call_arguments.done` emitted once
+  - `output_item.done` emitted once
+- Text output is never lost:
+  - `response.output_text.delta` always forwards to client.
 
-- [ ] All observed v2 `response.*` notifications are either:
-  - handled explicitly, or
-  - ignored safely via default branch (no crash), with a debug log **once per type**.
-- [ ] For a streaming tool call:
-  - [ ] arguments are reconstructed correctly (no truncation / missing segments)
-  - [ ] `call_id` and `function.name` remain stable across deltas
-  - [ ] downstream SSE emits `delta.tool_calls` in correct order
-- [ ] Mixed content + tool call:
-  - [ ] assistant text streaming ends **exactly** when tool call begins (no text after tool call start)
-- [ ] Stream termination:
-  - [ ] after tool call completion, proxy emits `finish_reason: "tool_calls"` then `[DONE]`
-  - [ ] non-tool responses still end with normal finish + `[DONE]`
-- [ ] Resource safety:
-  - [ ] tool-call argument buffering is bounded (cap and/or cleanup)
-  - [ ] aggregator does not retain completed calls after completion
-
-### Non-functional
-
-- [ ] No unbounded memory growth in long-running sessions.
-- [ ] Unknown event types do not spam logs (log once per type, or rate-limit).
+### Termination
+- Exactly one completion sequence:
+  - `response.completed` then `done: [DONE]`.
 
 ---
 
 ## Suggested tests
 
-### Unit tests (fast)
+### Unit: ToolCallAggregator v2 ingestion
+- Feed events:
+  - `response.output_item.added` (with `item.type="function_call"`)
+  - multiple `response.function_call_arguments.delta`
+  - `response.function_call_arguments.done`
+  - `response.output_item.done`
+- Assert `snapshot()` returns the full `function.arguments`.
 
-1. **ToolCallAggregator accumulates deltas**
-   - given: `output_item.added(function_call)`, then N `arguments.delta`, then `arguments.done`
-   - assert: final args == concatenation of deltas
+### Integration: Transport preserves v2 methods
+- Simulate a JSON-RPC notification with:
+  - `message.method = "codex/event/response.function_call_arguments.delta"`
+  - `params.msg = { delta: "{\"x\":" }` (no `type`)
+- Assert stored delta has `type === "response.function_call_arguments.delta"`.
 
-2. **ToolCallAggregator handles output_item.done**
-   - assert: `drainCompletedCalls()` returns the completed call(s) and removes them
-
-3. **Multiple tool calls**
-   - interleave deltas for call A and call B
-   - assert: both calls preserved and emitted with stable indexes
-
-4. **Bounds**
-   - feed >1MB worth of args deltas
-   - assert: throws (or emits an error path) and cleans up state
-
-### Integration tests (replay streams)
-
-Create a **fixture** that replays a recorded notification stream (JSONL):
-
-- Input: list of notifications (v2) representing:
-  1) assistant text only
-  2) tool call only
-  3) mixed text then tool call
-  4) unknown `response.*` event types sprinkled in
-
-Assertions:
-
-- output SSE sequence matches a golden file:
-  - correct `data:` frames
-  - correct `delta.content` frames for text
-  - correct `delta.tool_calls` frames for tool call
-  - correct finish chunk and `[DONE]`
-
-### Regression test (legacy support)
-
-- Replay a v1/legacy stream (if supported) to ensure no breakage:
-  - `agentMessageDelta` / `item_completed` / `task_complete` still function
+### Integration: Adapter does not swallow text deltas
+- Feed `handleEvent({ type: "response.output_text.delta", delta: "hi" })`.
+- Assert SSE output includes `response.output_text.delta` with that text.
 
 ---
 
 ## Deliverable
-
-- Updated notification routing + tool-call handling for v2 events
-- Added tests:
-  - unit tests for `ToolCallAggregator`
-  - an integration “replay harness” that asserts emitted SSE frames against golden output
+- Implement the required hardening patches (Transport, and Adapter if you accept raw `response.*` ingress).
+- Add tests above (at least one per surface).
+- Update this document’s “Decision gate” section with evidence from a captured worker notification.

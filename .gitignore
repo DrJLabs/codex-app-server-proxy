@@ -120,3 +120,4 @@ docker-compose.local.example.yml
 # Allow structured logging schema module under src
 !src/services/logging/
 !src/services/logging/**
+.codev/AGENTS.xml.backup

@@ -1,24 +1,27 @@
 # Task 01 — JSON-RPC `initialize` handshake (v2: `protocolVersion` + `capabilities`)
 
 Reasoning:
-- Assumption: upstream **Codex app-server** (and/or the deterministic local shim) has tightened its `initialize` schema to require `protocolVersion` and `capabilities`, similar to the MCP/LSP-style handshake.
-- Goal: keep the proxy compatible with **newer v2 servers** without breaking **older v1 servers**, and make the change testable in CI.
-- Constraint: this repo includes a deterministic JSON-RPC shim (`scripts/fake-codex-jsonrpc.js`) for CI/offline dev, so it must be updated alongside the real client path.
+- Assumption (verified vs repo): this proxy already *supports* `protocolVersion` + `capabilities` in the JSON-RPC schema layer, but it does **not** currently send them during the worker handshake.
+- Goal: explicitly opt into v2 behavior when talking to newer Codex app-server workers **without** breaking older workers that may reject unknown fields.
+- Constraint: the repo includes a deterministic stdio worker shim (`scripts/fake-codex-jsonrpc.js`) used by tests; any handshake change must remain compatible (or be updated in lockstep).
 
 ## Objective
 
-Update the proxy’s JSON-RPC client initialization message to include:
+Update the proxy’s JSON-RPC client initialization request (sent by the transport) to include:
 
 - `protocolVersion: "v2"`
-- `capabilities: { ... }` (start minimal; grow only when a server capability is required)
+- `capabilities: {}` (start minimal; grow only when a server capability is required)
 - preserve existing `clientInfo`
 
-### Target payload
+### Target payload (what the worker should receive)
+
+> Note: the real proxy uses an incrementing numeric RPC id (see `#nextRpcId()`); the exact number is not important.
 
 ```json
 {
+  "jsonrpc": "2.0",
+  "id": 1,
   "method": "initialize",
-  "id": 0,
   "params": {
     "clientInfo": { "name": "codex-app-server-proxy", "version": "x.y.z" },
     "protocolVersion": "v2",
@@ -27,253 +30,206 @@ Update the proxy’s JSON-RPC client initialization message to include:
 }
 ```
 
-Then send:
+### Important compatibility detail (repo-specific)
 
-```json
-{ "method": "initialized", "params": {} }
+`buildInitializeParams()` intentionally emits **camelCase + snake_case mirrors** for compatibility with multiple worker versions:
+
+- `clientInfo` **and** `client_info`
+- `protocolVersion` **and** `protocol_version` (when provided)
+
+This is implemented in `src/lib/json-rpc/schema.ts` inside `buildInitializeParams()`.
+
+## What’s currently true in the codebase (baseline)
+
+### Schema already supports v2 fields (but does not default them)
+
+- `InitializeParams` includes optional `capabilities` and `protocolVersion`.
+- `buildInitializeParams(options)` only includes these keys when `options.capabilities !== undefined` and/or `options.protocolVersion` is truthy.
+- There are existing unit tests that assert **no default** protocol version is set when not provided.
+
+Implication: **do not** change the builder to default to `"v2"` unless you also update the unit tests and any downstream assumptions. The safest change is to set v2 defaults at the **call site** that performs the handshake.
+
+### Transport currently sends `initialize` with clientInfo only
+
+Handshake is performed in `src/services/transport/index.js` inside `ensureHandshake()`, currently:
+
+```js
+const initParams = buildInitializeParams({ clientInfo: DEFAULT_CLIENT_INFO });
+this.#write({ jsonrpc: "2.0", id: rpcId, method: "initialize", params: initParams });
 ```
-
-Codex app-server expects `initialize` followed by `initialized` before any other requests.
-
-## Spec anchors (original task file line refs)
-
-These references map directly to the original attached task text so you can cross-check intent while implementing:
-
-- **Objective / intent:** lines **3–7** (protocol v2 + capabilities; why it matters).
-- **Search targets:** lines **11–17** (`buildInitializeParams`, `initialize`, `protocolVersion`, `capabilities`, bootstrap send path).
-- **Core operations:** lines **21–30** (add fields to types + ensure they’re not stripped).
-- **Example payload:** lines **33–52** (example `buildInitializeParams` returning v2 fields).
-- **Validation checklist:** lines **57–65** (verify handshake + run /v1/responses with/without tools).
-- **Deliverable:** lines **68–70** (PR + docs note).
 
 ## Best strategy (recommended)
 
-### 1) Implement v2-first handshake with v1 fallback
+### 1) Set v2 params at the handshake call site (minimal diff, aligned with current tests)
 
-**Why:** If some environments still run an older app-server that rejects unknown fields, v2-only can break. A v2-first attempt plus a targeted fallback preserves compatibility without requiring users to set flags.
+**Change:** update the `buildInitializeParams()` call in `ensureHandshake()` to pass:
 
-**Decision rule:** Retry with v1 params **only** when the error is clearly “invalid params / unknown field / schema mismatch” (avoid retrying on auth errors, transport errors, etc.).
+- `protocolVersion: "v2"`
+- `capabilities: {}`
 
-#### Suggested helper: `initializeWithFallback()`
+This keeps the builder behavior unchanged (and keeps existing unit tests valid), while achieving the goal that the proxy negotiates v2 during actual runtime handshake.
 
-```ts
-type ClientInfo = { name: string; version: string; title?: string };
-
-type InitializeParamsV2 = {
-  clientInfo: ClientInfo;
-  protocolVersion: "v2";
-  capabilities: Record<string, unknown>;
-};
-
-type InitializeParamsV1 = {
-  clientInfo: ClientInfo;
-};
-
-function isCompatInitError(err: unknown): boolean {
-  // Keep this conservative. Match your actual error shape.
-  const msg = String((err as any)?.message ?? err);
-  return (
-    /invalid params/i.test(msg) ||
-    /unknown field/i.test(msg) ||
-    /unrecognized.*field/i.test(msg) ||
-    /schema/i.test(msg)
-  );
-}
-
-export async function initializeWithFallback(
-  rpc: { request(method: string, params: any, id?: number): Promise<any>; notify(method: string, params: any): void },
-  clientInfo: ClientInfo,
-  capabilities: Record<string, unknown> = {},
-): Promise<{ negotiated: "v2" | "v1" }> {
-  const v2: InitializeParamsV2 = { clientInfo, protocolVersion: "v2", capabilities };
-
-  try {
-    await rpc.request("initialize", v2, 0);
-    rpc.notify("initialized", {});
-    return { negotiated: "v2" };
-  } catch (err) {
-    if (!isCompatInitError(err)) throw err;
-
-    const v1: InitializeParamsV1 = { clientInfo };
-    await rpc.request("initialize", v1, 0);
-    rpc.notify("initialized", {});
-    return { negotiated: "v1" };
-  }
-}
-```
-
-**Notes:**
-- Keep `capabilities` minimal (`{}`) until you confirm the server’s capabilities schema (avoid guessing keys).
-- Log the negotiated version at debug level to simplify support triage.
-
-### 2) Ensure the request builder does not strip new fields
-
-Your task notes that the proxy may have a serializer/request-builder that whitelists fields (dropping unknown keys). The change must occur at the **source-of-truth builder** (e.g., a `buildInitializeParams()` function) and any schema/type definitions used for validation/serialization.
-
-#### Suggested `buildInitializeParams()` shape
-
-```ts
-export function buildInitializeParams(args: {
-  clientInfo: ClientInfo;
-  protocolVersion?: "v2";
-  capabilities?: Record<string, unknown>;
-}): InitializeParamsV2 {
-  return {
-    clientInfo: args.clientInfo,
-    protocolVersion: args.protocolVersion ?? "v2",
-    capabilities: args.capabilities ?? {},
-  };
-}
-```
-
-### 3) Update the deterministic JSON-RPC shim to accept v2 params
-
-The README explicitly calls out a deterministic JSON-RPC shim for CI/offline dev.  
-If that shim currently validates `initialize.params` strictly, it must accept `protocolVersion` and `capabilities` (and ideally echo them back in the `initialize` result if the real server does).
-
-#### Example: permissive shim-side validation
+#### Suggested patch shape (transport)
 
 ```js
-// Pseudocode inside scripts/fake-codex-jsonrpc.js
-function handleInitialize(msg) {
-  const p = msg.params || {};
-  if (!p.clientInfo || !p.clientInfo.name) {
-    return jsonRpcError(msg.id, -32602, "initialize.params.clientInfo is required");
-  }
-
-  // v2 optional/required (depending on how strict you want the shim)
-  const protocolVersion = p.protocolVersion ?? "v1";
-  const capabilities = p.capabilities ?? {};
-
-  return jsonRpcResult(msg.id, {
-    serverInfo: { name: "fake-codex-jsonrpc", version: "0.0.0" },
-    protocolVersion,
-    capabilities,
-  });
-}
-```
-
-## Alternate strategies
-
-### A) Flag-gated v2 handshake (fastest / least logic)
-
-If you want to avoid heuristics around error matching, add an env var:
-
-- `CODEX_RPC_PROTOCOL_VERSION=v2|v1` (default `v2`)
-
-Pros:
-- Simple behavior; no retries.
-Cons:
-- Requires users/ops to know they must flip a flag when connecting to older servers.
-
-### B) Always send v2 (minimal patch, highest risk)
-
-Pros:
-- Smallest diff.
-Cons:
-- Breaks older servers if they reject unknown fields.
-
-## Where to change (add exact file+line refs during implementation)
-
-Because this task is intended to be executed inside the repo, the most reliable way to produce **exact** file+line refs is to pin them at implementation time using `rg -n` + `nl -ba`.
-
-### Fast path to locate call-sites (copy/paste)
-
-```bash
-# 1) Find the initialize request and any builder function
-rg -n 'method:\s*["\']initialize["\']|\binitialize\b\s*\(|buildInitializeParams|initialized' src scripts tests server.js
-
-# 2) Find any schema/type that could be stripping fields
-rg -n 'InitializeParams|clientInfo|params\s*:\s*\{|pick\(|omit\(|zod|ajv|schema|validate' src
-
-# 3) Find the deterministic shim’s initialize handler
-rg -n 'fake-codex-jsonrpc|handleInitialize|method\s*[:=]\s*["\']initialize["\']' scripts
-```
-
-### Files you already know exist (fill in line ranges)
-
-- `server.js` — locate the JSON-RPC client wiring and the initial handshake send.
-  - **Line refs:** `server.js:L___-L___`
-- `scripts/fake-codex-jsonrpc.js` — accept/validate `protocolVersion` + `capabilities`.
-  - **Line refs:** `scripts/fake-codex-jsonrpc.js:L___-L___`
-- `src/**` — request builder/types/serialization; update whichever component constructs the `initialize` params.
-  - **Line refs:** `src/**/____.ts:L___-L___`
-- `tests/**` — add/adjust unit + integration tests.
-  - **Line refs:** `tests/**/____.test.ts:L___-L___`
-
-## Acceptance criteria
-
-1. **Initialize payload includes v2 fields**
-   - Outgoing JSON-RPC `initialize` request includes `params.protocolVersion === "v2"` and `params.capabilities` (object), alongside `params.clientInfo`.
-
-2. **No silent field stripping**
-   - Any request serialization layer preserves `protocolVersion` and `capabilities` keys end-to-end.
-
-3. **Backward compatibility (if required)**
-   - If a server rejects v2 params with a schema/invalid-params style error, the proxy retries with v1 params (`{ clientInfo }`) and still completes initialization.
-
-4. **Shim compatibility**
-   - `scripts/fake-codex-jsonrpc.js` accepts the v2 payload and does not fail strict validation.
-
-5. **Logging/telemetry**
-   - Debug logs (or structured logs) show negotiated init version (`v2` vs `v1`) and the server error when fallback occurs.
-
-## Suggested tests
-
-> Repo hints: there is a `tests/` directory and `vitest.config.ts`, so prefer Vitest unit tests + a small integration test that runs the shim.
-
-### 1) Unit: `buildInitializeParams()` returns v2 fields
-
-- Given `{ clientInfo }`, returns `{ clientInfo, protocolVersion: "v2", capabilities: {} }`.
-- Given explicit capabilities, preserves them.
-
-Example (Vitest):
-
-```ts
-import { describe, it, expect } from "vitest";
-import { buildInitializeParams } from "../src/.../initialize"; // adjust path
-
-describe("buildInitializeParams", () => {
-  it("adds protocolVersion and capabilities by default", () => {
-    const params = buildInitializeParams({
-      clientInfo: { name: "codex-app-server-proxy", version: "test" },
-    });
-    expect(params.protocolVersion).toBe("v2");
-    expect(params.capabilities).toEqual({});
-    expect(params.clientInfo.name).toBe("codex-app-server-proxy");
-  });
-});
-```
-
-### 2) Unit: serializer does not strip keys
-
-If you have a function that “normalizes” or “serializes” RPC params, assert the output includes the keys.
-
-```ts
-expect(serialize(params)).toMatchObject({
+const initParams = buildInitializeParams({
+  clientInfo: DEFAULT_CLIENT_INFO,
   protocolVersion: "v2",
   capabilities: {},
 });
 ```
 
-### 3) Integration: shim receives v2 initialize params
+### 2) Optional: v2-first with v1 fallback (only if you must support older workers)
 
-- Spawn `node scripts/fake-codex-jsonrpc.js` (or whatever harness exists).
-- Connect via the same transport your proxy uses (stdio, TCP, etc.).
-- Assert the shim logs or responds in a way that proves it received `protocolVersion` and `capabilities`.
+**Reality check vs repo:** The transport wraps RPC errors into `TransportError` inside `#handleRpcResponse()`. The error you can reliably match is:
 
-### 4) Integration: fallback to v1 when shim rejects v2 (optional but valuable)
+- `err.code` (string/number, from JSON-RPC error code)
+- `err.message` (string)
 
-- Add a shim mode/flag (or a separate fixture shim) that rejects unknown fields.
-- Ensure proxy retries with v1 and proceeds.
+**Decision rule (conservative):** retry with v1 only if the worker indicates a schema/params failure, e.g.:
+
+- `code === -32602` (JSON-RPC “Invalid params”) **or**
+- message contains `invalid params`, `unknown field`, `schema`
+
+**Fallback behavior:** retry with *no* `protocolVersion` and *no* `capabilities` keys (omit them entirely). Do **not** send `capabilities: null` because that still sends the field.
+
+#### Minimal approach (no big refactor)
+
+Instead of a full rewrite of `ensureHandshake()`, introduce a small helper inside it (or as a private method) that attempts initialize with a given params object, and wire a retry when the failure matches the compat condition.
+
+Pseudo-structure:
+
+```js
+const tryInitialize = (params) => new Promise((resolve, reject) => {
+  // register pending for rpcId, set timeout, write request, resolve/reject on response
+});
+
+try {
+  return await tryInitialize(v2Params);
+} catch (err) {
+  if (!isCompatInitError(err)) throw err;
+  return await tryInitialize(v1Params /* clientInfo only */);
+}
+```
+
+### 3) Do NOT send `"initialized"` in this repo (unless you add protocol support)
+
+Your suggested plan included an `"initialized"` notification after `"initialize"`.
+
+**Repo verification:** this proxy’s JSON-RPC method set does **not** include `"initialized"` (see `JsonRpcMethod` union in `src/lib/json-rpc/schema.ts`), and the deterministic shim returns `-32601` for unknown methods.
+
+So sending `"initialized"` would break the shim (and potentially older real workers). If upstream later requires `"initialized"`, that change must be done deliberately by:
+- adding it to the schema/types
+- teaching the shim to accept it
+- validating the upstream server actually requires it
+
+## Shim compatibility and testability
+
+### Current state (shim)
+
+- `scripts/fake-codex-jsonrpc.js` accepts the `initialize` method and does not validate params strictly.
+- It can emit captured RPC payloads to **stderr** when `FAKE_CODEX_CAPTURE_RPCS=true`.
+
+### Recommended testing approach (least invasive)
+
+Prefer using the existing capture mechanism (stderr) to assert the outgoing handshake contains `protocolVersion:"v2"` and `capabilities:{}` — no need to modify shim behavior.
+
+### Optional shim enhancement (if you want easier assertions)
+
+Add `receivedParams: params` to the initialize **result** payload to simplify assertions:
+
+```js
+result: {
+  advertised_models: ["codex-5"],
+  capabilities: { tools: {} },
+  receivedParams: params,
+}
+```
+
+This is not required for functionality, but makes integration tests simpler.
+
+## Where to change (exact file+line refs from current repo snapshot)
+
+### Handshake call site (actual behavior)
+
+- `src/services/transport/index.js`
+  - `ensureHandshake()` starts around `L263`
+  - `buildInitializeParams({ clientInfo: DEFAULT_CLIENT_INFO })` occurs at `L329`
+  - request write occurs at `L338–L343`
+
+### Schema support for `InitializeParams`
+
+- `src/lib/json-rpc/schema.ts`
+  - `InitializeParams` interface: `L66–L70`
+  - `buildInitializeParams()` implementation: `L332–L356`
+
+### Shim initialize handler
+
+- `scripts/fake-codex-jsonrpc.js`
+  - `case "initialize"`: `L248–L279`
+  - capture emission uses `FAKE_CODEX_CAPTURE_RPCS`: `L98–L104`
+
+### Existing tests you must keep in mind
+
+- `tests/unit/json-rpc-schema.helpers.spec.ts`
+  - verifies `buildInitializeParams` sets protocol/capabilities when provided: `L128–L138`
+  - verifies defaults do **not** implicitly set protocol: `L140–L152`
+- `tests/unit/json-rpc-schema.test.ts`
+  - expects `protocolVersion` undefined when not provided: `L434–L440`
+- `tests/integration/json-rpc-schema-validation.int.test.js`
+  - already builds `InitializeParams` with `capabilities: {}` but no `protocolVersion`: `L85–L89`
+
+## Acceptance criteria
+
+1. **Initialize payload includes v2 fields (runtime handshake)**
+   - Outgoing JSON-RPC `initialize` request sent by the proxy includes:
+     - `protocolVersion === "v2"`
+     - `capabilities` is an object (default `{}`)
+     - `clientInfo` remains present
+
+2. **No silent field stripping**
+   - The JSON written to worker stdio preserves both keys in the outbound payload.
+
+3. **Backward compatibility (if implemented)**
+   - If a worker rejects v2 params with a schema/invalid-params style error, the proxy retries with v1 params (clientInfo only) and still completes initialization.
+
+4. **Shim compatibility**
+   - The deterministic shim continues to work with the new handshake payload (no `-32601` errors due to unexpected post-initialize methods).
+
+5. **Logging/telemetry**
+   - When fallback triggers, logs show: negotiated version (`v2` vs `v1`) and the error cause.
+
+## Suggested tests (aligned to existing repo patterns)
+
+### 1) Unit: keep existing schema tests (no changes expected)
+
+Do **not** change builder defaults unless you intentionally update:
+- `tests/unit/json-rpc-schema.test.ts` (`protocolVersion` currently expected to be undefined when not provided).
+
+### 2) New integration: assert transport sends v2 handshake params (via shim capture)
+
+Create a new test like:
+
+- `tests/integration/json-rpc-handshake.int.test.js`
+
+Approach:
+1. Spawn `node scripts/fake-codex-jsonrpc.js` with env:
+   - `CODEX_WORKER_SUPERVISED=true`
+   - `FAKE_CODEX_CAPTURE_RPCS=true`
+2. Start the transport (or the minimal component that triggers `ensureHandshake()`).
+3. Read shim **stderr**, parse capture payload, assert `initialize.params.protocolVersion === "v2"` and `capabilities` is `{}`.
+
+### 3) Optional integration: fallback path (if implemented)
+
+If you implement fallback, you’ll need a shim mode that rejects v2. Add one env flag, e.g.:
+
+- `FAKE_CODEX_REJECT_PROTOCOL_V2=true`
+
+Behavior: in initialize handler, if `params.protocolVersion === "v2"`, return JSON-RPC error `-32602` (invalid params). Then your test asserts the proxy retries without those keys.
 
 ## Implementation checklist
 
-- [ ] Update initialize params builder to include `protocolVersion` + `capabilities`
-- [ ] Wire builder into the actual `initialize` send path
-- [ ] Add v2-first + v1 fallback (or env-flag strategy)
-- [ ] Update `scripts/fake-codex-jsonrpc.js`
-- [ ] Add/adjust unit tests (Vitest)
-- [ ] Add a minimal integration test for handshake against shim
-- [ ] Update any docs referencing initialize payload (if present)
-
+- [ ] **Src:** Update `src/services/transport/index.js` handshake call to pass `protocolVersion:"v2"` and `capabilities:{}` to `buildInitializeParams`.
+- [ ] **Src (optional):** Add v2-first → v1 fallback in `ensureHandshake()` (conservative error matching).
+- [ ] **Shim (optional):** Add a mode to reject v2 (for fallback tests) OR use existing capture mode.
+- [ ] **Test:** Add integration test asserting initialize params include v2 keys (capture via stderr).

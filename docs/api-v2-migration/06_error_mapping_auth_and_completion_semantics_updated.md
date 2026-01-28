@@ -34,6 +34,8 @@ Create **one normalization function** that converts *any* app-server failure (JS
 - optional `retryAfterSeconds`
 - optional `raw` (for logs only, never returned)
 
+> **Rich error propagation:** Ensure transport layers preserve the original Codex error payload (including `codexErrorInfo` and `additionalDetails`) so `normalizeCodexError()` can classify 401/429/5xx correctly. See watchout #2.
+
 Then use that normalized error in exactly two places:
 
 1. **Non-streaming**: set HTTP status + `res.json(openaiError)`
@@ -45,6 +47,34 @@ This avoids:
 - duplicated mapping logic
 - mismatched envelopes between streaming / non-streaming
 - double-termination bugs (`res.end()` called twice)
+
+
+### ⚠️ Implementation watchouts (v2 termination + rich errors)
+
+#### 1) Event filtering in `src/handlers/chat/stream-transport.js`
+`wireStreamTransport().handleParsedEvent()` currently forwards **only**:
+- `agent_message_content_delta` / `agent_message_delta` → `runtime.handleDelta(...)`
+- `agent_message` → `runtime.handleMessage(...)`
+
+Everything else returns `false` and is ignored.
+
+**Action:** extend `handleParsedEvent` to explicitly recognize and forward v2 termination signals:
+
+- `turn/completed`
+  - `turn.status === "completed"` → `runtime.handleResult(...)`
+  - `turn.status === "failed"` → `runtime.handleError(...)` (prefer the `turn.error` payload)
+  - `turn.status === "interrupted"` → map to cancellation semantics (`runtime.handleError(...)` with a cancellation-shaped error)
+- `error` → `runtime.handleError(...)` (preserve the raw `params.error` object)
+
+Without this, v2 terminal events can be silently ignored depending on which wiring path is active.
+
+#### 2) Rich error propagation from `src/services/transport/child-adapter.js`
+`JsonRpcChildAdapter` special-cases auth-required signals by cancelling the context with a synthetic `TransportError("auth required")`. That’s fine as control flow, but **it currently discards the original error payload** unless you deliberately carry it forward.
+
+**Action:** when emitting/cancelling due to `codex/event/error`, attach the raw payload (e.g. `params.error`, `codexErrorInfo`, `additionalDetails`, `willRetry`, derived `httpStatusCode`) onto the emitted error (for example `TransportError.details.raw_codex_error = ...`). Higher layers need this to correctly map 401/429/5xx per the table below.
+
+#### 3) Exactly-once termination belongs in the runtime, not just `res.end()`
+Add an `isTerminated` guard to `src/handlers/chat/stream-runtime.js` so that **only the first** terminal signal (`error` or `turn/completed`) wins. This prevents double `[DONE]`, double usage finalization, and internal state corruption.
 
 ---
 
@@ -67,30 +97,41 @@ This is the preferred direction if you expect additional v2 work.
 
 ---
 
-## Where to look in *this* repo (fill in file+line refs)
-> Note: I do not have the `codex-app-server-proxy` repository contents in this workspace, so I cannot embed exact `path:line` references yet.
-> Use the commands below to produce **stable file+line anchors** and paste them into this section when implementing.
+## Where to look in *this* repo (stable references)
 
-### Commands to generate exact file+line references
+Use these paths as the canonical “go edit here” anchors for this subtask.
+
+### JSON-RPC client / transport layer
+- `src/services/transport/index.js` — `JsonRpcTransport`, `TransportError`, request lifecycle, `cancelContext`, `mapTransportError`
+- `src/services/transport/child-adapter.js` — `JsonRpcChildAdapter`; worker stdout framing, auth-required handling, error emission
+- `src/handlers/chat/stream-event.js` — `parseStreamEventLine()`; normalizes event `type` by stripping `codex/event/`
+- `src/handlers/chat/stream-transport.js` — bridges parsed events → stream runtime (currently allow-lists only `agent_message*`)
+
+### Request handler / normalization
+- `src/routes/chat.js` — Express route for `/v1/chat/completions`
+- `src/handlers/chat/request.js` — `normalizeChatJsonRpcRequest()` validation and turn/message normalization
+
+### SSE writer / stream adapter
+- `src/handlers/chat/stream.js` — streaming orchestration + SSE emission + finalization
+- `src/handlers/chat/stream-output.js` — output coordinator (`emitDelta`, `emitMessage`, `emitFinish`, `emitError`)
+- `src/handlers/chat/stream-runtime.js` — runtime interface (`handleDelta|Message|Usage|Result|Error`)
+- `src/handlers/chat/stream-runtime-emitter.js` — turns runtime delta/message callbacks into OpenAI-compatible chunks
+
+### Error normalization utilities
+- `src/lib/errors.js` — existing OpenAI-style error envelope helpers; best place to add `normalizeCodexError()` (or a thin wrapper that lives here)
+- (also) `src/services/transport/index.js` — existing `mapTransportError()`; decide whether to fold it into `normalizeCodexError()` or keep it as the transport→HTTP adapter
+
+### Commands to generate exact file+line anchors (optional)
 ```bash
-# JSON-RPC parsing / dispatch
-rg -n "JSON-RPC|jsonrpc|on\(\"message\"|handleMessage|dispatch" .
+# Streaming termination + v2 turn semantics
+rg -n "turn/completed|task_complete|\[DONE\]|finishSSE|finalizeStream|handleResult|handleError" src
 
-# Error normalization candidates
-rg -n "codexErrorInfo|mapTransportError|TransportError|HttpError|handleError|on\(\"error\"" .
+# App-server error notifications + auth handling
+rg -n "codex\/event\/error|\bunauthorized\b|auth_required|account\/login" src
 
-# Streaming termination ([DONE], finish, close)
-rg -n "\[DONE\]|res\.end\(|finish\b|close\b|flush\b|SSE|text/event-stream" .
-
-# Auth / login required / unauthorized
-rg -n "unauthorized|Unauthorized|requiresOpenaiAuth|account/read|login|required" .
+# Error mapping helpers and envelopes
+rg -n "mapTransportError|TransportError|authErrorBody|invalidRequestBody|serverErrorBody" src
 ```
-
-### Expected hot spots (typical structure)
-- JSON-RPC client / transport layer (stdio process, websocket, or HTTP bridge)
-- Request handler that translates OpenAI requests → app-server `turn/start`
-- SSE writer / stream adapter that emits OpenAI-compatible chunks + `[DONE]`
-- Central error handler middleware (if Express/Fastify)
 
 ---
 
@@ -334,7 +375,21 @@ function endStreamWithError(res: import("http").ServerResponse, norm: Normalized
 }
 ```
 
-### 3) Exactly-once completion guard (prevents double resolve)
+### 3) Exactly-once completion guard (prefer runtime-level termination)
+
+The app-server can emit both:
+- an `error` notification **and then**
+- a terminal `turn/completed` with `turn.status: "failed"`
+
+So you need a single “first terminal event wins” guard that applies to **all** terminal paths.
+
+**Recommendation:** implement this guard in `src/handlers/chat/stream-runtime.js` (e.g., `isTerminated`) so it protects:
+- SSE finalization (`[DONE]`)
+- usage finalization
+- any internal state (tool buffers, finish tracker)
+
+You can still keep a small `once()` helper for the HTTP response closure, but the runtime guard should be the primary safety net.
+
 ```ts
 function once<T extends (...args: any[]) => any>(fn: T): T {
   let called = false;
@@ -344,12 +399,44 @@ function once<T extends (...args: any[]) => any>(fn: T): T {
     return fn(...args);
   }) as T;
 }
-```
 
-Use this to wrap the terminalizer that:
-- finishes the response
-- resolves/rejects the awaiting promise
-- closes transports
+// Sketch: runtime-local termination state
+export const createStreamRuntime = ({ output, toolNormalizer, finishTracker }) => {
+  let terminated = false;
+
+  const terminalOnce = (fn) => (payload) => {
+    if (terminated) return;
+    terminated = true;
+    return fn(payload);
+  };
+
+  return {
+    handleDelta({ choiceIndex, delta, ...ctx }) {
+      if (terminated) return;
+      const normalized = toolNormalizer.ingestDelta(delta);
+      finishTracker?.onDelta?.(normalized);
+      output.emitDelta(choiceIndex, normalized, ctx);
+    },
+    handleMessage({ choiceIndex, message, ...ctx }) {
+      if (terminated) return;
+      const normalized = toolNormalizer.ingestMessage(message);
+      finishTracker?.onMessage?.(normalized);
+      output.emitMessage(choiceIndex, normalized, ctx);
+    },
+    handleUsage({ choiceIndex, usage, ...ctx }) {
+      if (terminated) return;
+      output.emitUsage(choiceIndex, usage, ctx);
+    },
+    handleResult: terminalOnce(({ choiceIndex, finishReason, ...ctx }) => {
+      finishTracker?.finalize?.(finishReason);
+      output.emitFinish(choiceIndex, finishReason, ctx);
+    }),
+    handleError: terminalOnce(({ choiceIndex, error, ...ctx }) => {
+      output.emitError(choiceIndex, error, ctx);
+    }),
+  };
+};
+```
 
 ---
 
@@ -390,6 +477,7 @@ Because the app-server can emit:
 ### Completion semantics
 - [ ] Request resolves exactly once (no double `res.end()`, no double promise settle), even if both `error` and `turn/completed` are observed.
 - [ ] `turn/completed` is the authoritative success termination.
+- [ ] Streaming completes (success/failure) when `turn/completed` arrives — i.e. it must not depend on legacy `task_complete` events being present.
 
 ---
 
