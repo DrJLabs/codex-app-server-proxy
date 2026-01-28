@@ -39,6 +39,54 @@ export const wireStreamTransport = ({
       });
       return true;
     }
+    if (type === "turn/completed" || type === "turn_completed") {
+      const turn = messagePayload?.turn ?? messagePayload;
+      const status = typeof turn?.status === "string" ? turn.status.toLowerCase() : "";
+      const choiceIndex = resolveChoiceIndex(turn, messagePayload, params, baseChoiceIndex);
+      if (status === "completed") {
+        if (!runtime?.handleResult) return false;
+        runtime.handleResult({
+          choiceIndex,
+          finishReason: turn?.finish_reason ?? turn?.finishReason ?? null,
+          metadataInfo,
+          eventType: type,
+        });
+        return true;
+      }
+      if (status === "failed") {
+        if (!runtime?.handleError) return false;
+        runtime.handleError({
+          choiceIndex,
+          error: turn?.error ?? { message: "turn failed" },
+          metadataInfo,
+          eventType: type,
+        });
+        return true;
+      }
+      if (status === "interrupted") {
+        if (!runtime?.handleError) return false;
+        runtime.handleError({
+          choiceIndex,
+          error: { message: "turn interrupted", code: "turn_interrupted" },
+          metadataInfo,
+          eventType: type,
+        });
+        return true;
+      }
+      return false;
+    }
+    if (type === "error") {
+      if (!runtime?.handleError) return false;
+      const errorPayload = messagePayload?.error ?? messagePayload;
+      const choiceIndex = resolveChoiceIndex(errorPayload, messagePayload, params, baseChoiceIndex);
+      runtime.handleError({
+        choiceIndex,
+        error: errorPayload,
+        metadataInfo,
+        eventType: type,
+      });
+      return true;
+    }
     return false;
   };
 

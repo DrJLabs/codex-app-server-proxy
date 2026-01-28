@@ -92,3 +92,184 @@ export function sseErrorBody(e) {
     },
   };
 }
+
+const toOpenAIError = ({ message, type, code, param = null }) => ({
+  error: {
+    message,
+    type,
+    code,
+    param: param ?? null,
+  },
+});
+
+const extractCodexErrorFields = (input) => {
+  const base =
+    input && typeof input === "object" && input.error && typeof input.error === "object"
+      ? input.error
+      : input && typeof input === "object"
+        ? input
+        : {};
+  const message = typeof base.message === "string" ? base.message : undefined;
+  const codexErrorInfo = base.codexErrorInfo ?? base.codex_error_info ?? undefined;
+  const additionalDetails = base.additionalDetails ?? base.additional_details ?? undefined;
+  const jsonRpcCode =
+    typeof base.code === "number"
+      ? base.code
+      : typeof base.code === "string" && base.code.trim()
+        ? Number(base.code)
+        : undefined;
+  const infoType =
+    codexErrorInfo && typeof codexErrorInfo === "object"
+      ? (codexErrorInfo.type ?? codexErrorInfo.name ?? codexErrorInfo.code)
+      : codexErrorInfo;
+  const httpStatusCode =
+    base.httpStatusCode ??
+    base.http_status_code ??
+    (codexErrorInfo && typeof codexErrorInfo === "object"
+      ? (codexErrorInfo.httpStatusCode ?? codexErrorInfo.http_status_code)
+      : undefined) ??
+    (additionalDetails && typeof additionalDetails === "object"
+      ? (additionalDetails.httpStatusCode ?? additionalDetails.http_status_code)
+      : undefined);
+
+  let retryAfterSeconds;
+  if (additionalDetails && typeof additionalDetails === "object") {
+    if (Number.isFinite(additionalDetails.retryAfterSeconds)) {
+      retryAfterSeconds = Number(additionalDetails.retryAfterSeconds);
+    } else if (Number.isFinite(additionalDetails.retry_after_seconds)) {
+      retryAfterSeconds = Number(additionalDetails.retry_after_seconds);
+    }
+  }
+
+  return {
+    message,
+    codexErrorInfo,
+    infoType,
+    additionalDetails,
+    httpStatusCode,
+    jsonRpcCode: Number.isFinite(jsonRpcCode) ? jsonRpcCode : undefined,
+    retryAfterSeconds,
+  };
+};
+
+export function normalizeCodexError(input) {
+  const extracted = extractCodexErrorFields(input);
+  const info = extracted.infoType ?? extracted.codexErrorInfo ?? "";
+  const infoLower = String(info).toLowerCase();
+  const message = extracted.message ?? "Internal server error.";
+  const messageLower = message.toLowerCase();
+
+  if (
+    infoLower.includes("unauthorized") ||
+    infoLower.includes("unauthorised") ||
+    messageLower.includes("authentication required")
+  ) {
+    return {
+      statusCode: 401,
+      body: toOpenAIError({
+        message: extracted.message ?? "Authentication required.",
+        type: "authentication_error",
+        code: "unauthorized",
+      }),
+    };
+  }
+
+  if (info === "UsageLimitExceeded") {
+    return {
+      statusCode: 429,
+      body: toOpenAIError({
+        message: extracted.message ?? "Rate limit exceeded.",
+        type: "rate_limit_error",
+        code: "rate_limit_exceeded",
+      }),
+      retryAfterSeconds: extracted.retryAfterSeconds,
+    };
+  }
+
+  if (info === "ContextWindowExceeded") {
+    return {
+      statusCode: 400,
+      body: toOpenAIError({
+        message: extracted.message ?? "Context length exceeded.",
+        type: "invalid_request_error",
+        code: "context_length_exceeded",
+      }),
+    };
+  }
+
+  if (
+    Number.isFinite(extracted.jsonRpcCode) &&
+    [-32700, -32600, -32602].includes(extracted.jsonRpcCode)
+  ) {
+    return {
+      statusCode: 400,
+      body: toOpenAIError({
+        message: extracted.message ?? "Invalid request.",
+        type: "invalid_request_error",
+        code: "invalid_request_error",
+      }),
+    };
+  }
+
+  if (info === "BadRequest") {
+    return {
+      statusCode: 400,
+      body: toOpenAIError({
+        message: extracted.message ?? "Bad request.",
+        type: "invalid_request_error",
+        code: "bad_request",
+      }),
+    };
+  }
+
+  if (info === "SandboxError") {
+    return {
+      statusCode: 400,
+      body: toOpenAIError({
+        message: extracted.message ?? "Sandbox error.",
+        type: "invalid_request_error",
+        code: "sandbox_error",
+      }),
+    };
+  }
+
+  if (infoLower.includes("responsestreamdisconnected")) {
+    return {
+      statusCode: 502,
+      body: toOpenAIError({
+        message: extracted.message ?? "Upstream stream disconnected.",
+        type: "api_connection_error",
+        code: "stream_disconnected",
+      }),
+    };
+  }
+
+  if (Number.isFinite(extracted.httpStatusCode)) {
+    const status = Number(extracted.httpStatusCode);
+    const type =
+      status === 429
+        ? "rate_limit_error"
+        : status >= 500
+          ? "server_error"
+          : "invalid_request_error";
+    const code =
+      status === 429 ? "rate_limit_exceeded" : status >= 500 ? "upstream_error" : "bad_request";
+    return {
+      statusCode: status,
+      body: toOpenAIError({
+        message: extracted.message ?? "Upstream request failed.",
+        type,
+        code,
+      }),
+    };
+  }
+
+  return {
+    statusCode: 500,
+    body: toOpenAIError({
+      message,
+      type: "server_error",
+      code: "internal_error",
+    }),
+  };
+}

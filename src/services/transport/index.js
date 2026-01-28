@@ -19,7 +19,7 @@ import {
   buildSendUserMessageParams,
   buildSendUserTurnParams,
 } from "../../lib/json-rpc/schema.ts";
-import { authErrorBody } from "../../lib/errors.js";
+import { authErrorBody, normalizeCodexError } from "../../lib/errors.js";
 import {
   logBackendNotification,
   logBackendResponse,
@@ -1328,6 +1328,17 @@ export function mapTransportError(err) {
       statusCode: 401,
       body: authErrorBody({ details, code: codeOverride, message: messageOverride }),
     };
+  }
+  if (err.details?.raw_codex_error) {
+    const normalized = normalizeCodexError(err.details.raw_codex_error);
+    if (normalized) {
+      return { statusCode: normalized.statusCode, body: normalized.body };
+    }
+  }
+  const numericCode = Number.isFinite(Number(rawCode)) ? Number(rawCode) : null;
+  if (numericCode !== null && [-32700, -32600, -32602].includes(numericCode)) {
+    const normalized = normalizeCodexError({ code: numericCode, message: err.message });
+    return { statusCode: normalized.statusCode, body: normalized.body };
   }
   const hasMapping = Object.prototype.hasOwnProperty.call(TRANSPORT_ERROR_DETAILS, lookupKey);
   // eslint-disable-next-line security/detect-object-injection -- lookupKey guarded by hasOwnProperty

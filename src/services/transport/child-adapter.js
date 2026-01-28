@@ -164,6 +164,18 @@ export class JsonRpcChildAdapter extends EventEmitter {
           errorInfo?.response_stream_disconnected?.httpStatusCode ??
           errorInfo?.response_stream_disconnected?.http_status_code ??
           null;
+        const additionalDetails =
+          errorPayload?.additionalDetails ??
+          params.additionalDetails ??
+          params.additional_details ??
+          null;
+        const rawCodexError = {
+          message: errorMessage || rawErrorMessage || null,
+          codexErrorInfo: errorInfo ?? codexErrorInfo ?? null,
+          additionalDetails,
+          httpStatusCode: statusCode,
+          willRetry: willRetry ?? null,
+        };
         const authRequiredSignal =
           codexErrorInfo === "unauthorized" ||
           statusCode === 401 ||
@@ -187,10 +199,12 @@ export class JsonRpcChildAdapter extends EventEmitter {
             }
           );
           const cancelWithAuth = (details = null) => {
+            const mergedDetails = details && typeof details === "object" ? { ...details } : {};
+            mergedDetails.raw_codex_error = rawCodexError;
             const authError = new TransportError("auth required", {
               code: "auth_required",
               retryable: false,
-              details,
+              details: mergedDetails,
             });
             this.transport.cancelContext?.(this.context, authError);
           };
