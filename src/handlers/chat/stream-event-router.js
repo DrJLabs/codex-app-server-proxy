@@ -1,3 +1,5 @@
+import { buildToolCallDeltaFromDynamicRequest } from "../../lib/tools/dynamic-tools.js";
+
 export const createStreamEventRouter = ({
   parseStreamEventLine,
   extractMetadataFromPayload,
@@ -54,6 +56,23 @@ export const createStreamEventRouter = ({
       if (finishCandidate && canTrackFinish) {
         trackFinishReason(finishCandidate, t || "event");
       }
+    }
+    if (t === "dynamic_tool_call_request") {
+      const toolCallDelta = buildToolCallDeltaFromDynamicRequest(messagePayload);
+      if (toolCallDelta && typeof trackToolSignals === "function") {
+        trackToolSignals(toolCallDelta);
+      }
+      if (toolCallDelta && typeof handleParsedEvent === "function") {
+        handleParsedEvent({
+          type: "agent_message_delta",
+          payload,
+          params,
+          messagePayload: { delta: toolCallDelta },
+          metadataInfo,
+          baseChoiceIndex: parsed.baseChoiceIndex,
+        });
+      }
+      return { handled: true };
     }
     if (
       t === "agent_message_content_delta" ||

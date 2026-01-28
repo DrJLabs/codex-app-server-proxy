@@ -42,6 +42,7 @@ import {
   trimTrailingTextAfterToolBlocks,
 } from "./tool-output.js";
 import { normalizeToolCalls } from "./tool-call-normalizer.js";
+import { buildToolCallDeltaFromDynamicRequest } from "../../lib/tools/dynamic-tools.js";
 import {
   sanitizeMetadataTextSegment,
   extractMetadataFromPayload,
@@ -1235,7 +1236,17 @@ export async function postChatNonStream(req, res) {
           trackToolSignals(payload);
         }
         const metadataInfo = SANITIZE_METADATA ? extractMetadataFromPayload(payload) : null;
-        if (tp === "agent_message_delta" || tp === "agent_message") {
+        if (tp === "dynamic_tool_call_request") {
+          const toolCallDelta = buildToolCallDeltaFromDynamicRequest(payload);
+          if (toolCallDelta) {
+            trackToolSignals(toolCallDelta);
+            const choiceIndex = resolveChoiceIndexFromPayload(toolCallDelta, evt.msg, evt) ?? 0;
+            const { updated } = toolCallAggregator.ingestDelta(toolCallDelta, {
+              choiceIndex,
+            });
+            if (updated) hasToolCalls = true;
+          }
+        } else if (tp === "agent_message_delta" || tp === "agent_message") {
           const isDelta = tp === "agent_message_delta";
           const payloadData = isDelta
             ? (evt.msg?.delta ?? evt.delta)

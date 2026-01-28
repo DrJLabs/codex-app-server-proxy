@@ -69,4 +69,50 @@ describe("stream event router", () => {
     });
     expect(result.stop).toBe(true);
   });
+
+  it("maps dynamic tool call requests to tool_calls deltas", () => {
+    const handleParsedEvent = vi.fn();
+    const router = createStreamEventRouter({
+      parseStreamEventLine: () => ({
+        type: "dynamic_tool_call_request",
+        payload: {},
+        params: {},
+        messagePayload: { tool: "lookup", arguments: { id: 1 }, callId: "call_1" },
+      }),
+      sanitizeMetadata: false,
+      handleParsedEvent,
+      trackToolSignals: vi.fn(),
+      extractFinishReasonFromMessage: vi.fn(),
+      trackFinishReason: vi.fn(),
+      updateUsageCounts: vi.fn(),
+      mergeMetadataInfo: vi.fn(),
+      recordSanitizedMetadata: vi.fn(),
+      shouldDropFunctionCallOutput: vi.fn(),
+      getUsageTrigger: () => null,
+      markUsageTriggerIfMissing: vi.fn(),
+      hasAnyChoiceSent: () => true,
+      hasLengthEvidence: () => false,
+      emitFinishChunk: vi.fn(),
+      finalizeStream: vi.fn(),
+    });
+
+    router.handleLine('{"type":"dynamic_tool_call_request"}');
+
+    expect(handleParsedEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "agent_message_delta",
+        messagePayload: {
+          delta: {
+            tool_calls: [
+              {
+                id: "call_1",
+                type: "function",
+                function: { name: "lookup", arguments: '{"id":1}' },
+              },
+            ],
+          },
+        },
+      })
+    );
+  });
 });
