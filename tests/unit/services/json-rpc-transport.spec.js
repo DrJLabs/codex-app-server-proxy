@@ -278,6 +278,33 @@ afterAll(() => {
 });
 
 describe("JsonRpcTransport handshake", () => {
+  it("sends v2 initialize params", async () => {
+    const child = createMockChild();
+    let initializeParams;
+    child.stdin.on("data", (chunk) => {
+      const text = chunk.toString().trim();
+      if (!text) return;
+      const message = JSON.parse(text);
+      if (message.method === "initialize") {
+        initializeParams = message.params;
+        child.stdout.write(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { advertised_models: ["codex-5"] },
+          }) + "\n"
+        );
+      }
+    });
+    __setChild(child);
+
+    const transport = getJsonRpcTransport();
+    await transport.ensureHandshake();
+
+    expect(initializeParams?.protocolVersion).toBe("v2");
+    expect(initializeParams?.capabilities).toEqual({});
+  });
+
   it("resolves handshake and captures advertised models", async () => {
     const child = createMockChild();
     child.stdin.on("data", (chunk) => {

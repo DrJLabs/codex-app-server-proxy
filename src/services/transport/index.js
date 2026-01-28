@@ -327,7 +327,11 @@ class JsonRpcTransport {
       });
 
       try {
-        const initParams = buildInitializeParams({ clientInfo: DEFAULT_CLIENT_INFO });
+        const initParams = buildInitializeParams({
+          clientInfo: DEFAULT_CLIENT_INFO,
+          protocolVersion: "v2",
+          capabilities: {},
+        });
         const recorder = this.supervisor?.recordHandshakePending;
         if (typeof recorder === "function") {
           try {
