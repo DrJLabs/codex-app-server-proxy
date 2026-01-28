@@ -168,6 +168,20 @@ describe("native responses request normalizer", () => {
     expect(result.inputItems).toEqual([{ type: "text", data: { text: "[user] Hi" } }]);
   });
 
+  it("keeps recent_conversations when stripping copilot system prompt", () => {
+    const body = {
+      input: [
+        {
+          type: "message",
+          role: "developer",
+          content: "<recent_conversations>hi</recent_conversations>\nSystem prompt body",
+        },
+      ],
+    };
+    const result = normalizeResponsesRequest(body, { stripObsidianSystemPrompt: true });
+    expect(result.developerInstructions).toBe("<recent_conversations>hi</recent_conversations>");
+  });
+
   it("defaults tool_choice to auto when tools are provided", () => {
     const body = {
       tools: [{ type: "function", function: { name: "lookup" } }],
@@ -241,6 +255,22 @@ describe("native responses request normalizer", () => {
     expect(text).toContain('"type":"object"');
     expect(text).toContain("If no tool is needed, respond with plain text.");
     expect(result.inputItems[0].data.text).toContain("[user] hi");
+  });
+
+  it("skips tool schema injection when disabled", () => {
+    const body = {
+      instructions: "Be nice",
+      tools: [
+        {
+          type: "function",
+          name: "lookup_user",
+          parameters: { type: "object", properties: { id: { type: "string" } } },
+        },
+      ],
+      input: "hi",
+    };
+    const result = normalizeResponsesRequest(body, { injectToolSchema: false });
+    expect(result.developerInstructions).toBe("Be nice");
   });
 
   it("rejects unsupported input item types", () => {

@@ -75,18 +75,25 @@ For production requirements (Traefik, Codex HOME, auth), see [docs/deployment/pr
 
 ## Minimal configuration
 
-| Variable                      | Default              | Purpose                                                                 |
-| ----------------------------- | -------------------- | ----------------------------------------------------------------------- |
-| `PROXY_API_KEY`               | `codex-local-secret` | Bearer token for protected routes                                       |
-| `PORT`                        | `11435`              | Listen port for `node server.js`/compose (dev script defaults to 18000) |
-| `PROXY_ENV`                   | `_(empty)_`          | Model advertising mode (`dev` -> `codev-*`)                             |
-| `PROXY_ENABLE_RESPONSES`      | `true`               | Enable `/v1/responses`                                                  |
-| `PROXY_DISABLE_SHELL_TOOL`    | `true`               | Disable Codex `shell_tool` in app-server                                |
-| `PROXY_DISABLE_UNIFIED_EXEC`  | `true`               | Disable Codex `unified_exec` in app-server                              |
-| `PROXY_OUTPUT_MODE`           | `obsidian-xml`       | Default output mode for `/v1/chat/completions`                          |
-| `PROXY_RESPONSES_OUTPUT_MODE` | `openai-json`        | Default output mode for `/v1/responses`                                 |
-| `PROXY_RESPONSES_SKIP_TURN`   | `false`              | Skip agent turn (`sendUserTurn`) for `/v1/responses`                    |
-| `PROXY_INCLUDE_APPLY_PATCH_TOOL` | `false`           | Include the `apply_patch` tool in Codex turns                           |
+| Variable                         | Default              | Purpose                                                                 |
+| -------------------------------- | -------------------- | ----------------------------------------------------------------------- |
+| `PROXY_API_KEY`                  | `codex-local-secret` | Bearer token for protected routes                                       |
+| `PORT`                           | `11435`              | Listen port for `node server.js`/compose (dev script defaults to 18000) |
+| `PROXY_ENV`                      | `_(empty)_`          | Model advertising mode (`dev` -> `codev-*`)                             |
+| `PROXY_ENABLE_RESPONSES`         | `true`               | Enable `/v1/responses`                                                  |
+| `PROXY_DISABLE_SHELL_TOOL`       | `true`               | Disable Codex `shell_tool` in app-server                                |
+| `PROXY_DISABLE_UNIFIED_EXEC`     | `true`               | Disable Codex `unified_exec` in app-server                              |
+| `PROXY_OUTPUT_MODE`              | `obsidian-xml`       | Default output mode for `/v1/chat/completions`                          |
+| `PROXY_RESPONSES_OUTPUT_MODE`    | `openai-json`        | Default output mode for `/v1/responses`                                 |
+| `PROXY_RESPONSES_SKIP_TURN`      | `false`              | Skip agent turn (`sendUserTurn`) for `/v1/responses`                    |
+| `PROXY_RESPONSES_OMIT_TOOL_MANIFEST` | `false`          | Omit tool definitions from app-server payloads for `/v1/responses`      |
+| `PROXY_RESPONSES_XML_TOOL_CALLS` | `false`              | Parse XML-style `<use_tool>` blocks instead of `<tool_call>`            |
+| `PROXY_RESPONSES_STRIP_OBSIDIAN_SYSTEM_PROMPT` | `false` | Strip Obsidian system/developer prompt text while keeping `<recent_conversations>` |
+| `PROXY_RESPONSES_INJECT_TOOL_SCHEMA` | `true` | Inject tool schema guidance into `/v1/responses` developer instructions |
+| `PROXY_RESPONSES_IDEMPOTENCY` | `false` | Reject duplicate `/v1/responses` requests with the same idempotency key or fingerprint |
+| `PROXY_RESPONSES_IDEMPOTENCY_TTL_MS` | `120000` | Time window (ms) for `/v1/responses` idempotency entries |
+| `PROXY_RESPONSES_IDEMPOTENCY_FINGERPRINT` | `false` | Enable fingerprint-based dedupe when no idempotency key is provided |
+| `PROXY_INCLUDE_APPLY_PATCH_TOOL` | `false`              | Include the `apply_patch` tool in Codex turns                           |
 
 Full configuration and defaults: [docs/configuration.md](configuration.md).
 
@@ -106,6 +113,9 @@ See [external/README.md](../external/README.md) for details.
 - [docs/README.md](README.md) - doc index
 - [docs/getting-started.md](getting-started.md) - first run walkthroughs
 - [docs/local-development.md](local-development.md) - local workflows (Node vs shim vs compose)
+- [docs/app-server-payloads.md](app-server-payloads.md) - exact app-server JSON-RPC payloads
+- [docs/obsidian-prompt-changes.md](obsidian-prompt-changes.md) - proposed Obsidian prompt sanitization rules
+- [docs/obsidian-xml-system-prompt.md](obsidian-xml-system-prompt.md) - proposed Obsidian XML tool-call system prompt
 - [docs/api/overview.md](api/overview.md) - endpoint overview + curl examples
 - [docs/api/responses.md](api/responses.md) - `/v1/responses` usage notes
 - [docs/api/chat-completions.md](api/chat-completions.md) - `/v1/chat/completions` usage notes
@@ -122,7 +132,7 @@ See [external/README.md](../external/README.md) for details.
 - [docs/responses-endpoint/obsidian-tool-call-simulation.md](responses-endpoint/obsidian-tool-call-simulation.md) - OpenAI-parity tool-call simulation
 - [docs/responses-endpoint/prompt-injection.md](responses-endpoint/prompt-injection.md) - responses tool-call prompt injection matrix
 - [docs/reference/app-server-protocol.schema.json](reference/app-server-protocol.schema.json) - JSON-RPC schema bundle
-- [docs/reference/app-server-schema-0.89-tools.md](reference/app-server-schema-0.89-tools.md) - app-server tools schema
+- [docs/reference/app-server-schema-0.92-tools.md](reference/app-server-schema-0.92-tools.md) - app-server tools schema (Codex 0.92.0)
 - [docs/logging-gaps/README.md](logging-gaps/README.md) - observability gap tracker
 - [docs/plans/2026-01-25-obsidian-tool-call-simulation-v2.md](plans/2026-01-25-obsidian-tool-call-simulation-v2.md) - tool-call simulation v2 plan
 

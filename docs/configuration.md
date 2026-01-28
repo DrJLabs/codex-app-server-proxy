@@ -49,6 +49,13 @@ Codex CLI reads `config.toml` and `AGENTS.md` from `CODEX_HOME`.
 | `PROXY_DISABLE_SHELL_TOOL` | `true` | Disable Codex `shell_tool` in app-server |
 | `PROXY_DISABLE_UNIFIED_EXEC` | `true` | Disable Codex `unified_exec` in app-server |
 | `PROXY_RESPONSES_SKIP_TURN` | `false` | Skip `sendUserTurn` (agent mode) for `/v1/responses` and rely on `sendUserMessage` only |
+| `PROXY_RESPONSES_OMIT_TOOL_MANIFEST` | `false` | Omit tool definitions from app-server payloads for `/v1/responses` |
+| `PROXY_RESPONSES_XML_TOOL_CALLS` | `false` | Parse XML-style `<use_tool>` blocks instead of `<tool_call>` JSON blocks for `/v1/responses` |
+| `PROXY_RESPONSES_STRIP_OBSIDIAN_SYSTEM_PROMPT` | `false` | Strip Obsidian system/developer prompt text while keeping `<recent_conversations>` blocks |
+| `PROXY_RESPONSES_INJECT_TOOL_SCHEMA` | `true` | Inject tool schema guidance into `/v1/responses` developer instructions |
+| `PROXY_RESPONSES_IDEMPOTENCY` | `false` | Reject duplicate `/v1/responses` requests with the same idempotency key or fingerprint |
+| `PROXY_RESPONSES_IDEMPOTENCY_TTL_MS` | `120000` | Time window (ms) for `/v1/responses` idempotency entries |
+| `PROXY_RESPONSES_IDEMPOTENCY_FINGERPRINT` | `false` | Enable fingerprint-based dedupe when no idempotency key is provided |
 | `PROXY_INCLUDE_APPLY_PATCH_TOOL` | `false` | Include the `apply_patch` tool in Codex turns (disabled by default) |
 | `PROXY_PROTECT_MODELS` | `false` | Require bearer for `/v1/models` |
 | `PROXY_USAGE_ALLOW_UNAUTH` | `false` | Allow unauthenticated access to `/v1/usage*` |

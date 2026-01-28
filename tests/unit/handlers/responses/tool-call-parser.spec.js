@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createToolCallParser } from "../../../../src/handlers/responses/tool-call-parser.js";
+import {
+  createToolCallParser,
+  createXmlToolCallParser,
+} from "../../../../src/handlers/responses/tool-call-parser.js";
 
 describe("responses tool call parser", () => {
   it("buffers partial <tool_call> tags across chunks", () => {
@@ -118,5 +121,36 @@ describe("responses tool call parser", () => {
 
     expect(flushed.visibleTextDeltas).toEqual([]);
     expect(flushed.parsedToolCalls).toEqual([{ name: "webSearch", arguments: "{}" }]);
+  });
+
+  it("parses <use_tool> blocks into tool calls", () => {
+    const parser = createXmlToolCallParser({ allowedTools: new Set(["localSearch"]) });
+
+    const result = parser.ingest(
+      '<use_tool><name>localSearch</name><query>piano</query><salientTerms>["piano"]</salientTerms></use_tool>'
+    );
+
+    expect(result.visibleTextDeltas).toEqual([]);
+    expect(result.errors).toEqual([]);
+    expect(result.parsedToolCalls).toEqual([
+      {
+        name: "localSearch",
+        arguments: '{"query": "piano", "salientTerms": ["piano"]}',
+      },
+    ]);
+  });
+
+  it("uses args tag content when provided", () => {
+    const parser = createXmlToolCallParser({ allowedTools: new Set(["webSearch"]) });
+
+    const result = parser.ingest(
+      '<use_tool><name>webSearch</name><args>{"query":"x","chatHistory":[]}</args></use_tool>'
+    );
+
+    expect(result.visibleTextDeltas).toEqual([]);
+    expect(result.errors).toEqual([]);
+    expect(result.parsedToolCalls).toEqual([
+      { name: "webSearch", arguments: '{"query":"x","chatHistory":[]}' },
+    ]);
   });
 });

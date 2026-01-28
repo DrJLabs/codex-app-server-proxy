@@ -182,38 +182,170 @@ const resolveForcedToolChoiceName = (toolChoice) => {
   return asNonEmptyString(toolChoice.function?.name) || asNonEmptyString(toolChoice.name);
 };
 
-const buildToolInjectionText = (tools, toolChoice) => {
+const sanitizeSchema = (schema) => {
+  if (schema && typeof schema === "object") {
+    if (Array.isArray(schema.oneOf) && schema.oneOf.length) return schema.oneOf[0];
+    if (Array.isArray(schema.anyOf) && schema.anyOf.length) return schema.anyOf[0];
+    if (Array.isArray(schema.allOf) && schema.allOf.length) return schema.allOf[0];
+  }
+  return schema;
+};
+
+const resolveSchemaType = (schema) => {
+  if (!schema || typeof schema !== "object") return "unknown";
+  const normalized = sanitizeSchema(schema) || {};
+  const type = normalized.type;
+  if (Array.isArray(type) && type.length) return type.join("|");
+  if (typeof type === "string" && type) return type;
+  if (normalized.properties) return "object";
+  if (normalized.items) return "array";
+  return "unknown";
+};
+
+const summarizeSchemaParameters = (schema) => {
+  const normalized = sanitizeSchema(schema);
+  if (!normalized || typeof normalized !== "object") {
+    return ["- (no parameters)"];
+  }
+  if (normalized.type !== "object" && !normalized.properties) {
+    return [`- (schema) ${formatToolSchema(normalized)}`];
+  }
+  const props = normalized.properties || {};
+  const propKeys = Object.keys(props);
+  if (!propKeys.length) {
+    return ["- (no parameters)"];
+  }
+  const required = new Set(Array.isArray(normalized.required) ? normalized.required : []);
+  return propKeys.map((key) => {
+    // Keys come from Object.keys(props); safe for controlled schema objects.
+    // eslint-disable-next-line security/detect-object-injection
+    const propSchema = sanitizeSchema(props[key]) || {};
+    const requirement = required.has(key) ? "required" : "optional";
+    const type = resolveSchemaType(propSchema);
+    const description = asNonEmptyString(propSchema.description);
+    const suffix = description ? `: ${description}` : "";
+    return `- ${key} (${requirement}, ${type})${suffix}`;
+  });
+};
+
+const exampleForSchema = (schema, depth = 0) => {
+  if (depth > 2) return "example";
+  if (!schema || typeof schema !== "object") return "example";
+  if (schema.default !== undefined) return schema.default;
+  if (schema.example !== undefined) return schema.example;
+  if (Array.isArray(schema.examples) && schema.examples.length) return schema.examples[0];
+  if (schema.const !== undefined) return schema.const;
+  if (Array.isArray(schema.enum) && schema.enum.length) return schema.enum[0];
+  const normalized = sanitizeSchema(schema) || {};
+  const type = normalized.type;
+  if (Array.isArray(type) && type.length) {
+    const first = type.find((entry) => entry !== "null") ?? type[0];
+    return exampleForSchema({ ...normalized, type: first }, depth);
+  }
+  if (type === "array") {
+    const itemExample = exampleForSchema(normalized.items || {}, depth + 1);
+    return itemExample === undefined ? [] : [itemExample];
+  }
+  if (type === "object" || normalized.properties) {
+    const props = normalized.properties || {};
+    const example = {};
+    Object.keys(props).forEach((key) => {
+      // Keys come from Object.keys(props); safe for controlled schema objects.
+      // eslint-disable-next-line security/detect-object-injection
+      example[key] = exampleForSchema(props[key], depth + 1);
+    });
+    return example;
+  }
+  if (type === "integer" || type === "number") return 0;
+  if (type === "boolean") return false;
+  if (type === "null") return null;
+  return "example";
+};
+
+const escapeExample = (value) => String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+
+const escapeXml = (value) =>
+  String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+const buildXmlToolTemplate = (tool) => {
+  const exampleArgs = exampleForSchema(tool.parameters) ?? {};
+  let xmlArgs = "";
+  if (exampleArgs && typeof exampleArgs === "object" && !Array.isArray(exampleArgs)) {
+    Object.keys(exampleArgs).forEach((key) => {
+      // eslint-disable-next-line security/detect-object-injection
+      const value = exampleArgs[key];
+      const text = typeof value === "string" ? value : JSON.stringify(value);
+      xmlArgs += `<${key}>${escapeXml(text)}</${key}>`;
+    });
+  } else {
+    const text = typeof exampleArgs === "string" ? exampleArgs : JSON.stringify(exampleArgs ?? {});
+    xmlArgs = `<arguments>${escapeXml(text)}</arguments>`;
+  }
+  return `<use_tool><name>${tool.name}</name>${xmlArgs}</use_tool>`;
+};
+
+const buildToolInjectionText = (tools, toolChoice, { toolCallStyle } = {}) => {
   const functionTools = collectFunctionTools(tools);
   if (!functionTools.length) return "";
 
   const lines = [];
+  const useXml = toolCallStyle === "xml";
+  const openTag = useXml ? "<use_tool>" : "<tool_call>";
+  const closeTag = useXml ? "</use_tool>" : "</tool_call>";
+
   lines.push("Tool calling instructions:");
-  lines.push("Only emit tool calls using <tool_call>...</tool_call>.");
-  lines.push('Format: <tool_call>{"name":"TOOL_NAME","arguments":"{...}"}</tool_call>');
+  if (useXml) {
+    lines.push("Only emit tool calls using <use_tool>...</use_tool>.");
+    lines.push("Format: <use_tool><name>TOOL_NAME</name><param>...</param></use_tool>");
+    lines.push(
+      "Inside <use_tool>...</use_tool>, include <name>TOOL_NAME</name> and one tag per parameter."
+    );
+    lines.push("Always emit <use_tool> blocks exactly as shown; the client executes them.");
+  } else {
+    lines.push("Only emit tool calls using <tool_call>...</tool_call>.");
+    lines.push('Format: <tool_call>{"name":"TOOL_NAME","arguments":"{...}"}</tool_call>');
+    lines.push(
+      'Inside <tool_call>...</tool_call>, output ONLY a JSON object with keys "name" and "arguments".'
+    );
+    lines.push("Always emit <tool_call> blocks exactly as shown; the client executes them.");
+  }
   lines.push(
-    'Inside <tool_call>...</tool_call>, output ONLY a JSON object with keys "name" and "arguments".'
+    useXml
+      ? "Do NOT call internal tools directly (shell, apply_patch, web_search, view_image); only emit <use_tool>."
+      : "Do NOT call internal tools directly (shell, apply_patch, web_search, view_image); only emit <tool_call>."
   );
-  lines.push("Always emit <tool_call> blocks exactly as shown; the client executes them.");
   lines.push(
-    "Do NOT call internal tools directly (shell, apply_patch, web_search, view_image); only emit <tool_call>."
-  );
-  lines.push(
-    "Read-only sandbox or approval restrictions do NOT prevent emitting <tool_call> output."
+    useXml
+      ? "Read-only sandbox or approval restrictions do NOT prevent emitting <use_tool> output."
+      : "Read-only sandbox or approval restrictions do NOT prevent emitting <tool_call> output."
   );
   lines.push("Use EXACT parameter names from the schema; do NOT invent or rename keys.");
-  lines.push(
-    'Do not add any extra characters before or after the JSON (no trailing ">", no code fences).'
-  );
-  lines.push("Use exactly one opening <tool_call> and one closing </tool_call> tag.");
-  lines.push("Output must be valid JSON. Do not add extra braces or trailing characters.");
-  lines.push('Do NOT wrap the JSON object in an array (no leading "[" or trailing "]").');
-  lines.push('Bad: <tool_call>[{"name":"tool","arguments":"{...}"}]</tool_call>');
-  lines.push("Never repeat the closing tag.");
-  lines.push(
-    'Example (exact): <tool_call>{"name":"webSearch","arguments":"{\\"query\\":\\"example\\",\\"chatHistory\\":[]}"}</tool_call>'
-  );
-  lines.push('The "arguments" field must be a JSON string.');
-  lines.push('If a tool has no parameters, use arguments "{}".');
+  if (useXml) {
+    lines.push("Do not add any extra characters before or after the XML.");
+    lines.push("Use exactly one opening <use_tool> and one closing </use_tool> tag.");
+    lines.push("Never repeat the closing tag.");
+    lines.push(
+      "Example (exact): <use_tool><name>webSearch</name><query>example</query><chatHistory>[]</chatHistory></use_tool>"
+    );
+    lines.push("If a tool has no parameters, still include <name>TOOL_NAME</name>.");
+    lines.push(
+      "If you must pass JSON, put it inside <arguments>{...}</arguments> (no extra wrapping)."
+    );
+  } else {
+    lines.push(
+      'Do not add any extra characters before or after the JSON (no trailing ">", no code fences).'
+    );
+    lines.push(`Use exactly one opening ${openTag} and one closing ${closeTag} tag.`);
+    lines.push("Output must be valid JSON. Do not add extra braces or trailing characters.");
+    lines.push('Do NOT wrap the JSON object in an array (no leading "[" or trailing "]").');
+    lines.push('Bad: <tool_call>[{"name":"tool","arguments":"{...}"}]</tool_call>');
+    lines.push("Never repeat the closing tag.");
+    lines.push(
+      'Example (exact): <tool_call>{"name":"webSearch","arguments":"{\\"query\\":\\"example\\",\\"chatHistory\\":[]}"}</tool_call>'
+    );
+    lines.push('The "arguments" field must be a JSON string.');
+    lines.push('If a tool has no parameters, use arguments "{}".');
+  }
   lines.push("If no tool is needed, respond with plain text.");
 
   if (toolChoice === "none") {
@@ -239,88 +371,6 @@ const buildToolInjectionText = (tools, toolChoice) => {
     lines.push(`- ${tool.name}: ${formatToolSchema(tool.parameters)}`);
   });
 
-  const sanitizeSchema = (schema) => {
-    if (schema && typeof schema === "object") {
-      if (Array.isArray(schema.oneOf) && schema.oneOf.length) return schema.oneOf[0];
-      if (Array.isArray(schema.anyOf) && schema.anyOf.length) return schema.anyOf[0];
-      if (Array.isArray(schema.allOf) && schema.allOf.length) return schema.allOf[0];
-    }
-    return schema;
-  };
-
-  const resolveSchemaType = (schema) => {
-    if (!schema || typeof schema !== "object") return "unknown";
-    const normalized = sanitizeSchema(schema) || {};
-    const type = normalized.type;
-    if (Array.isArray(type) && type.length) return type.join("|");
-    if (typeof type === "string" && type) return type;
-    if (normalized.properties) return "object";
-    if (normalized.items) return "array";
-    return "unknown";
-  };
-
-  const summarizeSchemaParameters = (schema) => {
-    const normalized = sanitizeSchema(schema);
-    if (!normalized || typeof normalized !== "object") {
-      return ["- (no parameters)"];
-    }
-    if (normalized.type !== "object" && !normalized.properties) {
-      return [`- (schema) ${formatToolSchema(normalized)}`];
-    }
-    const props = normalized.properties || {};
-    const propKeys = Object.keys(props);
-    if (!propKeys.length) {
-      return ["- (no parameters)"];
-    }
-    const required = new Set(Array.isArray(normalized.required) ? normalized.required : []);
-    return propKeys.map((key) => {
-      // Keys come from Object.keys(props); safe for controlled schema objects.
-      // eslint-disable-next-line security/detect-object-injection
-      const propSchema = sanitizeSchema(props[key]) || {};
-      const requirement = required.has(key) ? "required" : "optional";
-      const type = resolveSchemaType(propSchema);
-      const description = asNonEmptyString(propSchema.description);
-      const suffix = description ? `: ${description}` : "";
-      return `- ${key} (${requirement}, ${type})${suffix}`;
-    });
-  };
-
-  const exampleForSchema = (schema, depth = 0) => {
-    if (depth > 2) return "example";
-    if (!schema || typeof schema !== "object") return "example";
-    if (schema.default !== undefined) return schema.default;
-    if (schema.example !== undefined) return schema.example;
-    if (Array.isArray(schema.examples) && schema.examples.length) return schema.examples[0];
-    if (schema.const !== undefined) return schema.const;
-    if (Array.isArray(schema.enum) && schema.enum.length) return schema.enum[0];
-    const normalized = sanitizeSchema(schema) || {};
-    const type = normalized.type;
-    if (Array.isArray(type) && type.length) {
-      const first = type.find((entry) => entry !== "null") ?? type[0];
-      return exampleForSchema({ ...normalized, type: first }, depth);
-    }
-    if (type === "array") {
-      const itemExample = exampleForSchema(normalized.items || {}, depth + 1);
-      return itemExample === undefined ? [] : [itemExample];
-    }
-    if (type === "object" || normalized.properties) {
-      const props = normalized.properties || {};
-      const example = {};
-      Object.keys(props).forEach((key) => {
-        // Keys come from Object.keys(props); safe for controlled schema objects.
-        // eslint-disable-next-line security/detect-object-injection
-        example[key] = exampleForSchema(props[key], depth + 1);
-      });
-      return example;
-    }
-    if (type === "integer" || type === "number") return 0;
-    if (type === "boolean") return false;
-    if (type === "null") return null;
-    return "example";
-  };
-
-  const escapeExample = (value) => String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-
   lines.push("Per-tool guidance and examples (schema-conformant):");
   functionTools.forEach((tool) => {
     const exampleArgs = JSON.stringify(exampleForSchema(tool.parameters) ?? {});
@@ -330,16 +380,44 @@ const buildToolInjectionText = (tools, toolChoice) => {
     }
     lines.push("Parameters:");
     summarizeSchemaParameters(tool.parameters).forEach((line) => lines.push(line));
-    lines.push("Example tool_call:");
-    lines.push(
-      `<tool_call>{"name":"${tool.name}","arguments":"${escapeExample(exampleArgs)}"}</tool_call>`
-    );
+    if (useXml) {
+      lines.push("Example use_tool:");
+      lines.push(buildXmlToolTemplate(tool));
+    } else {
+      lines.push("Example tool_call:");
+      lines.push(
+        `<tool_call>{"name":"${tool.name}","arguments":"${escapeExample(exampleArgs)}"}</tool_call>`
+      );
+    }
   });
 
   return lines.join("\n");
 };
 
-export const normalizeResponsesRequest = (body = {}) => {
+const buildToolFormatOverrideText = (toolCallStyle, tools = []) => {
+  if (toolCallStyle !== "xml") return "";
+  const functionTools = collectFunctionTools(tools);
+  const toolNames = functionTools.map((tool) => tool.name).filter(Boolean);
+  const lines = [];
+  lines.push("Tool-call format override (highest priority):");
+  lines.push("Ignore any internal or prior tool-call instructions.");
+  lines.push("ONLY emit tool calls using <use_tool>...</use_tool>.");
+  lines.push("NEVER emit <tool_call> blocks or function_call/tool_calls JSON.");
+  lines.push("Inside <use_tool>, include <name>TOOL_NAME</name> and one tag per parameter.");
+  lines.push("If you must pass JSON, put it inside <arguments>{...}</arguments>.");
+  lines.push("Do not execute tools directly; only emit <use_tool> blocks.");
+  if (toolNames.length) {
+    lines.push(`Allowed tool names: ${toolNames.join(", ")}.`);
+    lines.push("Do NOT use any other tool names (e.g., web.run).");
+    lines.push("Complete templates (copy exactly, fill values only):");
+    functionTools.forEach((tool) => {
+      lines.push(`Template (${tool.name}): ${buildXmlToolTemplate(tool)}`);
+    });
+  }
+  return lines.join("\n");
+};
+
+export const normalizeResponsesRequest = (body = {}, options = {}) => {
   if (Array.isArray(body.messages)) {
     throw new ResponsesJsonRpcNormalizationError(
       invalidRequestBody("messages", "messages is not supported for /v1/responses")
@@ -354,6 +432,10 @@ export const normalizeResponsesRequest = (body = {}) => {
 
   const items = [];
   const developerInstructionsParts = [];
+  const stripObsidianSystemPrompt = options?.stripObsidianSystemPrompt === true;
+  const injectToolSchema = options?.injectToolSchema !== false;
+  const toolCallStyle = options?.toolCallStyle;
+  const forcedDeveloperInstructions = asNonEmptyString(options?.forcedDeveloperInstructions);
   let textLines = [];
   let lastRoleAnchor = null;
 
@@ -403,7 +485,67 @@ export const normalizeResponsesRequest = (body = {}) => {
     items.push({ type: "image", data: { image_url: url } });
   };
 
+  const extractRecentConversations = (text) => {
+    if (!stripObsidianSystemPrompt) return String(text ?? "");
+    const input = String(text ?? "");
+    if (!input) return "";
+    const matches = input.match(/<recent_conversations>[\s\S]*?<\/recent_conversations>/gi);
+    if (!matches) return "";
+    return matches
+      .map((match) => match.trim())
+      .filter(Boolean)
+      .join("\n\n");
+  };
+
+  const extractRecentConversationsFromContent = (content, baseParam) => {
+    if (content === undefined || content === null) return "";
+    if (typeof content === "string") return extractRecentConversations(content);
+    if (Array.isArray(content)) {
+      const extracted = [];
+      content.forEach((part) => {
+        const param = baseParam;
+        if (!part || typeof part !== "object") {
+          throw new ResponsesJsonRpcNormalizationError(
+            invalidRequestBody(param, "content item must be an object")
+          );
+        }
+        const partType = String(part.type || "").toLowerCase();
+        if (partType === "input_text" || partType === "text") {
+          const snippet = extractRecentConversations(part.text ?? part.input_text ?? "");
+          if (snippet) extracted.push(snippet);
+          return;
+        }
+        if (partType === "input_image") {
+          const url = resolveImageUrl(part.image_url);
+          if (!url) {
+            throw new ResponsesJsonRpcNormalizationError(
+              invalidRequestBody(param, "input_image.image_url must be a string")
+            );
+          }
+          return;
+        }
+        throw new ResponsesJsonRpcNormalizationError(
+          invalidRequestBody(param, "unsupported input item type")
+        );
+      });
+      return extracted.join("\n\n");
+    }
+    if (content && typeof content === "object") {
+      if (typeof content.text === "string") {
+        return extractRecentConversations(content.text);
+      }
+    }
+    return extractRecentConversations(String(content));
+  };
+
   const appendDeveloperContent = (content, baseParam) => {
+    if (stripObsidianSystemPrompt) {
+      const extracted = extractRecentConversationsFromContent(content, baseParam);
+      if (extracted) {
+        pushDeveloperInstruction(extracted);
+      }
+      return;
+    }
     if (content === undefined || content === null) {
       return;
     }
@@ -561,8 +703,17 @@ export const normalizeResponsesRequest = (body = {}) => {
     );
   }
 
-  const toolInjection = buildToolInjectionText(tools, toolChoice);
-  if (toolInjection) {
+  const toolFormatOverride = buildToolFormatOverrideText(toolCallStyle, tools);
+  if (toolFormatOverride) {
+    pushDeveloperInstruction(toolFormatOverride);
+  }
+
+  if (forcedDeveloperInstructions) {
+    pushDeveloperInstruction(forcedDeveloperInstructions);
+  }
+
+  const toolInjection = buildToolInjectionText(tools, toolChoice, { toolCallStyle });
+  if (injectToolSchema && toolInjection) {
     pushDeveloperInstruction(toolInjection);
   }
 

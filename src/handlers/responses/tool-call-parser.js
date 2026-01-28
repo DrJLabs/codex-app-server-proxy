@@ -1,5 +1,9 @@
+import { buildCanonicalJsonFromFields } from "../../lib/tools/obsidianToolsSpec.js";
+
 const OPEN_TAG = "<tool_call>";
 const CLOSE_TAG = "</tool_call>";
+const OPEN_XML_PREFIX = "<use_tool";
+const CLOSE_XML_TAG = "</use_tool>";
 
 const toSet = (value) => {
   if (!value) return null;
@@ -214,6 +218,117 @@ const parseToolCallPayload = (raw, options) => {
   };
 };
 
+const parseXmlToolCallPayload = (openTag, raw, options) => {
+  const errors = [];
+  const strictFallback = options.strictFallback;
+  const safeOpen = typeof openTag === "string" ? openTag : "<use_tool>";
+  const inner = typeof raw === "string" ? raw : "";
+  const rawBlock = `${safeOpen}${inner}${CLOSE_XML_TAG}`;
+
+  let name = "";
+  if (safeOpen) {
+    const attrMatch = safeOpen.match(/name\s*=\s*"([^"]+)"|name\s*=\s*'([^']+)'/);
+    if (attrMatch) {
+      name = (attrMatch[1] || attrMatch[2] || "").trim();
+    }
+  }
+
+  const fields = {};
+  const tagRegex = /<([a-zA-Z0-9_:-]+)>([\s\S]*?)<\/\1>/g;
+  let match;
+  while ((match = tagRegex.exec(inner))) {
+    const tag = (match[1] || "").trim();
+    if (!tag) continue;
+    const value = (match[2] || "").trim();
+    if (tag.toLowerCase() === "name") {
+      name = value;
+      continue;
+    }
+    // eslint-disable-next-line security/detect-object-injection
+    fields[tag] = value;
+  }
+
+  if (!name && Object.keys(fields).length === 0) {
+    const trimmed = inner.trim();
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          Object.entries(parsed).forEach(([key, value]) => {
+            if (key === "name" && !name && typeof value === "string") {
+              name = value.trim();
+            } else if (value !== undefined) {
+              // eslint-disable-next-line security/detect-object-injection
+              fields[key] = typeof value === "string" ? value : JSON.stringify(value);
+            }
+          });
+        }
+      } catch {
+        // fall through
+      }
+    }
+  }
+
+  let argsText = "";
+  if (Object.prototype.hasOwnProperty.call(fields, "args")) {
+    argsText = String(fields.args ?? "").trim();
+    delete fields.args;
+  } else if (Object.prototype.hasOwnProperty.call(fields, "arguments")) {
+    argsText = String(fields.arguments ?? "").trim();
+    delete fields.arguments;
+  }
+
+  if (!argsText) {
+    if (Object.keys(fields).length) {
+      argsText = buildCanonicalJsonFromFields(name || "", fields);
+    } else {
+      argsText = "{}";
+    }
+  }
+
+  if (!name) {
+    errors.push({
+      type: "missing_name",
+      message: "tool_call name is required",
+      strict: Boolean(strictFallback),
+    });
+    if (strictFallback) return { errors, call: null, fallbackText: null };
+    return { errors, call: null, fallbackText: rawBlock };
+  }
+
+  if (!isAllowedTool(name, options.allowedTools)) {
+    const strict = resolveStrictMode(name, options);
+    errors.push({
+      type: "unknown_tool",
+      message: `unknown tool: ${name}`,
+      name,
+      strict,
+    });
+    if (strict) return { errors, call: null, fallbackText: null };
+    return { errors, call: null, fallbackText: rawBlock };
+  }
+
+  const strict = resolveStrictMode(name, options);
+  if (strict) {
+    const schema = options.toolSchemas?.get(name) || null;
+    const validation = validateRequiredKeys(argsText, schema);
+    if (!validation.ok) {
+      errors.push({
+        type: "schema_mismatch",
+        message: validation.error || "schema mismatch",
+        strict: true,
+      });
+      return { errors, call: null, fallbackText: null };
+    }
+  }
+
+  return {
+    errors,
+    call: { name, arguments: argsText },
+    fallbackText: null,
+  };
+};
+
 const createResult = () => ({
   visibleTextDeltas: [],
   parsedToolCalls: [],
@@ -311,6 +426,112 @@ const consumeBuffer = (state, incoming, options, { flush = false } = {}) => {
   return result;
 };
 
+const consumeXmlBuffer = (state, incoming, options, { flush = false } = {}) => {
+  const result = createResult();
+  let buffer = state.buffer + (typeof incoming === "string" ? incoming : "");
+
+  while (buffer.length) {
+    if (!state.inTag) {
+      const openIdx = buffer.indexOf(OPEN_XML_PREFIX);
+      if (openIdx === -1) {
+        const keep = flush ? 0 : longestSuffixPrefix(buffer, OPEN_XML_PREFIX);
+        const safe = buffer.slice(0, buffer.length - keep);
+        if (safe) result.visibleTextDeltas.push(safe);
+        buffer = buffer.slice(buffer.length - keep);
+        break;
+      }
+      if (openIdx > 0) {
+        result.visibleTextDeltas.push(buffer.slice(0, openIdx));
+      }
+      buffer = buffer.slice(openIdx);
+      const endIdx = buffer.indexOf(">");
+      if (endIdx === -1) {
+        if (flush) {
+          result.visibleTextDeltas.push(buffer);
+          buffer = "";
+        } else {
+          const keep = buffer.length;
+          buffer = buffer.slice(buffer.length - keep);
+        }
+        break;
+      }
+      state.openTag = buffer.slice(0, endIdx + 1);
+      buffer = buffer.slice(endIdx + 1);
+      state.inTag = true;
+      state.tagContent = "";
+    }
+
+    if (state.inTag) {
+      const closeIdx = buffer.indexOf(CLOSE_XML_TAG);
+      if (closeIdx === -1) {
+        if (flush) {
+          state.tagContent += buffer;
+          buffer = "";
+          break;
+        }
+        const keep = longestSuffixPrefix(buffer, CLOSE_XML_TAG);
+        if (keep > 0) {
+          state.tagContent += buffer.slice(0, buffer.length - keep);
+          buffer = buffer.slice(buffer.length - keep);
+        } else {
+          state.tagContent += buffer;
+          buffer = "";
+        }
+        break;
+      }
+      state.tagContent += buffer.slice(0, closeIdx);
+      buffer = buffer.slice(closeIdx + CLOSE_XML_TAG.length);
+
+      const parsed = parseXmlToolCallPayload(state.openTag, state.tagContent, options);
+      if (parsed.call) {
+        result.parsedToolCalls.push(parsed.call);
+      }
+      if (parsed.fallbackText) {
+        result.visibleTextDeltas.push(parsed.fallbackText);
+      }
+      if (parsed.errors.length) {
+        result.errors.push(...parsed.errors);
+      }
+
+      state.inTag = false;
+      state.tagContent = "";
+      state.openTag = "";
+    }
+  }
+
+  if (flush) {
+    if (state.inTag) {
+      const parsed = parseXmlToolCallPayload(state.openTag, state.tagContent, options);
+      if (parsed.call) {
+        result.parsedToolCalls.push(parsed.call);
+        result.errors.push({
+          type: "unclosed_tag_recovered",
+          message: "unterminated use_tool block recovered",
+        });
+      } else if (!parsed.fallbackText) {
+        result.errors.push({ type: "unclosed_tag", message: "unterminated use_tool block" });
+        result.visibleTextDeltas.push(`${state.openTag || OPEN_XML_PREFIX}${state.tagContent}`);
+      }
+      if (parsed.fallbackText) {
+        result.visibleTextDeltas.push(parsed.fallbackText);
+      }
+      if (parsed.errors.length) {
+        result.errors.push(...parsed.errors);
+      }
+      state.inTag = false;
+      state.tagContent = "";
+      state.openTag = "";
+    }
+    if (buffer) {
+      result.visibleTextDeltas.push(buffer);
+      buffer = "";
+    }
+  }
+
+  state.buffer = buffer;
+  return result;
+};
+
 export const createToolCallParser = (options = {}) => {
   const normalized = normalizeOptions(options);
   const state = {
@@ -329,8 +550,38 @@ export const createToolCallParser = (options = {}) => {
   };
 };
 
+export const createXmlToolCallParser = (options = {}) => {
+  const normalized = normalizeOptions(options);
+  const state = {
+    buffer: "",
+    inTag: false,
+    tagContent: "",
+    openTag: "",
+  };
+
+  return {
+    ingest(delta) {
+      return consumeXmlBuffer(state, delta, normalized, { flush: false });
+    },
+    flush() {
+      return consumeXmlBuffer(state, "", normalized, { flush: true });
+    },
+  };
+};
+
 export const parseToolCallText = (text, options = {}) => {
   const parser = createToolCallParser(options);
+  const first = parser.ingest(text);
+  const tail = parser.flush();
+  return {
+    visibleTextDeltas: [...first.visibleTextDeltas, ...tail.visibleTextDeltas],
+    parsedToolCalls: [...first.parsedToolCalls, ...tail.parsedToolCalls],
+    errors: [...first.errors, ...tail.errors],
+  };
+};
+
+export const parseXmlToolCallText = (text, options = {}) => {
+  const parser = createXmlToolCallParser(options);
   const first = parser.ingest(text);
   const tail = parser.flush();
   return {

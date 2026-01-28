@@ -1,5 +1,6 @@
 model = "gpt-5.2"
-sandbox_mode = "read-only"
+model_reasoning_effort = "low"
+sandbox_mode = ""
 approval_policy = "never"
 preferred_auth_method = "chatgpt"
 project_doc_max_bytes = 65536

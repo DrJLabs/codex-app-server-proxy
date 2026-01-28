@@ -10,6 +10,7 @@ import {
   summarizeResponsesIngress,
   summarizeTools,
 } from "./ingress-logging.js";
+import { loadObsidianAgentInstructions } from "./agent-instructions.js";
 import { captureResponsesNonStream } from "./capture.js";
 import { logStructured, sha256 } from "../../services/logging/schema.js";
 import {
@@ -33,7 +34,8 @@ import { runNativeResponses } from "./native/execute.js";
 import { createJsonRpcChildAdapter } from "../../services/transport/child-adapter.js";
 import { mapTransportError } from "../../services/transport/index.js";
 import { createToolCallAggregator } from "../../lib/tool-call-aggregator.js";
-import { parseToolCallText } from "./tool-call-parser.js";
+import { parseToolCallText, parseXmlToolCallText } from "./tool-call-parser.js";
+import { logResponsesIdempotencyBlock, registerResponsesIdempotency } from "./idempotency.js";
 import {
   extractMetadataFromPayload,
   normalizeMetadataKey,
@@ -270,10 +272,42 @@ export async function postResponsesNonStream(req, res) {
   }
   const { effort: reasoningEffort, reasoningPayload } = reasoningResult;
 
+  const idempotency = registerResponsesIdempotency({
+    req,
+    body: originalBody,
+    mode: "responses_nonstream",
+    reqId,
+  });
+  if (idempotency.shouldBlock) {
+    logResponsesIdempotencyBlock({
+      reqId,
+      route: locals.routeOverride || "/v1/responses",
+      mode: locals.modeOverride || "responses_nonstream",
+      idempotency,
+    });
+    applyCors(req, res);
+    res.status(idempotency.statusCode || 409).json(idempotency.body);
+    restoreOutputMode();
+    return;
+  }
+
   let normalized;
+  const stripObsidianSystemPrompt =
+    CFG.PROXY_RESPONSES_STRIP_OBSIDIAN_SYSTEM_PROMPT && copilotDetection.copilot_detected;
+  const injectToolSchema = CFG.PROXY_RESPONSES_INJECT_TOOL_SCHEMA;
+  const toolCallStyle = CFG.PROXY_RESPONSES_XML_TOOL_CALLS ? "xml" : undefined;
+  const agentInstructions = copilotDetection.copilot_detected
+    ? loadObsidianAgentInstructions()
+    : "";
   try {
-    normalized = normalizeResponsesRequest(originalBody);
+    normalized = normalizeResponsesRequest(originalBody, {
+      stripObsidianSystemPrompt,
+      injectToolSchema,
+      toolCallStyle,
+      forcedDeveloperInstructions: agentInstructions,
+    });
   } catch (err) {
+    idempotency.markFailed?.();
     if (err instanceof ResponsesJsonRpcNormalizationError) {
       applyCors(req, res);
       res.status(err.statusCode || 400).json(err.body);
@@ -313,10 +347,12 @@ export async function postResponsesNonStream(req, res) {
 
   const { nativeTools, functionTools } = splitResponsesTools(normalized.tools);
   const toolDefinitions = nativeTools.concat(functionTools);
+  const omitToolManifest = CFG.PROXY_RESPONSES_OMIT_TOOL_MANIFEST;
   const capabilityCheck = await ensureResponsesCapabilities({
     toolsRequested: nativeTools.length > 0 || functionTools.length > 0,
   });
   if (!capabilityCheck.ok) {
+    idempotency.markFailed?.();
     applyCors(req, res);
     res.status(capabilityCheck.statusCode).json(capabilityCheck.body);
     restoreOutputMode();
@@ -325,11 +361,13 @@ export async function postResponsesNonStream(req, res) {
 
   const fallbackMax = Number(CFG.PROXY_RESPONSES_DEFAULT_MAX_TOKENS || 0);
   const maxOutputTokens = normalized.maxOutputTokens ?? (fallbackMax > 0 ? fallbackMax : undefined);
-  const toolsPayload = buildToolsPayload({
-    definitions: toolDefinitions.length ? toolDefinitions : undefined,
-    toolChoice: toolDefinitions.length ? normalized.toolChoice : undefined,
-    parallelToolCalls: toolDefinitions.length ? normalized.parallelToolCalls : undefined,
-  });
+  const toolsPayload = omitToolManifest
+    ? undefined
+    : buildToolsPayload({
+        definitions: toolDefinitions.length ? toolDefinitions : undefined,
+        toolChoice: toolDefinitions.length ? normalized.toolChoice : undefined,
+        parallelToolCalls: toolDefinitions.length ? normalized.parallelToolCalls : undefined,
+      });
 
   const turn = {
     model: effectiveModel,
@@ -365,7 +403,9 @@ export async function postResponsesNonStream(req, res) {
   const ingressToolCount = toolDefinitions.length;
   const turnToolCount = countToolDefinitions(turn.tools);
   const messageToolCount = countToolDefinitions(message.tools);
-  const toolsMismatch = ingressToolCount !== turnToolCount || ingressToolCount !== messageToolCount;
+  const toolsMismatch =
+    !omitToolManifest &&
+    (ingressToolCount !== turnToolCount || ingressToolCount !== messageToolCount);
   logStructured(
     {
       component: "responses",
@@ -380,6 +420,7 @@ export async function postResponsesNonStream(req, res) {
       turn_tool_count: turnToolCount,
       message_tool_count: messageToolCount,
       mismatch: toolsMismatch,
+      manifest_omitted: omitToolManifest,
     }
   );
 
@@ -513,6 +554,7 @@ export async function postResponsesNonStream(req, res) {
     if (responded) return;
     responded = true;
     cancelIdle();
+    idempotency.markFailed?.();
     try {
       child.kill("SIGKILL");
     } catch {}
@@ -627,6 +669,7 @@ export async function postResponsesNonStream(req, res) {
   } catch (error) {
     clearTimeout(requestTimeout);
     cancelIdle();
+    idempotency.markFailed?.();
     const mapped = mapTransportError(error);
     if (!res.headersSent && !responded) {
       responded = true;
@@ -663,7 +706,8 @@ export async function postResponsesNonStream(req, res) {
   let parserErrors = [];
 
   if (toolParseOptions.enabled && outputText) {
-    const parsed = parseToolCallText(outputText, {
+    const parser = CFG.PROXY_RESPONSES_XML_TOOL_CALLS ? parseXmlToolCallText : parseToolCallText;
+    const parsed = parser(outputText, {
       allowedTools: toolParseOptions.allowedTools,
       strictTools: toolParseOptions.strictTools,
       toolSchemas: toolParseOptions.toolSchemas,
@@ -808,6 +852,7 @@ export async function postResponsesNonStream(req, res) {
 
   applyCors(req, res);
   responded = true;
+  idempotency.markDone?.();
   res.status(200).json(envelope);
   restoreOutputMode();
 }

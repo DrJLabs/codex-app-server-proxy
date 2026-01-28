@@ -65,9 +65,18 @@ const createToolCallAggregatorMock = vi.fn(() => ({
 const appendUsageMock = vi.fn();
 const logSanitizerToggleMock = vi.fn();
 const logSanitizerSummaryMock = vi.fn();
+const detectCopilotRequestMock = vi.fn(() => ({
+  copilot_detected: false,
+  copilot_detect_tier: null,
+  copilot_detect_reasons: [],
+}));
 
 const ORIGINAL_RESPONSES_DEFAULT_MAX_TOKENS = process.env.PROXY_RESPONSES_DEFAULT_MAX_TOKENS;
 const ORIGINAL_MAX_CHAT_CHOICES = process.env.PROXY_MAX_CHAT_CHOICES;
+const ORIGINAL_RESPONSES_OMIT_TOOL_MANIFEST = process.env.PROXY_RESPONSES_OMIT_TOOL_MANIFEST;
+const ORIGINAL_RESPONSES_STRIP_OBSIDIAN_SYSTEM_PROMPT =
+  process.env.PROXY_RESPONSES_STRIP_OBSIDIAN_SYSTEM_PROMPT;
+const ORIGINAL_RESPONSES_INJECT_TOOL_SCHEMA = process.env.PROXY_RESPONSES_INJECT_TOOL_SCHEMA;
 
 vi.mock("../../../../src/handlers/responses/ingress-logging.js", () => ({
   logResponsesIngressRaw: (...args) => logResponsesIngressRawMock(...args),
@@ -125,11 +134,7 @@ vi.mock("../../../../src/lib/observability/transform-summary.js", () => ({
 }));
 
 vi.mock("../../../../src/lib/copilot-detect.js", () => ({
-  detectCopilotRequest: () => ({
-    copilot_detected: false,
-    copilot_detect_tier: null,
-    copilot_detect_reasons: [],
-  }),
+  detectCopilotRequest: (...args) => detectCopilotRequestMock(...args),
 }));
 
 vi.mock("../../../../src/dev-logging.js", () => ({
@@ -167,6 +172,7 @@ beforeEach(() => {
   appendUsageMock.mockClear();
   logSanitizerToggleMock.mockClear();
   logSanitizerSummaryMock.mockClear();
+  detectCopilotRequestMock.mockClear();
 });
 
 afterEach(() => {
@@ -179,6 +185,22 @@ afterEach(() => {
     delete process.env.PROXY_MAX_CHAT_CHOICES;
   } else {
     process.env.PROXY_MAX_CHAT_CHOICES = ORIGINAL_MAX_CHAT_CHOICES;
+  }
+  if (ORIGINAL_RESPONSES_OMIT_TOOL_MANIFEST === undefined) {
+    delete process.env.PROXY_RESPONSES_OMIT_TOOL_MANIFEST;
+  } else {
+    process.env.PROXY_RESPONSES_OMIT_TOOL_MANIFEST = ORIGINAL_RESPONSES_OMIT_TOOL_MANIFEST;
+  }
+  if (ORIGINAL_RESPONSES_STRIP_OBSIDIAN_SYSTEM_PROMPT === undefined) {
+    delete process.env.PROXY_RESPONSES_STRIP_OBSIDIAN_SYSTEM_PROMPT;
+  } else {
+    process.env.PROXY_RESPONSES_STRIP_OBSIDIAN_SYSTEM_PROMPT =
+      ORIGINAL_RESPONSES_STRIP_OBSIDIAN_SYSTEM_PROMPT;
+  }
+  if (ORIGINAL_RESPONSES_INJECT_TOOL_SCHEMA === undefined) {
+    delete process.env.PROXY_RESPONSES_INJECT_TOOL_SCHEMA;
+  } else {
+    process.env.PROXY_RESPONSES_INJECT_TOOL_SCHEMA = ORIGINAL_RESPONSES_INJECT_TOOL_SCHEMA;
   }
   vi.resetModules();
 });
@@ -207,6 +229,53 @@ describe("responses nonstream handler", () => {
 
     expect(res.status).toHaveBeenCalledWith(400);
     expect(createJsonRpcChildAdapterMock).not.toHaveBeenCalled();
+  });
+
+  it("passes strip flag to normalizer for copilot requests when enabled", async () => {
+    process.env.PROXY_RESPONSES_STRIP_OBSIDIAN_SYSTEM_PROMPT = "true";
+    detectCopilotRequestMock.mockReturnValueOnce({
+      copilot_detected: true,
+      copilot_detect_tier: "high",
+      copilot_detect_reasons: ["marker_recent_conversations"],
+    });
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    expect(normalizeResponsesRequestMock).toHaveBeenCalledWith(
+      req.body,
+      expect.objectContaining({
+        stripObsidianSystemPrompt: true,
+        injectToolSchema: expect.any(Boolean),
+        forcedDeveloperInstructions: expect.any(String),
+        toolCallStyle: undefined,
+      })
+    );
+  });
+
+  it("disables tool schema injection when configured", async () => {
+    process.env.PROXY_RESPONSES_INJECT_TOOL_SCHEMA = "false";
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    expect(normalizeResponsesRequestMock).toHaveBeenCalledWith(
+      req.body,
+      expect.objectContaining({
+        stripObsidianSystemPrompt: false,
+        injectToolSchema: false,
+        forcedDeveloperInstructions: "",
+        toolCallStyle: undefined,
+      })
+    );
   });
 
   it("infers low reasoning effort from model alias when not provided", async () => {
@@ -374,6 +443,34 @@ describe("responses nonstream handler", () => {
         parallelToolCalls: true,
       })
     );
+  });
+
+  it("omits tool manifest when PROXY_RESPONSES_OMIT_TOOL_MANIFEST is true", async () => {
+    process.env.PROXY_RESPONSES_OMIT_TOOL_MANIFEST = "true";
+    const definitions = [{ type: "function", function: { name: "lookup", parameters: {} } }];
+    normalizeResponsesRequestMock.mockReturnValueOnce({
+      instructions: "",
+      inputItems: [{ type: "text", data: { text: "[user] hi" } }],
+      responseFormat: undefined,
+      finalOutputJsonSchema: undefined,
+      tools: definitions,
+      toolChoice: "auto",
+      parallelToolCalls: true,
+      maxOutputTokens: undefined,
+    });
+
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    expect(createJsonRpcChildAdapterMock).toHaveBeenCalled();
+    const [{ normalizedRequest }] = createJsonRpcChildAdapterMock.mock.calls[0];
+    expect(normalizedRequest.turn.tools).toBeUndefined();
+    expect(normalizedRequest.message.tools).toBeUndefined();
   });
 
   it("strips <tool_call> blocks from output text and emits function calls", async () => {

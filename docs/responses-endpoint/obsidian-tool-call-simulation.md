@@ -23,16 +23,17 @@ This yields **wire-level compatibility** with the OpenAI Responses API even thou
 
 ---
 
-## Constraints from app-server schema (Codex 0.89.0)
+## Constraints from app-server schema (Codex 0.92.0)
 - `SendUserTurnParams` has **no `tools` field**.
 - `SendUserMessageParams` has **no `tools` field**.
-- v2 `ThreadStartParams` has **no `tools` field**.
+- v2 `ThreadStartParams` now supports **`dynamicTools`** (DynamicToolSpec[]).
+- Event stream includes **`dynamic_tool_call_request`** for client-executed tools.
 - `ToolsV2` only exposes built-in capability toggles: `web_search`, `view_image`.
-- Tool definitions are surfaced via MCP status (`McpServerStatus.tools`), not per request.
+- Tool definitions are still not supported per v1 request; MCP remains a supported tool source.
 
 See:
-- `docs/reference/app-server-schema-0.89-tools.md`
-- `docs/reference/app-server-tools.md`
+- `docs/reference/app-server-schema-0.92-tools.md`
+- `docs/responses-endpoint/app-server-tools.md`
 
 ---
 

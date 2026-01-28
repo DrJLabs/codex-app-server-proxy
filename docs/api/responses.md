@@ -24,6 +24,13 @@ Bearer token is required:
 Authorization: Bearer <PROXY_API_KEY>
 ```
 
+## Idempotency (optional)
+
+When `PROXY_RESPONSES_IDEMPOTENCY=true`, the proxy can reject duplicate requests
+that use the same idempotency key within the configured TTL window. Provide a key
+via `Idempotency-Key` (or `X-Idempotency-Key`) header or `idempotency_key` in the
+JSON body.
+
 ## Non-stream request (minimal)
 
 ```json

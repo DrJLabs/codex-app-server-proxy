@@ -57,7 +57,7 @@
     "backup:data": "bash scripts/codex-data-backup.sh --mount-check --prune"
   },
   "dependencies": {
-    "@openai/codex": "0.89.0",
+    "@openai/codex": "0.92.0",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/core": "^1.9.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.52.1",

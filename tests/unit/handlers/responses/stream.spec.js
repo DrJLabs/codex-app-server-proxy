@@ -58,6 +58,7 @@ const logSanitizerSummaryMock = vi.fn();
 const logSanitizerToggleMock = vi.fn();
 const appendProtoEventMock = vi.fn();
 const appendUsageMock = vi.fn();
+const ORIGINAL_RESPONSES_OMIT_TOOL_MANIFEST = process.env.PROXY_RESPONSES_OMIT_TOOL_MANIFEST;
 const applyCorsMock = vi.fn();
 const normalizeModelMock = vi.fn((model) => ({ requested: model, effective: model }));
 const acceptedModelIdsMock = vi.fn(() => new Set(["gpt-5.2", "gpt-5.2-codev-l"]));
@@ -179,6 +180,11 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.resetModules();
+  if (ORIGINAL_RESPONSES_OMIT_TOOL_MANIFEST === undefined) {
+    delete process.env.PROXY_RESPONSES_OMIT_TOOL_MANIFEST;
+  } else {
+    process.env.PROXY_RESPONSES_OMIT_TOOL_MANIFEST = ORIGINAL_RESPONSES_OMIT_TOOL_MANIFEST;
+  }
 });
 
 describe("responses stream handler", () => {
@@ -239,6 +245,33 @@ describe("responses stream handler", () => {
         parallelToolCalls: true,
       })
     );
+  });
+
+  it("omits tool manifest when PROXY_RESPONSES_OMIT_TOOL_MANIFEST is true", async () => {
+    process.env.PROXY_RESPONSES_OMIT_TOOL_MANIFEST = "true";
+    const definitions = [{ type: "function", function: { name: "lookup", parameters: {} } }];
+    normalizeResponsesRequestMock.mockReturnValueOnce({
+      instructions: "",
+      inputItems: [{ type: "text", data: { text: "[user] hi" } }],
+      responseFormat: undefined,
+      finalOutputJsonSchema: undefined,
+      tools: definitions,
+      toolChoice: "auto",
+      parallelToolCalls: true,
+      maxOutputTokens: undefined,
+    });
+
+    const { postResponsesStream } = await import("../../../../src/handlers/responses/stream.js");
+
+    const req = makeReq({ input: "hello", model: "gpt-5.2", stream: true });
+    const res = makeRes();
+
+    await postResponsesStream(req, res);
+
+    expect(createJsonRpcChildAdapterMock).toHaveBeenCalled();
+    const [{ normalizedRequest }] = createJsonRpcChildAdapterMock.mock.calls[0];
+    expect(normalizedRequest.turn.tools).toBeUndefined();
+    expect(normalizedRequest.message.tools).toBeUndefined();
   });
 
   it("infers low reasoning effort from model alias when not provided", async () => {

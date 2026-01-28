@@ -1,13 +1,14 @@
 import { normalizeResponseId } from "./shared.js";
 import { buildResponsesEnvelope } from "./native/envelope.js";
 import { createToolCallAggregator } from "../../lib/tool-call-aggregator.js";
-import { createToolCallParser } from "./tool-call-parser.js";
+import { createToolCallParser, createXmlToolCallParser } from "./tool-call-parser.js";
 import { recordResponsesSseEvent } from "../../services/metrics/index.js";
 import { writeSseChunk } from "../../services/sse.js";
 import { appendProtoEvent, LOG_PROTO } from "../../dev-logging.js";
 import { ensureReqId } from "../../lib/request-context.js";
 import { logStructured, sha256, shouldLogVerbose, preview } from "../../services/logging/schema.js";
 import { createResponsesStreamCapture } from "./capture.js";
+import { config as CFG } from "../../config/index.js";
 import {
   summarizeTextParts,
   summarizeToolCalls,
@@ -139,8 +140,11 @@ const buildToolRegistry = (requestBody = {}) => {
 export function createResponsesStreamAdapter(res, requestBody = {}, req = null) {
   const toolCallAggregator = createToolCallAggregator();
   const toolRegistry = buildToolRegistry(requestBody);
+  const toolParserFactory = CFG.PROXY_RESPONSES_XML_TOOL_CALLS
+    ? createXmlToolCallParser
+    : createToolCallParser;
   const toolCallParser = toolRegistry.enabled
-    ? createToolCallParser({
+    ? toolParserFactory({
         allowedTools: toolRegistry.allowedTools,
         strictTools: toolRegistry.strictTools,
         toolSchemas: toolRegistry.toolSchemas,
@@ -154,6 +158,8 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
     requestBody,
     outputModeEffective: res?.locals?.output_mode_effective ?? null,
   });
+  const requestStartMs =
+    typeof res?.locals?.request_start_ms === "number" ? res.locals.request_start_ms : Date.now();
   const state = {
     responseId: null,
     model: requestBody?.model ?? null,
@@ -167,6 +173,59 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
     outputTextHasUseTool: false,
     transformSummaryEmitted: false,
     createdAt: null,
+    timing: {
+      requestStartMs,
+      firstOutputMs: null,
+      firstToolMs: null,
+    },
+  };
+
+  const logFirstOutput = () => {
+    if (state.timing.firstOutputMs) return;
+    state.timing.firstOutputMs = Date.now();
+    const elapsed = state.timing.firstOutputMs - state.timing.requestStartMs;
+    logStructured(
+      {
+        component: "responses",
+        event: "responses_first_output",
+        level: "info",
+        req_id: res.locals?.req_id,
+        trace_id: res.locals?.trace_id,
+        route: res.locals?.routeOverride || RESPONSES_ROUTE,
+        mode: res.locals?.modeOverride || res.locals?.mode,
+        model: state.model || requestBody?.model,
+      },
+      {
+        elapsed_ms: elapsed,
+        response_id: state.responseId,
+        output_mode_effective: res?.locals?.output_mode_effective ?? null,
+      }
+    );
+  };
+
+  const logFirstToolCall = (toolName, source) => {
+    if (state.timing.firstToolMs) return;
+    state.timing.firstToolMs = Date.now();
+    const elapsed = state.timing.firstToolMs - state.timing.requestStartMs;
+    logStructured(
+      {
+        component: "responses",
+        event: "responses_first_tool_call",
+        level: "info",
+        req_id: res.locals?.req_id,
+        trace_id: res.locals?.trace_id,
+        route: res.locals?.routeOverride || RESPONSES_ROUTE,
+        mode: res.locals?.modeOverride || res.locals?.mode,
+        model: state.model || requestBody?.model,
+      },
+      {
+        elapsed_ms: elapsed,
+        response_id: state.responseId,
+        tool_name: toolName || null,
+        source: source || null,
+        output_mode_effective: res?.locals?.output_mode_effective ?? null,
+      }
+    );
   };
 
   const recordEvent = (event) => {
@@ -457,6 +516,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
         type: toolDelta.type,
         name: toolDelta.function?.name,
       });
+      logFirstToolCall(existing?.name, "tool_calls");
 
       if (!existing.added) {
         writeEvent("response.output_item.added", {
@@ -685,6 +745,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
 
   const emitTextDelta = (choiceState, choiceIndex, text) => {
     if (!isNonEmptyString(text)) return;
+    logFirstOutput();
     if (choiceState.textParts.length && !choiceState.mixedTextWarningEmitted) {
       choiceState.mixedTextWarningEmitted = true;
       logStructured(
@@ -719,6 +780,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
 
   const emitTextPart = (choiceState, choiceIndex, text) => {
     if (!isNonEmptyString(text)) return;
+    logFirstOutput();
     if (choiceState.hasDelta && !choiceState.mixedTextWarningEmitted) {
       choiceState.mixedTextWarningEmitted = true;
       logStructured(
@@ -819,6 +881,7 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
     parsedCalls.forEach((call) => {
       if (!call || typeof call !== "object") return;
       const id = nextToolCallId();
+      logFirstToolCall(call.name, "text");
       const toolCall = {
         id,
         type: "function",

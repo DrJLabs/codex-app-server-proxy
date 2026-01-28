@@ -10,6 +10,7 @@ import {
   summarizeResponsesIngress,
   summarizeTools,
 } from "./ingress-logging.js";
+import { loadObsidianAgentInstructions } from "./agent-instructions.js";
 import { applyProxyTraceHeaders, ensureReqId, setHttpContext } from "../../lib/request-context.js";
 import { detectCopilotRequest as detectCopilotRequestV2 } from "../../lib/copilot-detect.js";
 import { invalidRequestBody, modelNotFoundBody } from "../../lib/errors.js";
@@ -22,6 +23,7 @@ import { createResponsesStreamAdapter } from "./stream-adapter.js";
 import { createStreamMetadataSanitizer } from "../chat/stream-metadata-sanitizer.js";
 import { applyGuardHeaders, setupStreamGuard } from "../../services/concurrency-guard.js";
 import { logStructured } from "../../services/logging/schema.js";
+import { logResponsesIdempotencyBlock, registerResponsesIdempotency } from "./idempotency.js";
 import {
   extractMetadataFromPayload,
   metadataKeys,
@@ -114,6 +116,7 @@ export async function postResponsesStream(req, res) {
 
   res.locals = res.locals || {};
   const locals = res.locals;
+  locals.request_start_ms = started;
   locals.endpoint_mode = "responses";
   locals.routeOverride = route;
   locals.modeOverride = mode;
@@ -195,10 +198,37 @@ export async function postResponsesStream(req, res) {
   }
   const { effort: reasoningEffort, reasoningPayload } = reasoningResult;
 
+  const idempotency = registerResponsesIdempotency({
+    req,
+    body: originalBody,
+    mode,
+    reqId,
+  });
+  if (idempotency.shouldBlock) {
+    logResponsesIdempotencyBlock({ reqId, route, mode, idempotency });
+    applyCors(req, res);
+    res.status(idempotency.statusCode || 409).json(idempotency.body);
+    restoreOutputMode();
+    return;
+  }
+
   let normalized;
+  const stripObsidianSystemPrompt =
+    CFG.PROXY_RESPONSES_STRIP_OBSIDIAN_SYSTEM_PROMPT && copilotDetection.copilot_detected;
+  const injectToolSchema = CFG.PROXY_RESPONSES_INJECT_TOOL_SCHEMA;
+  const toolCallStyle = CFG.PROXY_RESPONSES_XML_TOOL_CALLS ? "xml" : undefined;
+  const agentInstructions = copilotDetection.copilot_detected
+    ? loadObsidianAgentInstructions()
+    : "";
   try {
-    normalized = normalizeResponsesRequest(originalBody);
+    normalized = normalizeResponsesRequest(originalBody, {
+      stripObsidianSystemPrompt,
+      injectToolSchema,
+      toolCallStyle,
+      forcedDeveloperInstructions: agentInstructions,
+    });
   } catch (err) {
+    idempotency.markFailed?.();
     if (err instanceof ResponsesJsonRpcNormalizationError) {
       applyCors(req, res);
       res.status(err.statusCode || 400).json(err.body);
@@ -242,6 +272,7 @@ export async function postResponsesStream(req, res) {
     toolsRequested: nativeTools.length > 0 || functionTools.length > 0,
   });
   if (!capabilityCheck.ok) {
+    idempotency.markFailed?.();
     applyCors(req, res);
     res.status(capabilityCheck.statusCode).json(capabilityCheck.body);
     restoreOutputMode();
@@ -268,6 +299,7 @@ export async function postResponsesStream(req, res) {
 
   if (!guardContext.acquired) {
     restoreOutputMode();
+    idempotency.markFailed?.();
     return;
   }
 
@@ -276,11 +308,14 @@ export async function postResponsesStream(req, res) {
 
   const fallbackMax = Number(CFG.PROXY_RESPONSES_DEFAULT_MAX_TOKENS || 0);
   const maxOutputTokens = normalized.maxOutputTokens ?? (fallbackMax > 0 ? fallbackMax : undefined);
-  const toolsPayload = buildToolsPayload({
-    definitions: toolDefinitions.length ? toolDefinitions : undefined,
-    toolChoice: toolDefinitions.length ? normalized.toolChoice : undefined,
-    parallelToolCalls: toolDefinitions.length ? normalized.parallelToolCalls : undefined,
-  });
+  const omitToolManifest = CFG.PROXY_RESPONSES_OMIT_TOOL_MANIFEST;
+  const toolsPayload = omitToolManifest
+    ? undefined
+    : buildToolsPayload({
+        definitions: toolDefinitions.length ? toolDefinitions : undefined,
+        toolChoice: toolDefinitions.length ? normalized.toolChoice : undefined,
+        parallelToolCalls: toolDefinitions.length ? normalized.parallelToolCalls : undefined,
+      });
   const includeUsage = Boolean(originalBody?.stream_options?.include_usage);
 
   const turn = {
@@ -315,10 +350,36 @@ export async function postResponsesStream(req, res) {
     message.finalOutputJsonSchema = normalized.finalOutputJsonSchema;
   }
 
+  logStructured(
+    {
+      component: "responses",
+      event: "responses_backend_request",
+      level: "info",
+      req_id: reqId,
+      route,
+      mode,
+      model: requestedModel,
+    },
+    {
+      requested_model: requestedModel,
+      effective_model: effectiveModel,
+      reasoning_effort: reasoningEffort || null,
+      reasoning_payload_present: Boolean(reasoningPayload),
+      tool_call_style: toolCallStyle || null,
+      tool_choice: normalized.toolChoice ?? null,
+      tool_count: toolDefinitions.length,
+      max_output_tokens: maxOutputTokens ?? null,
+      sandbox_mode: SANDBOX_MODE || null,
+      approval_policy: APPROVAL_POLICY || null,
+    }
+  );
+
   const ingressToolCount = toolDefinitions.length;
   const turnToolCount = countToolDefinitions(turn.tools);
   const messageToolCount = countToolDefinitions(message.tools);
-  const toolsMismatch = ingressToolCount !== turnToolCount || ingressToolCount !== messageToolCount;
+  const toolsMismatch =
+    !omitToolManifest &&
+    (ingressToolCount !== turnToolCount || ingressToolCount !== messageToolCount);
   logStructured(
     {
       component: "responses",
@@ -333,6 +394,7 @@ export async function postResponsesStream(req, res) {
       turn_tool_count: turnToolCount,
       message_tool_count: messageToolCount,
       mismatch: toolsMismatch,
+      manifest_omitted: omitToolManifest,
     }
   );
 
@@ -376,6 +438,11 @@ export async function postResponsesStream(req, res) {
     if (responded || res.writableEnded) return;
     responded = true;
     cleanupStream();
+    if (outcome === "completed") {
+      idempotency.markDone?.();
+    } else {
+      idempotency.markFailed?.();
+    }
     if (KILL_ON_DISCONNECT) {
       try {
         child.kill("SIGTERM");
@@ -390,6 +457,7 @@ export async function postResponsesStream(req, res) {
     responded = true;
     cleanupStream();
     releaseGuard("error");
+    idempotency.markFailed?.();
     streamAdapter.fail(error);
     restoreOutputMode();
   };
@@ -529,6 +597,7 @@ export async function postResponsesStream(req, res) {
   } catch (error) {
     clearTimeout(requestTimeout);
     cleanupStream();
+    idempotency.markFailed?.();
     const mapped = mapTransportError(error);
     if (mapped?.body?.error) {
       respondStreamFailure(mapped.body.error);
@@ -594,5 +663,6 @@ export async function postResponsesStream(req, res) {
     sanitized_metadata_sources: SANITIZE_METADATA ? sanitizerSummary.sources : [],
   });
 
+  idempotency.markDone?.();
   restoreOutputMode();
 }

@@ -13,6 +13,10 @@ This folder is the canonical index for repository documentation. Update this fil
 ## Development
 
 - [`local-development.md`](local-development.md) — Node vs shim vs Docker workflows
+- [`app-server-payloads.md`](app-server-payloads.md) — exact JSON-RPC payloads sent to app-server
+- [`obsidian-prompt-changes.md`](obsidian-prompt-changes.md) — proposed Obsidian prompt sanitization rules
+- [`obsidian-xml-system-prompt.md`](obsidian-xml-system-prompt.md) — proposed Obsidian XML tool-call system prompt
+- [`obsidian-tool-manifest.md`](obsidian-tool-manifest.md) — captured Obsidian tool manifest (raw client payload)
 - [`api/overview.md`](api/overview.md) — endpoint overview + runnable curl examples
 - [`api/responses.md`](api/responses.md) — `/v1/responses` usage notes
 - [`api/chat-completions.md`](api/chat-completions.md) — `/v1/chat/completions` usage notes
@@ -37,7 +41,7 @@ This folder is the canonical index for repository documentation. Update this fil
 - [`responses-endpoint/obsidian-tool-call-simulation.md`](responses-endpoint/obsidian-tool-call-simulation.md) — OpenAI-parity tool-call simulation plan
 - [`responses-endpoint/prompt-injection.md`](responses-endpoint/prompt-injection.md) — `/v1/responses` tool-call prompt injection matrix
 - [`reference/app-server-protocol.schema.json`](reference/app-server-protocol.schema.json) — JSON-RPC schema bundle (Codex app-server)
-- [`reference/app-server-schema-0.89-tools.md`](reference/app-server-schema-0.89-tools.md) — schema extract for tool support (Codex 0.89.0)
+- [`reference/app-server-schema-0.92-tools.md`](reference/app-server-schema-0.92-tools.md) — schema extract for tool support (Codex 0.92.0)
 
 ## Deep dives and backlogs
 
