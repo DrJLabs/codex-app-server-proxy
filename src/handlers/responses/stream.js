@@ -479,11 +479,7 @@ export async function postResponsesStream(req, res) {
 
   try {
     const prompt = buildPromptFromItems(normalized.inputItems);
-    const submission = {
-      id: reqId,
-      op: { type: "user_input", items: [{ type: "text", text: prompt }] },
-    };
-    child.stdin.write(JSON.stringify(submission) + "\n");
+    child.stdin.write(JSON.stringify({ prompt }) + "\n");
   } catch (error) {
     logStructured(
       {

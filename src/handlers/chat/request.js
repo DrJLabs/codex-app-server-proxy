@@ -521,6 +521,10 @@ export const normalizeChatJsonRpcRequest = ({
     includeUsage,
   };
 
+  if (stream) {
+    messagePayload.stream = true;
+  }
+
   if (temperature !== undefined) messagePayload.temperature = temperature;
   if (topP !== undefined) messagePayload.topP = topP;
   if (maxOutputTokens !== undefined) messagePayload.maxOutputTokens = maxOutputTokens;

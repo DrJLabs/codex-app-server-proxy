@@ -278,6 +278,31 @@ describe("JsonRpcChildAdapter normalization", () => {
     await flushAsync();
   });
 
+  it("forwards tools from turn payload to message payload", async () => {
+    const tools = {
+      definitions: [{ type: "function", function: { name: "tool" } }],
+      choice: "auto",
+      parallelToolCalls: true,
+    };
+    const { adapter, context, resolvePromise } = await setupAdapter({
+      normalizedRequest: {
+        turn: { items: [], tools },
+        message: { items: [] },
+      },
+    });
+
+    adapter.stdin.write(JSON.stringify({ prompt: "hello" }));
+    await flushAsync();
+
+    expect(transport.sendUserMessage).toHaveBeenCalledWith(
+      context,
+      expect.objectContaining({ tools })
+    );
+
+    resolvePromise();
+    await flushAsync();
+  });
+
   it("ignores duplicate writes and falls back on invalid JSON", async () => {
     const { adapter, context, resolvePromise } = await setupAdapter();
 

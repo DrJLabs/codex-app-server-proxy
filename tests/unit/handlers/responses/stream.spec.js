@@ -224,4 +224,19 @@ describe("responses stream handler", () => {
       })
     );
   });
+
+  it("submits prompt payload without op envelope", async () => {
+    const { postResponsesStream } = await import("../../../../src/handlers/responses/stream.js");
+    const req = makeReq({ input: "hello", model: "gpt-5.2", stream: true });
+    const res = makeRes();
+
+    await postResponsesStream(req, res);
+
+    const child = createJsonRpcChildAdapterMock.mock.results[0]?.value;
+    expect(child?.stdin?.write).toHaveBeenCalled();
+    const rawPayload = child.stdin.write.mock.calls[0][0];
+    const parsed = JSON.parse(String(rawPayload).trim());
+    expect(parsed.prompt).toEqual(expect.any(String));
+    expect(parsed.op).toBeUndefined();
+  });
 });
