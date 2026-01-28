@@ -122,6 +122,17 @@
             }
           ]
         },
+        "dynamicTools": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {}
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "baseInstructions": {
           "type": [
             "null",
@@ -231,16 +242,6 @@
         "outputSchema": {},
         "output_schema": {},
         "metadata": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Record<string,unknown>"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "tools": {
           "anyOf": [
             {
               "$ref": "#/definitions/Record<string,unknown>"
@@ -449,7 +450,6 @@
         "max_output_tokens": {
           "type": "number"
         },
-        "tools": {},
         "responseFormat": {},
         "response_format": {},
         "reasoning": {},

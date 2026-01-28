@@ -122,6 +122,7 @@ export interface NewConversationParams {
   approvalPolicy?: AskForApproval | null;
   sandbox?: SandboxMode | null;
   config?: Record<string, unknown> | null;
+  dynamicTools?: JsonValue[] | null;
   baseInstructions?: string | null;
   developerInstructions?: string | null;
   compactPrompt?: string | null;
@@ -162,7 +163,6 @@ export interface SendUserTurnParams {
   outputSchema?: JsonValue;
   output_schema?: JsonValue;
   metadata?: Record<string, unknown> | null;
-  tools?: Record<string, unknown> | null;
   [key: string]: unknown;
 }
 
@@ -182,7 +182,6 @@ export interface SendUserMessageParams {
   top_p?: number;
   maxOutputTokens?: number;
   max_output_tokens?: number;
-  tools?: JsonValue;
   responseFormat?: JsonValue;
   response_format?: JsonValue;
   reasoning?: JsonValue;
@@ -230,6 +229,7 @@ export interface BuildNewConversationOptions {
   approvalPolicy?: AskForApproval | string | null;
   sandbox?: SandboxMode | string | JsonObject | null;
   config?: JsonObject | null;
+  dynamicTools?: JsonValue[] | null;
   baseInstructions?: string | null;
   developerInstructions?: string | null;
   compactPrompt?: string | null;
@@ -247,7 +247,6 @@ export interface BuildSendUserTurnOptions {
   choice_count?: number | string | null;
   effort?: ReasoningEffort | string | null;
   summary?: ReasoningSummary | string | null;
-  tools?: JsonValue;
   outputSchema?: JsonValue;
   output_schema?: JsonValue;
   finalOutputJsonSchema?: JsonValue;
@@ -262,7 +261,6 @@ export interface BuildSendUserMessageOptions {
   temperature?: number;
   topP?: number;
   maxOutputTokens?: number;
-  tools?: JsonValue;
   responseFormat?: JsonValue;
   reasoning?: JsonValue;
   finalOutputJsonSchema?: JsonValue;
@@ -383,6 +381,10 @@ export function buildNewConversationParams(
     params.config = options.config ?? null;
   }
 
+  if (Array.isArray(options.dynamicTools)) {
+    params.dynamicTools = options.dynamicTools;
+  }
+
   const baseInstructions = toNullableString(options.baseInstructions);
   if (typeof baseInstructions === "string") params.baseInstructions = baseInstructions;
 
@@ -438,11 +440,6 @@ export function buildSendUserTurnParams(
     params.effort = effort;
   }
 
-  const tools = toRecordOrNull(options.tools);
-  if (tools !== undefined) {
-    params.tools = tools;
-  }
-
   const rawOutputSchema =
     options.outputSchema ?? options.output_schema ?? options.finalOutputJsonSchema;
   if (rawOutputSchema !== undefined) {
@@ -489,10 +486,6 @@ export function buildSendUserMessageParams(
   if (options.maxOutputTokens !== undefined) {
     params.maxOutputTokens = options.maxOutputTokens;
     params.max_output_tokens = options.maxOutputTokens;
-  }
-
-  if (options.tools !== undefined) {
-    params.tools = options.tools ?? null;
   }
 
   if (options.responseFormat !== undefined) {
@@ -954,13 +947,4 @@ function normalizeSandboxModeOption(
     }
   }
   return undefined;
-}
-
-function toRecordOrNull(value: unknown): Record<string, unknown> | null | undefined {
-  if (value === undefined) return undefined;
-  if (value === null) return null;
-  if (typeof value === "object" && !Array.isArray(value)) {
-    return { ...(value as Record<string, unknown>) };
-  }
-  return null;
 }

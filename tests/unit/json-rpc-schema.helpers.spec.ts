@@ -177,7 +177,7 @@ describe("json-rpc schema helper behavior", () => {
     expect(params.includeApplyPatchTool).toBe(true);
   });
 
-  it("skips invalid choice counts and preserves null tools", () => {
+  it("skips invalid choice counts", () => {
     const params = buildSendUserTurnParams({
       items: [],
       conversationId: "conv",
@@ -187,13 +187,11 @@ describe("json-rpc schema helper behavior", () => {
       model: "gpt-5.2",
       summary: "auto",
       choiceCount: "0",
-      tools: [] as unknown as Record<string, unknown>,
       effort: "invalid" as unknown as string,
     });
 
     expect(params.choiceCount).toBeUndefined();
     expect(params.choice_count).toBeUndefined();
-    expect(params.tools).toBeNull();
     expect(params).not.toHaveProperty("effort");
   });
 

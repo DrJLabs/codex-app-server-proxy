@@ -463,12 +463,15 @@ describe("json-rpc schema bindings", () => {
 
     it("passes through config and compactPrompt in newConversation params", () => {
       const config = { featureFlags: { experimental: true } };
+      const dynamicTools = [{ name: "lookup", description: "", inputSchema: { type: "object" } }];
       const params = buildNewConversationParams({
         config,
         compactPrompt: "true",
+        dynamicTools,
       });
       expect(params.config).toEqual(config);
       expect(params.compactPrompt).toBe("true");
+      expect(params.dynamicTools).toEqual(dynamicTools);
     });
 
     it("drops invalid sandbox types in newConversation params", () => {
@@ -574,7 +577,6 @@ describe("json-rpc schema bindings", () => {
         temperature: 0.75,
         topP: 0.5,
         maxOutputTokens: 256,
-        tools: { definitions: [{ type: "function", function: { name: "noop" } }] },
         responseFormat: { type: "json_schema" },
         reasoning: { effort: "low" },
         finalOutputJsonSchema: { type: "object" },
@@ -591,9 +593,7 @@ describe("json-rpc schema bindings", () => {
       expect(params.top_p).toBe(0.5);
       expect(params.maxOutputTokens).toBe(256);
       expect(params.max_output_tokens).toBe(256);
-      expect(params.tools).toEqual({
-        definitions: [{ type: "function", function: { name: "noop" } }],
-      });
+      expect(params).not.toHaveProperty("tools");
       expect(params.responseFormat).toEqual({ type: "json_schema" });
       expect(params.response_format).toEqual({ type: "json_schema" });
       expect(params.reasoning).toEqual({ effort: "low" });
