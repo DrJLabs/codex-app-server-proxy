@@ -461,6 +461,32 @@ describe("json-rpc schema bindings", () => {
       expect(params.includeApplyPatchTool).toBe(true);
     });
 
+    it("passes through config and compactPrompt in newConversation params", () => {
+      const config = { featureFlags: { experimental: true } };
+      const params = buildNewConversationParams({
+        config,
+        compactPrompt: "true",
+      });
+      expect(params.config).toEqual(config);
+      expect(params.compactPrompt).toBe("true");
+    });
+
+    it("drops invalid sandbox types in newConversation params", () => {
+      const params = buildNewConversationParams({
+        // @ts-expect-error test runtime validation
+        sandbox: true,
+      });
+      expect(params.sandbox).toBeUndefined();
+    });
+
+    it("normalizes legacy sandbox policy objects in newConversation params", () => {
+      const params = buildNewConversationParams({
+        // @ts-expect-error test legacy object shape support
+        sandbox: { type: "read-only" },
+      });
+      expect(params.sandbox).toBe("read-only");
+    });
+
     it("builds sendUserTurn params with normalized values", () => {
       const item = createUserMessageItem("hello", { message_count: 1, messageCount: 1 });
       const params = buildSendUserTurnParams({

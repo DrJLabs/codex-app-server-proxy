@@ -452,6 +452,8 @@ class JsonRpcTransport {
       cwd: basePayload.cwd ?? undefined,
       approvalPolicy: basePayload.approvalPolicy ?? basePayload.approval_policy ?? undefined,
       sandbox: basePayload.sandboxPolicy ?? basePayload.sandbox ?? undefined,
+      config: basePayload.config ?? undefined,
+      compactPrompt: basePayload.compactPrompt ?? basePayload.compact_prompt ?? undefined,
       baseInstructions: basePayload.baseInstructions ?? undefined,
       developerInstructions: basePayload.developerInstructions ?? undefined,
       includeApplyPatchTool:
