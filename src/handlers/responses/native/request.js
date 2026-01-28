@@ -354,6 +354,7 @@ export const normalizeResponsesRequest = (body = {}) => {
 
   const items = [];
   const developerInstructionsParts = [];
+  const toolOutputs = [];
   let textLines = [];
   let lastRoleAnchor = null;
 
@@ -506,14 +507,21 @@ export const normalizeResponsesRequest = (body = {}) => {
       appendMessageContent(role, item.content, `input[${index}]`);
       return;
     }
-    if (itemType === "function_call_output") {
-      const callId = asNonEmptyString(item.call_id);
+    if (itemType === "function_call_output" || itemType === "tool_output") {
+      const callId =
+        asNonEmptyString(item.call_id) ||
+        asNonEmptyString(item.callId) ||
+        asNonEmptyString(item.id);
       if (!callId) {
         throw new ResponsesJsonRpcNormalizationError(
           invalidRequestBody(`input[${index}].call_id`, "call_id is required")
         );
       }
-      const output = stringifyToolValue(item.output ?? "");
+      const output = stringifyToolValue(
+        item.output ?? item.content ?? item.content_items ?? item.value ?? ""
+      );
+      const success = typeof item.success === "boolean" ? item.success : item.error ? false : true;
+      toolOutputs.push({ callId, output, success });
       pushTextLine(`[function_call_output call_id=${callId} output=${output}]`);
       return;
     }
@@ -599,6 +607,7 @@ export const normalizeResponsesRequest = (body = {}) => {
     toolChoice,
     parallelToolCalls,
     maxOutputTokens: body.max_output_tokens,
+    toolOutputs,
   };
 };
 

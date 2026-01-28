@@ -80,6 +80,33 @@ const applyCors = (req, res) => applyCorsUtil(req, res, CORS_ENABLED, CORS_ALLOW
 
 const countDynamicTools = (dynamicTools) => (Array.isArray(dynamicTools) ? dynamicTools.length : 0);
 
+const respondToToolOutputs = (child, toolOutputs, { reqId, route, mode } = {}) => {
+  if (!child || !Array.isArray(toolOutputs) || toolOutputs.length === 0) return;
+  const transport = child.transport;
+  if (!transport || typeof transport.respondToToolCall !== "function") return;
+  toolOutputs.forEach((toolOutput) => {
+    const callId = toolOutput?.callId;
+    if (!callId) return;
+    const ok = transport.respondToToolCall(callId, {
+      output: toolOutput.output,
+      success: toolOutput.success,
+    });
+    if (!ok) {
+      logStructured(
+        {
+          component: "responses",
+          event: "responses_tool_output_unmatched",
+          level: "warn",
+          req_id: reqId,
+          route,
+          mode,
+        },
+        { call_id: callId }
+      );
+    }
+  });
+};
+
 const mapFinishStatus = (reason) => {
   const normalized = String(reason || "").toLowerCase();
   if (normalized === "length" || normalized === "content_filter") return "incomplete";
@@ -353,6 +380,11 @@ export async function postResponsesNonStream(req, res) {
     timeoutMs: REQ_TIMEOUT_MS,
     normalizedRequest,
     trace: { reqId, route: "/v1/responses", mode: "responses_nonstream" },
+  });
+  respondToToolOutputs(child, normalized.toolOutputs, {
+    reqId,
+    route: "/v1/responses",
+    mode: "responses_nonstream",
   });
 
   let responded = false;

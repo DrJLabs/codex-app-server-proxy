@@ -196,6 +196,7 @@ class JsonRpcTransport {
     this.handshakePromise = null;
     this.rpcSeq = 1;
     this.pending = new Map();
+    this.pendingToolCalls = new Map();
     this.contextsByConversation = new Map();
     this.contextsByRequest = new Map();
     this.activeRequests = 0;
@@ -253,6 +254,7 @@ class JsonRpcTransport {
       } catch {}
     }
     this.pending.clear();
+    this.pendingToolCalls.clear();
     for (const context of this.contextsByRequest.values()) {
       context.reject(new TransportError("transport destroyed", { retryable: true }));
     }
@@ -886,6 +888,7 @@ class JsonRpcTransport {
         new TransportError("worker exited", { code: "worker_exited", retryable: true })
       );
     }
+    this.pendingToolCalls.clear();
     this.contextsByConversation.clear();
     this.contextsByRequest.clear();
     this.activeRequests = 0;
@@ -905,6 +908,10 @@ class JsonRpcTransport {
       console.warn(`${LOG_PREFIX} unable to parse worker output`, err, trimmed);
       return;
     }
+    if (payload.id !== undefined && payload.method) {
+      this.#handleServerRequest(payload);
+      return;
+    }
     if (payload.id !== undefined) {
       this.#handleRpcResponse(payload);
       return;
@@ -914,6 +921,111 @@ class JsonRpcTransport {
       return;
     }
     console.warn(`${LOG_PREFIX} unrecognized worker message`, payload);
+  }
+
+  #handleServerRequest(message) {
+    if (!message || typeof message !== "object") return;
+    const method = String(message.method || "");
+    if (method !== "item/tool/call") {
+      this.#sendServerError(message.id, -32601, `unsupported method: ${method}`);
+      return;
+    }
+
+    const params = message.params && typeof message.params === "object" ? message.params : {};
+    const callId = params.callId || params.call_id || params.id || params.callID || null;
+    const threadId =
+      params.threadId ||
+      params.thread_id ||
+      params.conversationId ||
+      params.conversation_id ||
+      null;
+    const tool = params.tool || params.name || null;
+    const argumentsPayload = Object.prototype.hasOwnProperty.call(params, "arguments")
+      ? params.arguments
+      : (params.args ?? params.input);
+
+    if (!callId || !threadId || !tool) {
+      this.#sendServerError(message.id, -32600, "invalid tool call request");
+      return;
+    }
+
+    const context =
+      this.contextsByConversation.get(threadId) ||
+      this.#resolveContext({ conversationId: threadId, conversation_id: threadId });
+
+    if (context?.trace) {
+      try {
+        logBackendNotification(context.trace, { method, params });
+      } catch {}
+    }
+
+    const key = String(callId);
+    this.pendingToolCalls.set(key, {
+      rpcId: message.id,
+      callId: key,
+      threadId: String(threadId),
+      turnId: params.turnId || params.turn_id || null,
+      tool: String(tool),
+      receivedAt: Date.now(),
+    });
+
+    if (!context) return;
+    try {
+      context.emitter.emit("notification", {
+        method: "codex/event/dynamic_tool_call_request",
+        params: {
+          tool: String(tool),
+          arguments: argumentsPayload,
+          callId: key,
+          threadId: String(threadId),
+          turnId: params.turnId || params.turn_id || null,
+          conversationId: String(threadId),
+        },
+      });
+    } catch (err) {
+      console.warn(`${LOG_PREFIX} failed to emit dynamic tool request`, err);
+    }
+  }
+
+  respondToToolCall(callId, { output, success } = {}) {
+    if (!callId) return false;
+    const key = String(callId);
+    const pending = this.pendingToolCalls.get(key);
+    if (!pending) return false;
+    let outputText = "";
+    if (typeof output === "string") {
+      outputText = output;
+    } else {
+      try {
+        outputText = JSON.stringify(output ?? "");
+      } catch {
+        outputText = String(output ?? "");
+      }
+    }
+    const result = {
+      output: outputText,
+      success: typeof success === "boolean" ? success : true,
+    };
+    try {
+      this.#write({ jsonrpc: JSONRPC_VERSION, id: pending.rpcId, result });
+    } catch (err) {
+      console.warn(`${LOG_PREFIX} failed to respond to tool call`, err);
+      return false;
+    }
+    this.pendingToolCalls.delete(key);
+    return true;
+  }
+
+  #sendServerError(id, code, message) {
+    try {
+      this.#write({
+        jsonrpc: JSONRPC_VERSION,
+        id,
+        error: { code, message },
+      });
+    } catch (err) {
+      console.warn(`${LOG_PREFIX} failed to send server error`, err);
+    }
   }
 
   #handleRpcResponse(message) {

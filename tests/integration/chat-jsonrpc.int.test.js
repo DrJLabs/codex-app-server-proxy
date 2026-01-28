@@ -173,6 +173,18 @@ describe("chat JSON-RPC normalization", () => {
     })();
     expect(newConversationParams.approvalPolicy).toBe(expectedApproval);
     expect(newConversationParams.includeApplyPatchTool).toBe(true);
+    expect(newConversationParams.dynamicTools).toEqual([
+      {
+        name: "list_files",
+        description: "lists files",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+          },
+        },
+      },
+    ]);
 
     const addListenerCapture = findCapture(server.captures, "addConversationListener");
     expect(addListenerCapture).toBeDefined();
@@ -188,11 +200,6 @@ describe("chat JSON-RPC normalization", () => {
     expect(turnParams.effort).toBe("medium");
     expect(turnParams.sandboxPolicy).toMatchObject({ type: CFG.PROXY_SANDBOX_MODE });
     expect(turnParams.metadata).toBeUndefined();
-    expect(turnParams.tools).toMatchObject({
-      definitions: expect.any(Array),
-      choice: payload.tool_choice,
-      parallelToolCalls: true,
-    });
     expect(turnParams.items).toBeInstanceOf(Array);
     expect(turnParams.items?.[0]).toMatchObject({
       type: "text",
@@ -205,18 +212,12 @@ describe("chat JSON-RPC normalization", () => {
     const params = messageCapture.payload.params;
     expect(params.conversationId).toBe(turnParams.conversationId);
     expect(params.metadata).toBeUndefined();
-    expect(params.tools).toMatchObject({
-      definitions: expect.any(Array),
-      choice: payload.tool_choice,
-      parallelToolCalls: true,
-    });
     expect(params.includeUsage).toBe(true);
     expect(params.items).toBeInstanceOf(Array);
     expect(params.items?.[0]).toMatchObject({
       type: "text",
       data: { text: payload.messages.find((msg) => msg.role === "user")?.content },
     });
-    expect(params.tools).toEqual(turnParams.tools);
     expect(params.items).toEqual(turnParams.items);
   }, 20000);
 
