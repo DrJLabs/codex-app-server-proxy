@@ -63,6 +63,12 @@ services:
       - PROXY_CAPTURE_RESPONSES_DIR=${PROXY_CAPTURE_RESPONSES_DIR:-/app/test-results/responses-copilot/raw}
       - PROXY_CAPTURE_RESPONSES_RAW_TRANSCRIPTS=${PROXY_CAPTURE_RESPONSES_RAW_TRANSCRIPTS:-}
       - PROXY_CAPTURE_RESPONSES_RAW_DIR=${PROXY_CAPTURE_RESPONSES_RAW_DIR:-/app/test-results/responses-copilot/raw-unredacted}
+      - PROXY_CAPTURE_APP_SERVER_RAW=${PROXY_CAPTURE_APP_SERVER_RAW:-}
+      - PROXY_CAPTURE_APP_SERVER_RAW_DIR=${PROXY_CAPTURE_APP_SERVER_RAW_DIR:-/app/test-results/app-server/raw}
+      - PROXY_CAPTURE_APP_SERVER_RAW_MAX_BYTES=${PROXY_CAPTURE_APP_SERVER_RAW_MAX_BYTES:-}
+      - PROXY_CAPTURE_THINKING_RAW=${PROXY_CAPTURE_THINKING_RAW:-}
+      - PROXY_CAPTURE_THINKING_RAW_DIR=${PROXY_CAPTURE_THINKING_RAW_DIR:-/app/test-results/responses-copilot/raw-thinking}
+      - PROXY_CAPTURE_THINKING_RAW_MAX_BYTES=${PROXY_CAPTURE_THINKING_RAW_MAX_BYTES:-}
     volumes:
       # Project-local Codex config; writable for rollouts/sessions
       - ./.codev:/home/node/.codex

@@ -84,6 +84,7 @@ export const config = {
   PROXY_DEFAULT_STREAM: bool("PROXY_DEFAULT_STREAM", "false"),
   PROXY_SSE_KEEPALIVE_MS: num("PROXY_SSE_KEEPALIVE_MS", 15000),
   PROXY_ENABLE_PARALLEL_TOOL_CALLS: bool("PROXY_ENABLE_PARALLEL_TOOL_CALLS", "false"),
+  PROXY_RESPONSES_XML_TOOL_CALLS: bool("PROXY_RESPONSES_XML_TOOL_CALLS", "false"),
   PROXY_STOP_AFTER_TOOLS: bool("PROXY_STOP_AFTER_TOOLS", ""),
   PROXY_STOP_AFTER_TOOLS_MODE: str("PROXY_STOP_AFTER_TOOLS_MODE", "burst").toLowerCase(),
   PROXY_STOP_AFTER_TOOLS_GRACE_MS: resolveStopAfterToolsGraceMs(),
@@ -135,6 +136,18 @@ export const config = {
     "PROXY_CAPTURE_RESPONSES_RAW_DIR",
     path.join(process.cwd(), "test-results", "responses-copilot", "raw-unredacted")
   ),
+  PROXY_CAPTURE_APP_SERVER_RAW: bool("PROXY_CAPTURE_APP_SERVER_RAW", "false"),
+  PROXY_CAPTURE_APP_SERVER_RAW_DIR: str(
+    "PROXY_CAPTURE_APP_SERVER_RAW_DIR",
+    path.join(process.cwd(), "test-results", "app-server", "raw")
+  ),
+  PROXY_CAPTURE_APP_SERVER_RAW_MAX_BYTES: num("PROXY_CAPTURE_APP_SERVER_RAW_MAX_BYTES", 262144),
+  PROXY_CAPTURE_THINKING_RAW: bool("PROXY_CAPTURE_THINKING_RAW", "false"),
+  PROXY_CAPTURE_THINKING_RAW_DIR: str(
+    "PROXY_CAPTURE_THINKING_RAW_DIR",
+    path.join(process.cwd(), "test-results", "responses-copilot", "raw-thinking")
+  ),
+  PROXY_CAPTURE_THINKING_RAW_MAX_BYTES: num("PROXY_CAPTURE_THINKING_RAW_MAX_BYTES", 262144),
   // Ingress safety: guardrails for client-provided memory/tool transcripts
   PROXY_INGRESS_GUARDRAIL: bool("PROXY_INGRESS_GUARDRAIL", "true"),
   // Worker supervisor

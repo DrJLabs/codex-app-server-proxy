@@ -46,6 +46,7 @@ const normalizeResponsesRequestMock = vi.fn(() => ({
   toolChoice: undefined,
   parallelToolCalls: undefined,
   maxOutputTokens: undefined,
+  toolOutputs: [],
 }));
 const runNativeResponsesMock = vi.fn(async ({ onEvent }) => {
   onEvent({ type: "text_delta", delta: "Hello", choiceIndex: 0 });
@@ -225,6 +226,42 @@ describe("responses nonstream handler", () => {
       })
     );
     expect(createJsonRpcChildAdapterMock).not.toHaveBeenCalled();
+  });
+
+  it("logs tool output summaries when provided", async () => {
+    const transport = { respondToToolCall: vi.fn(() => true) };
+    createJsonRpcChildAdapterMock.mockReturnValueOnce({
+      stdin: { write: vi.fn() },
+      once: vi.fn(),
+      kill: vi.fn(),
+      transport,
+    });
+    normalizeResponsesRequestMock.mockReturnValueOnce({
+      instructions: "",
+      inputItems: [{ type: "text", data: { text: "[user] hi" } }],
+      responseFormat: undefined,
+      finalOutputJsonSchema: undefined,
+      tools: null,
+      toolChoice: undefined,
+      parallelToolCalls: undefined,
+      maxOutputTokens: undefined,
+      toolOutputs: [{ callId: "call_1", output: "ok", success: true, toolName: "lookup" }],
+    });
+
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    const toolLog = logStructuredMock.mock.calls.find(
+      ([entry]) => entry?.event === "tool_call_output"
+    );
+    expect(toolLog).toBeTruthy();
+    expect(toolLog[1].tool_call_id).toBe("call_1");
+    expect(toolLog[1].tool_name).toBe("lookup");
   });
 
   it("returns 400 when model is missing", async () => {

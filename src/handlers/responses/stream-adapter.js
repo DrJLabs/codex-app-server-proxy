@@ -8,6 +8,7 @@ import { appendProtoEvent, LOG_PROTO } from "../../dev-logging.js";
 import { ensureReqId } from "../../lib/request-context.js";
 import { logStructured, sha256, shouldLogVerbose, preview } from "../../services/logging/schema.js";
 import { createResponsesStreamCapture } from "./capture.js";
+import { config as CFG } from "../../config/index.js";
 import {
   summarizeTextParts,
   summarizeToolCalls,
@@ -141,13 +142,14 @@ const buildToolRegistry = (requestBody = {}) => {
 export function createResponsesStreamAdapter(res, requestBody = {}, req = null) {
   const toolCallAggregator = createToolCallAggregator();
   const toolRegistry = buildToolRegistry(requestBody);
-  const toolCallParser = toolRegistry.enabled
-    ? createToolCallParser({
-        allowedTools: toolRegistry.allowedTools,
-        strictTools: toolRegistry.strictTools,
-        toolSchemas: toolRegistry.toolSchemas,
-      })
-    : null;
+  const toolCallParser =
+    toolRegistry.enabled && CFG.PROXY_RESPONSES_XML_TOOL_CALLS
+      ? createToolCallParser({
+          allowedTools: toolRegistry.allowedTools,
+          strictTools: toolRegistry.strictTools,
+          toolSchemas: toolRegistry.toolSchemas,
+        })
+      : null;
   const choiceStates = new Map();
   const eventCounts = new Map();
   const streamCapture = createResponsesStreamCapture({

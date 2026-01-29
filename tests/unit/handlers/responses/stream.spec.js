@@ -29,6 +29,7 @@ const normalizeResponsesRequestMock = vi.fn(() => ({
   toolChoice: undefined,
   parallelToolCalls: undefined,
   maxOutputTokens: undefined,
+  toolOutputs: [],
 }));
 const ensureResponsesCapabilitiesMock = vi.fn(async () => ({ ok: true }));
 const runNativeResponsesMock = vi.fn(async () => {});
@@ -58,6 +59,7 @@ const logSanitizerSummaryMock = vi.fn();
 const logSanitizerToggleMock = vi.fn();
 const appendProtoEventMock = vi.fn();
 const appendUsageMock = vi.fn();
+const appendThinkingRawCaptureMock = vi.fn();
 const applyCorsMock = vi.fn();
 const normalizeModelMock = vi.fn((model) => ({ requested: model, effective: model }));
 const acceptedModelIdsMock = vi.fn(() => new Set(["gpt-5.2"]));
@@ -120,6 +122,7 @@ vi.mock("../../../../src/services/concurrency-guard.js", () => ({
 
 vi.mock("../../../../src/services/logging/schema.js", () => ({
   logStructured: (...args) => logStructuredMock(...args),
+  sha256: (value) => `hash-${value}`,
 }));
 
 vi.mock("../../../../src/dev-logging.js", () => ({
@@ -127,6 +130,10 @@ vi.mock("../../../../src/dev-logging.js", () => ({
   appendUsage: (...args) => appendUsageMock(...args),
   logSanitizerSummary: (...args) => logSanitizerSummaryMock(...args),
   logSanitizerToggle: (...args) => logSanitizerToggleMock(...args),
+}));
+
+vi.mock("../../../../src/dev-trace/raw-capture.js", () => ({
+  appendThinkingRawCapture: (...args) => appendThinkingRawCaptureMock(...args),
 }));
 
 vi.mock("../../../../src/utils.js", async () => {
@@ -192,6 +199,57 @@ describe("responses stream handler", () => {
       })
     );
     expect(createJsonRpcChildAdapterMock).not.toHaveBeenCalled();
+  });
+
+  it("logs tool output summaries when provided", async () => {
+    const transport = { respondToToolCall: vi.fn(() => true) };
+    createJsonRpcChildAdapterMock.mockReturnValueOnce({
+      stdin: { write: vi.fn() },
+      once: vi.fn(),
+      kill: vi.fn(),
+      transport,
+    });
+    normalizeResponsesRequestMock.mockReturnValueOnce({
+      instructions: "",
+      inputItems: [{ type: "text", data: { text: "[user] hi" } }],
+      responseFormat: undefined,
+      finalOutputJsonSchema: undefined,
+      tools: null,
+      toolChoice: undefined,
+      parallelToolCalls: undefined,
+      maxOutputTokens: undefined,
+      toolOutputs: [{ callId: "call_1", output: "ok", success: true, toolName: "lookup" }],
+    });
+
+    const { postResponsesStream } = await import("../../../../src/handlers/responses/stream.js");
+    const req = makeReq({ input: "hello", model: "gpt-5.2", stream: true });
+    const res = makeRes();
+
+    await postResponsesStream(req, res);
+
+    const toolLog = logStructuredMock.mock.calls.find(
+      ([entry]) => entry?.event === "tool_call_output"
+    );
+    expect(toolLog).toBeTruthy();
+    expect(toolLog[1].tool_call_id).toBe("call_1");
+    expect(toolLog[1].tool_name).toBe("lookup");
+  });
+
+  it("captures raw thinking deltas before sanitization", async () => {
+    runNativeResponsesMock.mockImplementationOnce(async ({ onEvent }) => {
+      onEvent({ type: "text_delta", delta: "hello", choiceIndex: 0 });
+    });
+
+    const { postResponsesStream } = await import("../../../../src/handlers/responses/stream.js");
+    const req = makeReq({ input: "hello", model: "gpt-5.2", stream: true });
+    const res = makeRes();
+
+    await postResponsesStream(req, res);
+
+    expect(appendThinkingRawCaptureMock).toHaveBeenCalled();
+    const call = appendThinkingRawCaptureMock.mock.calls[0][0];
+    expect(call.event_type).toBe("text_delta");
+    expect(call.delta).toBe("hello");
   });
 
   it("forwards function tools as dynamicTools on the turn payload", async () => {

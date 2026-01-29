@@ -41,7 +41,7 @@ describe("native responses request normalizer", () => {
         { type: "message", role: "user", content: "Hi" },
       ],
     };
-    const result = normalizeResponsesRequest(body);
+    const result = normalizeResponsesRequest(body, { injectToolInstructions: true });
     const text = result.developerInstructions;
     const toolIndex = text.indexOf("Available tools (schema):");
     const instructionIndex = text.indexOf("Be nice");
@@ -186,6 +186,31 @@ describe("native responses request normalizer", () => {
     expect(result.toolChoice).toBe("none");
   });
 
+  it("allows disabling tool schema injection when requested", () => {
+    const body = {
+      instructions: "Be nice",
+      tools: [
+        {
+          type: "function",
+          name: "lookup_user",
+          parameters: { type: "object", properties: { id: { type: "string" } } },
+        },
+      ],
+      input: [
+        { type: "message", role: "system", content: "System prompt" },
+        { type: "message", role: "developer", content: "Developer prompt" },
+        { type: "message", role: "user", content: "Hi" },
+      ],
+    };
+    const result = normalizeResponsesRequest(body, { injectToolInstructions: false });
+    const text = result.developerInstructions;
+    expect(text).toContain("Be nice");
+    expect(text).toContain("System prompt");
+    expect(text).toContain("Developer prompt");
+    expect(text).not.toContain("Tool calling instructions:");
+    expect(text).not.toContain("Available tools (schema):");
+  });
+
   it("injects tool schema guidance into the transcript when tools are present", () => {
     const body = {
       tools: [
@@ -197,7 +222,7 @@ describe("native responses request normalizer", () => {
       ],
       input: "hi",
     };
-    const result = normalizeResponsesRequest(body);
+    const result = normalizeResponsesRequest(body, { injectToolInstructions: true });
     const text = result.developerInstructions;
     expect(text).toContain("Only emit tool calls using <tool_call>...</tool_call>.");
     expect(text).toContain(

@@ -48,6 +48,9 @@ This folder is the canonical index for repository documentation. Update this fil
 ## Plans (working drafts)
 
 - [`plans/2026-01-25-obsidian-tool-call-simulation-v2.md`](plans/2026-01-25-obsidian-tool-call-simulation-v2.md) — Responses tool-call simulation v2 implementation plan
+- [`plans/2026-01-29-logging-gaps-full-tracing-design.md`](plans/2026-01-29-logging-gaps-full-tracing-design.md) — Dev-only raw capture design for `/v1/responses`
+- [`plans/2026-01-29-logging-gaps-full-tracing-plan.md`](plans/2026-01-29-logging-gaps-full-tracing-plan.md) — Implementation plan for full tracing gaps
+- [`plans/2026-01-29-responses-xml-tool-calls-design.md`](plans/2026-01-29-responses-xml-tool-calls-design.md) — Default to native tool calls, opt-in XML parsing
 
 ## Internal docs (not published)
 

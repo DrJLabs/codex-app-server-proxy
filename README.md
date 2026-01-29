@@ -84,7 +84,13 @@ For production requirements (Traefik, Codex HOME, auth), see [docs/deployment/pr
 | `PROXY_OUTPUT_MODE`           | `obsidian-xml`       | Default output mode for `/v1/chat/completions`                          |
 | `PROXY_RESPONSES_OUTPUT_MODE` | `openai-json`        | Default output mode for `/v1/responses`                                 |
 
+Legacy XML tool-call parsing for `/v1/responses` can be enabled with `PROXY_RESPONSES_XML_TOOL_CALLS=true` (default `false`).
+
 Full configuration and defaults: [docs/configuration.md](docs/configuration.md).
+
+### Dev-only raw capture
+
+For deeper tracing in dev, enable `PROXY_CAPTURE_APP_SERVER_RAW=true` (app-server JSON-RPC) and/or `PROXY_CAPTURE_THINKING_RAW=true` (pre-sanitized deltas). See [docs/configuration.md](docs/configuration.md) and [docs/dev/logging-schema.md](docs/dev/logging-schema.md).
 
 ## Optional external references
 

@@ -3,9 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const appendProtoEventMock = vi.fn();
 const sanitizeRpcPayloadMock = vi.fn((payload) => ({ sanitized: payload }));
 const ensureReqIdMock = vi.fn(() => "req-123");
+const appendAppServerRawCaptureMock = vi.fn();
 
 vi.mock("../../src/dev-logging.js", () => ({
   appendProtoEvent: (...args) => appendProtoEventMock(...args),
+}));
+
+vi.mock("../../src/dev-trace/raw-capture.js", () => ({
+  appendAppServerRawCapture: (...args) => appendAppServerRawCaptureMock(...args),
 }));
 
 vi.mock("../../src/dev-trace/sanitize.js", () => ({
@@ -37,7 +42,7 @@ describe("dev-trace backend logging", () => {
     const { logBackendSubmission } = await importTargets();
 
     logBackendSubmission(
-      { reqId: "req-1", route: "/v1/chat", mode: "chat" },
+      { reqId: "req-1", route: "/v1/chat", mode: "chat", trace_id: "trace-1" },
       {
         rpcId: 2,
         method: "sendUserTurn",
@@ -51,6 +56,7 @@ describe("dev-trace backend logging", () => {
     expect(payload.rpc_id).toBe(2);
     expect(payload.payload).toEqual({ sanitized: { message: "hi" } });
     expect(payload.req_id).toBe("req-1");
+    expect(payload.trace_id).toBe("trace-1");
   });
 
   it("logs responses as rpc_response or rpc_error", async () => {
@@ -68,7 +74,7 @@ describe("dev-trace backend logging", () => {
     const { logBackendNotification } = await importTargets();
 
     logBackendNotification(
-      { reqId: "req-4" },
+      { reqId: "req-4", trace_id: "trace-4", copilot_trace_id: "copilot-4" },
       {
         method: "codex/event/tool",
         params: { msg: { tool_calls: [{ id: "tool-1" }] } },
@@ -78,6 +84,8 @@ describe("dev-trace backend logging", () => {
     expect(appendProtoEventMock).toHaveBeenCalledTimes(2);
     expect(appendProtoEventMock.mock.calls[0][0].kind).toBe("rpc_notification");
     expect(appendProtoEventMock.mock.calls[1][0].kind).toBe("tool_block");
+    expect(appendProtoEventMock.mock.calls[0][0].trace_id).toBe("trace-4");
+    expect(appendProtoEventMock.mock.calls[0][0].copilot_trace_id).toBe("copilot-4");
   });
 
   it("logs notification without tool payloads once", async () => {
@@ -104,9 +112,34 @@ describe("dev-trace backend logging", () => {
     const { traceFromResponse } = await importTargets();
 
     expect(traceFromResponse(null)).toEqual({});
-    const res = { locals: { httpRoute: "/v1/chat", mode: "chat" } };
+    const res = {
+      locals: { httpRoute: "/v1/chat", mode: "chat", trace_id: "trace-123", copilot_trace_id: "c" },
+    };
     const trace = traceFromResponse(res);
 
-    expect(trace).toEqual({ reqId: "req-123", route: "/v1/chat", mode: "chat" });
+    expect(trace).toEqual({
+      reqId: "req-123",
+      route: "/v1/chat",
+      mode: "chat",
+      trace_id: "trace-123",
+      copilot_trace_id: "c",
+    });
+  });
+
+  it("captures app-server raw payloads for responses route", async () => {
+    const { logBackendSubmission } = await importTargets();
+
+    logBackendSubmission(
+      { reqId: "req-7", route: "/v1/responses", mode: "responses_stream" },
+      {
+        rpcId: 9,
+        method: "sendUserTurn",
+        params: { input: "hi" },
+      }
+    );
+
+    expect(appendAppServerRawCaptureMock).toHaveBeenCalledTimes(1);
+    expect(appendAppServerRawCaptureMock.mock.calls[0][0].req_id).toBe("req-7");
+    expect(appendAppServerRawCaptureMock.mock.calls[0][0].payload).toEqual({ input: "hi" });
   });
 });

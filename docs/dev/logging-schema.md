@@ -35,6 +35,12 @@ Sampling: none; every worker lifecycle transition and request is logged. Rotatio
 - Raw captures still redact secret headers (authorization, API keys, cookies).
 - Each capture includes `metadata.proxy_trace_id` to correlate with structured logs.
 
+## Dev-only raw capture streams
+
+- App-server JSON-RPC raw capture (dev-only): `PROXY_CAPTURE_APP_SERVER_RAW=true` writes NDJSON to `PROXY_CAPTURE_APP_SERVER_RAW_DIR` (default `test-results/app-server/raw/app-server-raw.ndjson`).
+- Raw thinking capture (dev-only): `PROXY_CAPTURE_THINKING_RAW=true` writes NDJSON to `PROXY_CAPTURE_THINKING_RAW_DIR` (default `test-results/responses-copilot/raw-thinking/responses-thinking-raw.ndjson`).
+- Both are gated by `PROXY_ENV=dev` and include `req_id`, `trace_id`, and `copilot_trace_id` for correlation.
+
 ## Example
 
 ```json

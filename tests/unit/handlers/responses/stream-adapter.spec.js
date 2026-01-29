@@ -426,43 +426,55 @@ describe("responses stream adapter", () => {
   });
 
   it("parses <tool_call> blocks from text deltas", async () => {
+    const previous = process.env.PROXY_RESPONSES_XML_TOOL_CALLS;
+    process.env.PROXY_RESPONSES_XML_TOOL_CALLS = "true";
+    vi.resetModules();
     const { createResponsesStreamAdapter } = await import(
       "../../../../src/handlers/responses/stream-adapter.js"
     );
 
-    const res = buildRes();
-    const adapter = createResponsesStreamAdapter(res, {
-      model: "gpt-test",
-      tools: [{ type: "function", name: "search", parameters: {} }],
-    });
+    try {
+      const res = buildRes();
+      const adapter = createResponsesStreamAdapter(res, {
+        model: "gpt-test",
+        tools: [{ type: "function", name: "search", parameters: {} }],
+      });
 
-    adapter.handleEvent({
-      type: "text_delta",
-      delta: 'Hi <tool_call>{"name":"search","arguments":"{\\"query\\":\\"x\\"}"}</tool_call> ok',
-      choiceIndex: 0,
-    });
-    await adapter.finalize();
-    await waitForWrites();
+      adapter.handleEvent({
+        type: "text_delta",
+        delta: 'Hi <tool_call>{"name":"search","arguments":"{\\"query\\":\\"x\\"}"}</tool_call> ok',
+        choiceIndex: 0,
+      });
+      await adapter.finalize();
+      await waitForWrites();
 
-    const entries = parseSSE(res.chunks.join(""));
-    const output = entries
-      .filter((entry) => entry.event === "response.output_text.delta")
-      .map((entry) => entry.data.delta)
-      .join("");
-    expect(output).toBe("Hi  ok");
+      const entries = parseSSE(res.chunks.join(""));
+      const output = entries
+        .filter((entry) => entry.event === "response.output_text.delta")
+        .map((entry) => entry.data.delta)
+        .join("");
+      expect(output).toBe("Hi  ok");
 
-    const events = entries.map((entry) => entry.event).filter(Boolean);
-    const addedIndex = events.indexOf("response.output_item.added");
-    const doneIndex = events.indexOf("response.function_call_arguments.done");
-    const outputDoneIndex = events.indexOf("response.output_item.done");
+      const events = entries.map((entry) => entry.event).filter(Boolean);
+      const addedIndex = events.indexOf("response.output_item.added");
+      const doneIndex = events.indexOf("response.function_call_arguments.done");
+      const outputDoneIndex = events.indexOf("response.output_item.done");
 
-    expect(addedIndex).toBeGreaterThan(-1);
-    expect(doneIndex).toBeGreaterThan(addedIndex);
-    expect(outputDoneIndex).toBeGreaterThan(doneIndex);
+      expect(addedIndex).toBeGreaterThan(-1);
+      expect(doneIndex).toBeGreaterThan(addedIndex);
+      expect(outputDoneIndex).toBeGreaterThan(doneIndex);
 
-    const added = entries.find((entry) => entry.event === "response.output_item.added");
-    expect(added?.data?.item?.type).toBe("function_call");
-    expect(added?.data?.item?.name).toBe("search");
+      const added = entries.find((entry) => entry.event === "response.output_item.added");
+      expect(added?.data?.item?.type).toBe("function_call");
+      expect(added?.data?.item?.name).toBe("search");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.PROXY_RESPONSES_XML_TOOL_CALLS;
+      } else {
+        process.env.PROXY_RESPONSES_XML_TOOL_CALLS = previous;
+      }
+      vi.resetModules();
+    }
   });
 
   it("keeps <tool_call> blocks as text without tool definitions", async () => {

@@ -51,6 +51,12 @@ Codex CLI reads `config.toml` and `AGENTS.md` from `CODEX_HOME`.
 | `PROXY_TEST_ENDPOINTS` | `false` | Enable `__test/*` endpoints (dev/CI only) |
 | `PROXY_TEST_ALLOW_REMOTE` | `false` | Allow `__test/*` from non-loopback |
 
+## Responses tool calling
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PROXY_RESPONSES_XML_TOOL_CALLS` | `false` | When `true`, injects `<tool_call>` guidance into `/v1/responses` developer instructions and enables XML tool-call parsing; keep `false` to rely on native `tool_calls` from app-server. |
+
 ## CORS
 
 | Variable | Default | Purpose |
@@ -62,6 +68,19 @@ Codex CLI reads `config.toml` and `AGENTS.md` from `CODEX_HOME`.
 
 - Metrics: set `PROXY_ENABLE_METRICS=true` to expose `/metrics` (access is restricted by default; see [`../src/routes/metrics.js`](../src/routes/metrics.js)).
 - Tracing: set `PROXY_ENABLE_OTEL=true` and `PROXY_OTEL_EXPORTER_URL` (or `OTEL_EXPORTER_OTLP_ENDPOINT`) to emit spans (see [`../src/services/tracing.js`](../src/services/tracing.js)).
+
+## Dev-only raw capture (responses)
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PROXY_CAPTURE_APP_SERVER_RAW` | `false` | Capture app-server JSON-RPC payloads (dev-only) |
+| `PROXY_CAPTURE_APP_SERVER_RAW_DIR` | `test-results/app-server/raw` | Directory for app-server raw NDJSON |
+| `PROXY_CAPTURE_APP_SERVER_RAW_MAX_BYTES` | `262144` | Per-record size guard for raw payloads |
+| `PROXY_CAPTURE_THINKING_RAW` | `false` | Capture pre-sanitized response deltas (dev-only) |
+| `PROXY_CAPTURE_THINKING_RAW_DIR` | `test-results/responses-copilot/raw-thinking` | Directory for raw thinking NDJSON |
+| `PROXY_CAPTURE_THINKING_RAW_MAX_BYTES` | `262144` | Per-record size guard for thinking capture |
+
+These captures are only active when `PROXY_ENV=dev`.
 
 ## Further reference
 

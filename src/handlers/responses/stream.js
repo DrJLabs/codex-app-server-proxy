@@ -20,7 +20,7 @@ import { mapTransportError } from "../../services/transport/index.js";
 import { createResponsesStreamAdapter } from "./stream-adapter.js";
 import { createStreamMetadataSanitizer } from "../chat/stream-metadata-sanitizer.js";
 import { applyGuardHeaders, setupStreamGuard } from "../../services/concurrency-guard.js";
-import { logStructured } from "../../services/logging/schema.js";
+import { logStructured, sha256 } from "../../services/logging/schema.js";
 import {
   extractMetadataFromPayload,
   metadataKeys,
@@ -33,6 +33,7 @@ import {
   logSanitizerSummary,
   logSanitizerToggle,
 } from "../../dev-logging.js";
+import { appendThinkingRawCapture } from "../../dev-trace/raw-capture.js";
 import { applyCors as applyCorsUtil, normalizeModel } from "../../utils.js";
 import { acceptedModelIds } from "../../config/models.js";
 import { setSSEHeaders, computeKeepaliveMs, startKeepalives } from "../../services/sse.js";
@@ -85,6 +86,24 @@ const respondToToolOutputs = (child, toolOutputs, { reqId, route, mode } = {}) =
   toolOutputs.forEach((toolOutput) => {
     const callId = toolOutput?.callId;
     if (!callId) return;
+    const outputText = toolOutput?.output ?? "";
+    const outputBytes = Buffer.byteLength(String(outputText), "utf8");
+    logStructured(
+      {
+        component: "responses",
+        event: "tool_call_output",
+        level: "debug",
+        req_id: reqId,
+        route,
+        mode,
+      },
+      {
+        tool_call_id: callId,
+        tool_name: toolOutput?.toolName ?? null,
+        tool_output_bytes: outputBytes,
+        tool_output_hash: sha256(outputText),
+      }
+    );
     const ok = transport.respondToToolCall(callId, {
       output: toolOutput.output,
       success: toolOutput.success,
@@ -195,7 +214,9 @@ export async function postResponsesStream(req, res) {
 
   let normalized;
   try {
-    normalized = normalizeResponsesRequest(originalBody);
+    normalized = normalizeResponsesRequest(originalBody, {
+      injectToolInstructions: CFG.PROXY_RESPONSES_XML_TOOL_CALLS,
+    });
   } catch (err) {
     if (err instanceof ResponsesJsonRpcNormalizationError) {
       applyCors(req, res);
@@ -235,7 +256,6 @@ export async function postResponsesStream(req, res) {
   );
 
   const { nativeTools, functionTools } = splitResponsesTools(normalized.tools);
-  const toolDefinitions = nativeTools.concat(functionTools);
   const capabilityCheck = await ensureResponsesCapabilities({
     toolsRequested: nativeTools.length > 0 || functionTools.length > 0,
   });
@@ -332,7 +352,13 @@ export async function postResponsesStream(req, res) {
     reqId,
     timeoutMs: REQ_TIMEOUT_MS,
     normalizedRequest,
-    trace: { reqId, route, mode },
+    trace: {
+      reqId,
+      route,
+      mode,
+      trace_id: locals.trace_id || null,
+      copilot_trace_id: locals.copilot_trace_id || null,
+    },
   });
   respondToToolOutputs(child, normalized.toolOutputs, { reqId, route, mode });
 
@@ -437,6 +463,14 @@ export async function postResponsesStream(req, res) {
     const choiceIndex = Number.isInteger(event.choiceIndex) ? event.choiceIndex : 0;
     if (event.type === "text_delta") {
       const delta = event.delta;
+      appendThinkingRawCapture({
+        req_id: reqId,
+        trace_id: res.locals?.trace_id || null,
+        copilot_trace_id: res.locals?.copilot_trace_id || null,
+        event_type: "text_delta",
+        delta,
+        metadata_info: event.metadataInfo ?? null,
+      });
       if (SANITIZE_METADATA) {
         enqueueSanitizedSegment(
           delta,
@@ -451,6 +485,14 @@ export async function postResponsesStream(req, res) {
     }
     if (event.type === "text") {
       const text = event.text;
+      appendThinkingRawCapture({
+        req_id: reqId,
+        trace_id: res.locals?.trace_id || null,
+        copilot_trace_id: res.locals?.copilot_trace_id || null,
+        event_type: "text",
+        delta: text,
+        metadata_info: event.metadataInfo ?? null,
+      });
       if (SANITIZE_METADATA) {
         enqueueSanitizedSegment(
           text,

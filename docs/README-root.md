@@ -86,6 +86,10 @@ For production requirements (Traefik, Codex HOME, auth), see [docs/deployment/pr
 
 Full configuration and defaults: [docs/configuration.md](configuration.md).
 
+### Dev-only raw capture
+
+For deeper tracing in dev, enable `PROXY_CAPTURE_APP_SERVER_RAW=true` (app-server JSON-RPC) and/or `PROXY_CAPTURE_THINKING_RAW=true` (pre-sanitized deltas). See [docs/configuration.md](configuration.md) and [docs/dev/logging-schema.md](dev/logging-schema.md).
+
 ## Optional external references
 
 If you want local copies of upstream Codex or Obsidian Copilot for compatibility checks,
@@ -121,6 +125,9 @@ See [external/README.md](../external/README.md) for details.
 - [docs/reference/app-server-schema-0.89-tools.md](reference/app-server-schema-0.89-tools.md) - app-server tools schema
 - [docs/logging-gaps/README.md](logging-gaps/README.md) - observability gap tracker
 - [docs/plans/2026-01-25-obsidian-tool-call-simulation-v2.md](plans/2026-01-25-obsidian-tool-call-simulation-v2.md) - tool-call simulation v2 plan
+- [docs/plans/2026-01-29-logging-gaps-full-tracing-design.md](plans/2026-01-29-logging-gaps-full-tracing-design.md) - dev-only raw capture design for responses
+- [docs/plans/2026-01-29-logging-gaps-full-tracing-plan.md](plans/2026-01-29-logging-gaps-full-tracing-plan.md) - full tracing implementation plan
+- [docs/plans/2026-01-29-responses-xml-tool-calls-design.md](plans/2026-01-29-responses-xml-tool-calls-design.md) - XML tool-call gating design
 
 ## Contributing
 

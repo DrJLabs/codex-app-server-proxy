@@ -87,6 +87,24 @@ const respondToToolOutputs = (child, toolOutputs, { reqId, route, mode } = {}) =
   toolOutputs.forEach((toolOutput) => {
     const callId = toolOutput?.callId;
     if (!callId) return;
+    const outputText = toolOutput?.output ?? "";
+    const outputBytes = Buffer.byteLength(String(outputText), "utf8");
+    logStructured(
+      {
+        component: "responses",
+        event: "tool_call_output",
+        level: "debug",
+        req_id: reqId,
+        route,
+        mode,
+      },
+      {
+        tool_call_id: callId,
+        tool_name: toolOutput?.toolName ?? null,
+        tool_output_bytes: outputBytes,
+        tool_output_hash: sha256(outputText),
+      }
+    );
     const ok = transport.respondToToolCall(callId, {
       output: toolOutput.output,
       success: toolOutput.success,
@@ -270,7 +288,9 @@ export async function postResponsesNonStream(req, res) {
 
   let normalized;
   try {
-    normalized = normalizeResponsesRequest(originalBody);
+    normalized = normalizeResponsesRequest(originalBody, {
+      injectToolInstructions: CFG.PROXY_RESPONSES_XML_TOOL_CALLS,
+    });
   } catch (err) {
     if (err instanceof ResponsesJsonRpcNormalizationError) {
       applyCors(req, res);
@@ -310,7 +330,6 @@ export async function postResponsesNonStream(req, res) {
   );
 
   const { nativeTools, functionTools } = splitResponsesTools(normalized.tools);
-  const toolDefinitions = nativeTools.concat(functionTools);
   const capabilityCheck = await ensureResponsesCapabilities({
     toolsRequested: nativeTools.length > 0 || functionTools.length > 0,
   });
@@ -379,7 +398,13 @@ export async function postResponsesNonStream(req, res) {
     reqId,
     timeoutMs: REQ_TIMEOUT_MS,
     normalizedRequest,
-    trace: { reqId, route: "/v1/responses", mode: "responses_nonstream" },
+    trace: {
+      reqId,
+      route: "/v1/responses",
+      mode: "responses_nonstream",
+      trace_id: locals.trace_id || null,
+      copilot_trace_id: locals.copilot_trace_id || null,
+    },
   });
   respondToToolOutputs(child, normalized.toolOutputs, {
     reqId,
