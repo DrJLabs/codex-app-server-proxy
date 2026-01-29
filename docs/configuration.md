@@ -51,12 +51,6 @@ Codex CLI reads `config.toml` and `AGENTS.md` from `CODEX_HOME`.
 | `PROXY_TEST_ENDPOINTS` | `false` | Enable `__test/*` endpoints (dev/CI only) |
 | `PROXY_TEST_ALLOW_REMOTE` | `false` | Allow `__test/*` from non-loopback |
 
-## Responses tool calling
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `PROXY_RESPONSES_XML_TOOL_CALLS` | `false` | When `true`, injects `<tool_call>` guidance into `/v1/responses` developer instructions and enables XML tool-call parsing; keep `false` to rely on native `tool_calls` from app-server. |
-
 ## CORS
 
 | Variable | Default | Purpose |

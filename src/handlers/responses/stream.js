@@ -214,9 +214,7 @@ export async function postResponsesStream(req, res) {
 
   let normalized;
   try {
-    normalized = normalizeResponsesRequest(originalBody, {
-      injectToolInstructions: CFG.PROXY_RESPONSES_XML_TOOL_CALLS,
-    });
+    normalized = normalizeResponsesRequest(originalBody);
   } catch (err) {
     if (err instanceof ResponsesJsonRpcNormalizationError) {
       applyCors(req, res);

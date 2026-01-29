@@ -127,7 +127,6 @@ See [external/README.md](../external/README.md) for details.
 - [docs/plans/2026-01-25-obsidian-tool-call-simulation-v2.md](plans/2026-01-25-obsidian-tool-call-simulation-v2.md) - tool-call simulation v2 plan
 - [docs/plans/2026-01-29-logging-gaps-full-tracing-design.md](plans/2026-01-29-logging-gaps-full-tracing-design.md) - dev-only raw capture design for responses
 - [docs/plans/2026-01-29-logging-gaps-full-tracing-plan.md](plans/2026-01-29-logging-gaps-full-tracing-plan.md) - full tracing implementation plan
-- [docs/plans/2026-01-29-responses-xml-tool-calls-design.md](plans/2026-01-29-responses-xml-tool-calls-design.md) - XML tool-call gating design
 
 ## Contributing
 

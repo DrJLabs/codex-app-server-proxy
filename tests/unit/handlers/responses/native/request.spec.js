@@ -25,7 +25,7 @@ describe("native responses request normalizer", () => {
     expect(result.inputItems).toEqual([{ type: "text", data: { text: "[user] Hi" } }]);
   });
 
-  it("orders developerInstructions with tool schema first", () => {
+  it("keeps developer instructions without tool schema injection", () => {
     const body = {
       instructions: "Be nice",
       tools: [
@@ -41,15 +41,12 @@ describe("native responses request normalizer", () => {
         { type: "message", role: "user", content: "Hi" },
       ],
     };
-    const result = normalizeResponsesRequest(body, { injectToolInstructions: true });
+    const result = normalizeResponsesRequest(body);
     const text = result.developerInstructions;
-    const toolIndex = text.indexOf("Available tools (schema):");
-    const instructionIndex = text.indexOf("Be nice");
-    const systemIndex = text.indexOf("System prompt");
-    expect(toolIndex).toBeGreaterThanOrEqual(0);
-    expect(instructionIndex).toBeGreaterThan(toolIndex);
-    expect(systemIndex).toBeGreaterThan(instructionIndex);
+    expect(text).toContain("Be nice");
+    expect(text).toContain("System prompt");
     expect(text).toContain("Developer prompt");
+    expect(text).not.toContain("Tool calling instructions:");
   });
 
   it("flattens message and function_call_output items", () => {
@@ -184,88 +181,6 @@ describe("native responses request normalizer", () => {
     };
     const result = normalizeResponsesRequest(body);
     expect(result.toolChoice).toBe("none");
-  });
-
-  it("allows disabling tool schema injection when requested", () => {
-    const body = {
-      instructions: "Be nice",
-      tools: [
-        {
-          type: "function",
-          name: "lookup_user",
-          parameters: { type: "object", properties: { id: { type: "string" } } },
-        },
-      ],
-      input: [
-        { type: "message", role: "system", content: "System prompt" },
-        { type: "message", role: "developer", content: "Developer prompt" },
-        { type: "message", role: "user", content: "Hi" },
-      ],
-    };
-    const result = normalizeResponsesRequest(body, { injectToolInstructions: false });
-    const text = result.developerInstructions;
-    expect(text).toContain("Be nice");
-    expect(text).toContain("System prompt");
-    expect(text).toContain("Developer prompt");
-    expect(text).not.toContain("Tool calling instructions:");
-    expect(text).not.toContain("Available tools (schema):");
-  });
-
-  it("injects tool schema guidance into the transcript when tools are present", () => {
-    const body = {
-      tools: [
-        {
-          type: "function",
-          name: "lookup_user",
-          parameters: { type: "object", properties: { id: { type: "string" } } },
-        },
-      ],
-      input: "hi",
-    };
-    const result = normalizeResponsesRequest(body, { injectToolInstructions: true });
-    const text = result.developerInstructions;
-    expect(text).toContain("Only emit tool calls using <tool_call>...</tool_call>.");
-    expect(text).toContain(
-      'Inside <tool_call>...</tool_call>, output ONLY a JSON object with keys "name" and "arguments".'
-    );
-    expect(text).toContain(
-      "Always emit <tool_call> blocks exactly as shown; the client executes them."
-    );
-    expect(text).toContain(
-      "Do NOT call internal tools directly (shell, apply_patch, web_search, view_image); only emit <tool_call>."
-    );
-    expect(text).toContain(
-      "Read-only sandbox or approval restrictions do NOT prevent emitting <tool_call> output."
-    );
-    expect(text).toContain(
-      "Use EXACT parameter names from the schema; do NOT invent or rename keys."
-    );
-    expect(text).toContain(
-      'Do not add any extra characters before or after the JSON (no trailing ">", no code fences).'
-    );
-    expect(text).toContain("Use exactly one opening <tool_call> and one closing </tool_call> tag.");
-    expect(text).toContain(
-      "Output must be valid JSON. Do not add extra braces or trailing characters."
-    );
-    expect(text).toContain(
-      'Do NOT wrap the JSON object in an array (no leading "[" or trailing "]").'
-    );
-    expect(text).toContain('Bad: <tool_call>[{"name":"tool","arguments":"{...}"}]</tool_call>');
-    expect(text).toContain("Never repeat the closing tag.");
-    expect(text).toContain(
-      'Example (exact): <tool_call>{"name":"webSearch","arguments":"{\\"query\\":\\"example\\",\\"chatHistory\\":[]}"}</tool_call>'
-    );
-    expect(text).toContain('If a tool has no parameters, use arguments "{}".');
-    expect(text).toContain("Available tools (schema):");
-    expect(text).toContain("Per-tool guidance and examples (schema-conformant):");
-    expect(text).toContain("Tool: lookup_user");
-    expect(text).toContain("Parameters:");
-    expect(text).toContain("- id (optional, string)");
-    expect(text).toContain("Example tool_call:");
-    expect(text).toContain("lookup_user");
-    expect(text).toContain('"type":"object"');
-    expect(text).toContain("If no tool is needed, respond with plain text.");
-    expect(result.inputItems[0].data.text).toContain("[user] hi");
   });
 
   it("rejects unsupported input item types", () => {
