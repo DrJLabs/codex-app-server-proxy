@@ -42,6 +42,8 @@ This folder is the canonical index for repository documentation. Update this fil
 ## Deep dives and backlogs
 
 - [`logging-gaps/README.md`](logging-gaps/README.md) — observability gap tracker
+- [`api-v2-migration/client-to-app-server.md`](api-v2-migration/client-to-app-server.md) — `/v1/responses` openai-json ingress -> JSON-RPC handoff trace
+- [`api-v2-migration/app-server-to-client.md`](api-v2-migration/app-server-to-client.md) — app-server tool request/output -> client response reverse trace
 
 ## Plans (working drafts)
 

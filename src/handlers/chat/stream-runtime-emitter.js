@@ -64,6 +64,8 @@ export const createStreamRuntimeEmitter = ({
         }
         if (!isObsidianOutput || state.textualToolContentSeen) {
           state.forwardedToolCount = snapshot.length;
+          // FIX: Explicitly schedule stop for native JSON mode since aggregator is bypassed
+          scheduleStopAfterTools(choiceIndex);
         } else if (!hasTextualToolPrefix(state, textDelta)) {
           emitAggregatorToolContent(choiceIndex, snapshot);
         }
@@ -158,6 +160,8 @@ export const createStreamRuntimeEmitter = ({
       const text = coerceAssistantContent(finalMessage.content ?? finalMessage.text ?? "");
       if (!isObsidianOutput || state.textualToolContentSeen) {
         state.forwardedToolCount = snapshot.length;
+        // FIX: Explicitly schedule stop for native JSON mode since aggregator is bypassed
+        scheduleStopAfterTools(choiceIndex);
       } else if (!hasTextualToolPrefix(state, text)) {
         emitAggregatorToolContent(choiceIndex, snapshot);
       }

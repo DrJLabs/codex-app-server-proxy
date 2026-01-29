@@ -23,3 +23,5 @@ Upgrade the proxy to speak **Codex app-server protocol API V2** end-to-end (not 
 4. [04_streaming_notifications_v2_events_and_tool_calls.md](04_streaming_notifications_v2_events_and_tool_calls.md)
 5. [05_responses_output_normalization_v2_parity.md](05_responses_output_normalization_v2_parity.md)
 6. [06_error_mapping_auth_and_completion_semantics_updated.md](06_error_mapping_auth_and_completion_semantics_updated.md)
+7. [client-to-app-server.md](client-to-app-server.md)
+8. [app-server-to-client.md](app-server-to-client.md)
