@@ -468,4 +468,64 @@ describe("responses nonstream handler", () => {
       },
     ]);
   });
+
+  it("requests atomic dynamic tool calls for nonstream responses", async () => {
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    const callArgs = runNativeResponsesMock.mock.calls[0]?.[0];
+    expect(callArgs?.dynamicToolCallMode).toBe("atomic");
+  });
+
+  it("ingests dynamic tool calls from atomic events", async () => {
+    const ingestMessage = vi.fn();
+    createToolCallAggregatorMock.mockReturnValueOnce({
+      ingestDelta: vi.fn(),
+      ingestMessage,
+      snapshot: vi.fn(() => []),
+    });
+    runNativeResponsesMock.mockImplementationOnce(async ({ onEvent }) => {
+      onEvent({
+        type: "dynamic_tool_call",
+        choiceIndex: 0,
+        messagePayload: { tool: "lookup", arguments: { id: 1 }, callId: "call_dyn_1" },
+        toolCallDelta: {
+          tool_calls: [
+            {
+              id: "call_dyn_1",
+              type: "function",
+              function: { name: "lookup", arguments: '{"id":1}' },
+            },
+          ],
+        },
+      });
+      onEvent({ type: "finish", reason: "tool_calls", trigger: "dynamic_tool_call" });
+    });
+
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    expect(ingestMessage).toHaveBeenCalledWith(
+      {
+        tool_calls: [
+          {
+            id: "call_dyn_1",
+            type: "function",
+            function: { name: "lookup", arguments: '{"id":1}' },
+          },
+        ],
+      },
+      { choiceIndex: 0, emitIfMissing: true }
+    );
+  });
 });

@@ -85,6 +85,16 @@ export const createStreamEventRouter = ({
           });
         }
       }
+      if (dynamicToolCallMode === "atomic") {
+        if (canTrackFinish) {
+          trackFinishReason("tool_calls", "dynamic_tool_call");
+        }
+        if (typeof emitFinishChunk === "function") emitFinishChunk("tool_calls");
+        if (typeof finalizeStream === "function") {
+          finalizeStream({ reason: "tool_calls", trigger: "dynamic_tool_call" });
+        }
+        return { handled: true, stop: true };
+      }
       return { handled: true };
     }
     if (

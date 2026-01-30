@@ -161,4 +161,45 @@ describe("stream event router", () => {
       })
     );
   });
+
+  it("stops stream on atomic dynamic tool call requests", () => {
+    const handleParsedEvent = vi.fn();
+    const trackFinishReason = vi.fn();
+    const emitFinishChunk = vi.fn();
+    const finalizeStream = vi.fn();
+    const router = createStreamEventRouter({
+      parseStreamEventLine: () => ({
+        type: "dynamic_tool_call_request",
+        payload: {},
+        params: {},
+        messagePayload: { tool: "lookup", arguments: { id: 1 }, callId: "call_1" },
+      }),
+      sanitizeMetadata: false,
+      handleParsedEvent,
+      trackToolSignals: vi.fn(),
+      extractFinishReasonFromMessage: vi.fn(),
+      trackFinishReason,
+      updateUsageCounts: vi.fn(),
+      mergeMetadataInfo: vi.fn(),
+      recordSanitizedMetadata: vi.fn(),
+      shouldDropFunctionCallOutput: vi.fn(),
+      getUsageTrigger: () => null,
+      markUsageTriggerIfMissing: vi.fn(),
+      hasAnyChoiceSent: () => true,
+      hasLengthEvidence: () => false,
+      emitFinishChunk,
+      finalizeStream,
+      dynamicToolCallMode: "atomic",
+    });
+
+    const result = router.handleLine('{"type":"dynamic_tool_call_request"}');
+
+    expect(result?.stop).toBe(true);
+    expect(trackFinishReason).toHaveBeenCalledWith("tool_calls", "dynamic_tool_call");
+    expect(emitFinishChunk).toHaveBeenCalledWith("tool_calls");
+    expect(finalizeStream).toHaveBeenCalledWith({
+      reason: "tool_calls",
+      trigger: "dynamic_tool_call",
+    });
+  });
 });

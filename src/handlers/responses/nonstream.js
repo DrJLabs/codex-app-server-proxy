@@ -40,7 +40,10 @@ import {
 } from "../../lib/metadata-sanitizer.js";
 import { normalizeModel, applyCors as applyCorsUtil } from "../../utils.js";
 import { acceptedModelIds } from "../../config/models.js";
-import { buildDynamicTools } from "../../lib/tools/dynamic-tools.js";
+import {
+  buildDynamicTools,
+  buildToolCallDeltaFromDynamicRequest,
+} from "../../lib/tools/dynamic-tools.js";
 
 const DEFAULT_MODEL = CFG.CODEX_MODEL;
 const ACCEPTED_MODEL_IDS = acceptedModelIds(DEFAULT_MODEL);
@@ -580,6 +583,18 @@ export async function postResponsesNonStream(req, res) {
       appendChoiceText(textParts, choiceIndex, sanitized);
       return;
     }
+    if (event.type === "dynamic_tool_call") {
+      const payload = event.messagePayload || event.payload?.msg || event.payload;
+      const delta =
+        event.toolCallDelta || buildToolCallDeltaFromDynamicRequest(payload || event.payload);
+      if (delta?.tool_calls?.length) {
+        toolCallAggregator.ingestMessage(
+          { tool_calls: delta.tool_calls },
+          { choiceIndex, emitIfMissing: true }
+        );
+      }
+      return;
+    }
     if (event.type === "tool_calls_delta") {
       if (Array.isArray(event.tool_calls)) {
         toolCallAggregator.ingestDelta({ tool_calls: event.tool_calls }, { choiceIndex });
@@ -651,6 +666,7 @@ export async function postResponsesNonStream(req, res) {
         onEvent: handleEvent,
         sanitizeMetadata: SANITIZE_METADATA,
         extractMetadataFromPayload,
+        dynamicToolCallMode: "atomic",
       }),
       new Promise((_resolve, reject) => child.once("error", reject)),
     ]);
