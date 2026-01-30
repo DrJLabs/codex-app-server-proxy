@@ -86,6 +86,8 @@ For production requirements (Traefik, Codex HOME, auth), see [docs/deployment/pr
 
 Full configuration and defaults: [docs/configuration.md](docs/configuration.md).
 
+By default, internal Codex tools (shell/apply_patch/etc.) are disabled and only dynamic tool calls are allowed. Set `PROXY_DISABLE_INTERNAL_TOOLS=false` to re-enable them.
+
 ### Dev-only raw capture
 
 For deeper tracing in dev, enable `PROXY_CAPTURE_APP_SERVER_RAW=true` (app-server JSON-RPC) and/or `PROXY_CAPTURE_THINKING_RAW=true` (pre-sanitized deltas). See [docs/configuration.md](docs/configuration.md) and [docs/dev/logging-schema.md](docs/dev/logging-schema.md).

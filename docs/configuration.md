@@ -26,6 +26,7 @@ This proxy is configured via environment variables. Defaults live in [`../src/co
 | `CODEX_HOME` | `$PROJECT/.codex-api` | Codex home/config directory |
 | `CODEX_MODEL` | `gpt-5.2` | Default effective model (proxy also accepts `codex-5*` / `codev-5*`) |
 | `CODEX_FORCE_PROVIDER` | *(empty)* | Force Codex provider (e.g., `chatgpt`) |
+| `PROXY_ENABLE_WEB_SEARCH_REQUEST` | `false` | Force app-server `web_search_request=true` and disable legacy `tools.web_search` |
 
 ### `CODEX_HOME` and `AGENTS.md`
 
@@ -40,6 +41,7 @@ Codex CLI reads `config.toml` and `AGENTS.md` from `CODEX_HOME`.
 | --- | --- | --- |
 | `PROXY_SANDBOX_MODE` | `read-only` | Sandbox policy passed to Codex (`read-only`, `workspace-write`, `danger-full-access`) |
 | `PROXY_CODEX_WORKDIR` | `/tmp/codex-work` | Child working directory (ephemeral writes) |
+| `PROXY_DISABLE_INTERNAL_TOOLS` | `true` | Disable Codex internal tools (shell/apply_patch/etc); only dynamic tool calls are allowed |
 
 ## Endpoint toggles and auth gates
 

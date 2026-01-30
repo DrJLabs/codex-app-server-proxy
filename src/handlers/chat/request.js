@@ -238,6 +238,11 @@ const assertAllowedMessageRoles = (messages) => {
   }
 };
 
+const stripErrorChunks = (text) => {
+  if (!text) return "";
+  return text.replace(/<errorChunk>[\s\S]*?<\/errorChunk>/gi, "").trim();
+};
+
 const buildTranscriptFromMessages = (messages = []) => {
   const relevant = (messages || []).filter((msg) => {
     if (!msg) return false;
@@ -251,16 +256,17 @@ const buildTranscriptFromMessages = (messages = []) => {
   for (const msg of relevant) {
     const role = (msg?.role || "user").toString().toLowerCase();
     const raw = flattenMessageContent(msg?.content).trim();
-    if (!raw) continue;
+    const cleaned = stripErrorChunks(raw);
+    if (!cleaned) continue;
     if (!needsRoleLabels && role === "user") {
-      lines.push(raw);
+      lines.push(cleaned);
       continue;
     }
     let label = role;
     if ((role === "tool" || role === "function") && msg.name) {
       label = `${role}:${String(msg.name).trim()}`;
     }
-    lines.push(`[${label}] ${raw}`);
+    lines.push(`[${label}] ${cleaned}`);
   }
   return lines.join("\n");
 };
@@ -476,6 +482,10 @@ export const normalizeChatJsonRpcRequest = ({
     reasoningEffort,
     body.reasoning
   );
+  const disableInternalTools = CFG.PROXY_DISABLE_INTERNAL_TOOLS;
+  const internalToolsInstruction = disableInternalTools
+    ? "Never use internal tools (shell/exec_command/apply_patch/update_plan/view_image). Request only dynamic tool calls provided by the client."
+    : "";
 
   const turn = {
     model: effectiveModel,
@@ -486,15 +496,22 @@ export const normalizeChatJsonRpcRequest = ({
     effort: turnEffort,
     summary: "auto",
     stream: !!stream,
-    includeApplyPatchTool: true,
+    includeApplyPatchTool: !disableInternalTools,
   };
 
   if (Number.isInteger(choiceCount) && choiceCount > 0) {
     turn.choiceCount = choiceCount;
   }
 
-  if (baseInstructions) {
-    turn.baseInstructions = baseInstructions;
+  if (baseInstructions || internalToolsInstruction) {
+    const mergedBaseInstructions = [baseInstructions, internalToolsInstruction]
+      .filter(Boolean)
+      .join("\n\n");
+    turn.baseInstructions = mergedBaseInstructions;
+  }
+
+  if (internalToolsInstruction) {
+    turn.developerInstructions = internalToolsInstruction;
   }
 
   if (dynamicTools !== undefined) {
