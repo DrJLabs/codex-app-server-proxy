@@ -5,8 +5,6 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   buildInitializeParams,
-  buildAddConversationListenerParams,
-  buildRemoveConversationListenerParams,
   buildThreadStartParams,
   buildTurnStartParams,
 } from "../../src/lib/json-rpc/schema.ts";
@@ -94,18 +92,8 @@ describe("json-rpc payload schema", () => {
       ...normalized.turn,
       threadId: "conv-validator",
     });
-    const addListenerParams = buildAddConversationListenerParams({
-      conversationId: "conv-validator",
-      experimentalRawEvents: false,
-    });
-    const removeListenerParams = buildRemoveConversationListenerParams({
-      subscriptionId: "sub-validator",
-    });
-
     expect(validator.validate("InitializeParams", initializeParams)).toBe(true);
     expect(validator.validate("ThreadStartParams", threadStartParams)).toBe(true);
-    expect(validator.validate("AddConversationListenerParams", addListenerParams)).toBe(true);
-    expect(validator.validate("RemoveConversationListenerParams", removeListenerParams)).toBe(true);
     expect(validator.validate("TurnStartParams", turnParams)).toBe(true);
   });
 });

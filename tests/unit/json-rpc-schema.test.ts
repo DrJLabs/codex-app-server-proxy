@@ -10,8 +10,6 @@ import {
   CODEX_CLI_VERSION,
   JSONRPC_VERSION,
   buildInitializeParams,
-  buildAddConversationListenerParams,
-  buildRemoveConversationListenerParams,
   buildThreadStartParams,
   buildTurnStartParams,
   createUserMessageItem,
@@ -524,20 +522,6 @@ describe("json-rpc schema bindings", () => {
       expect(params.input[0]).toMatchObject({ type: "text", text: "hi" });
       expect(params.input[1]).toMatchObject({ type: "text", text: "hello" });
       expect(params.input[2]).toMatchObject({ type: "text", text: "hey" });
-    });
-
-    it("builds add/remove conversation listener params", () => {
-      const addParams = buildAddConversationListenerParams({
-        conversationId: "conv-abc",
-        experimentalRawEvents: undefined,
-      });
-      expect(addParams.conversationId).toBe("conv-abc");
-      expect(addParams.experimentalRawEvents).toBeUndefined();
-
-      const removeParams = buildRemoveConversationListenerParams({
-        subscriptionId: "sub-123",
-      });
-      expect(removeParams.subscriptionId).toBe("sub-123");
     });
   });
 });

@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   JSONRPC_VERSION,
   createUserMessageItem,
-  buildAddConversationListenerParams,
   buildInitializeParams,
   buildThreadStartParams,
   buildTurnStartParams,
@@ -19,6 +18,7 @@ import {
   isTokenCountNotification,
   normalizeInputItems,
 } from "../../src/lib/json-rpc/schema.ts";
+import * as jsonRpcSchema from "../../src/lib/json-rpc/schema.ts";
 
 describe("json-rpc schema helper behavior", () => {
   it("normalizes input items and falls back to provided text", () => {
@@ -208,6 +208,11 @@ describe("json-rpc schema helper behavior", () => {
     expect(isRequestTimeoutNotification(timeout)).toBe(true);
   });
 
+  it("does not expose legacy listener builders in v2-only schema", () => {
+    expect("buildAddConversationListenerParams" in jsonRpcSchema).toBe(false);
+    expect("buildRemoveConversationListenerParams" in jsonRpcSchema).toBe(false);
+  });
+
   it("accepts valid chat notifications", () => {
     const delta = {
       jsonrpc: JSONRPC_VERSION,
@@ -248,16 +253,5 @@ describe("json-rpc schema helper behavior", () => {
   it("rejects invalid jsonrpc responses", () => {
     expect(isJsonRpcErrorResponse({ jsonrpc: JSONRPC_VERSION, error: {} })).toBe(false);
     expect(isJsonRpcSuccessResponse({ jsonrpc: JSONRPC_VERSION, id: 1 })).toBe(false);
-  });
-
-  it("includes experimentalRawEvents for addConversationListener", () => {
-    const params = buildThreadStartParams({ model: "gpt-5.2" });
-    const listener = buildAddConversationListenerParams({
-      conversationId: "conv-1",
-      experimentalRawEvents: true,
-    });
-
-    expect(params.model).toBe("gpt-5.2");
-    expect(listener.experimentalRawEvents).toBe(true);
   });
 });

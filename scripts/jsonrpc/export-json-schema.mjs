@@ -22,8 +22,6 @@ const settings = {
 const typeNames = [
   "InitializeParams",
   "ThreadStartParams",
-  "AddConversationListenerParams",
-  "RemoveConversationListenerParams",
   "TurnStartParams",
   "AgentMessageDeltaParams",
   "AgentMessageParams",

@@ -13,12 +13,7 @@ export const CODEX_CLI_VERSION = "0.92.0" as const;
 
 export type JsonRpcId = number | string;
 
-export type JsonRpcMethod =
-  | "initialize"
-  | "thread/start"
-  | "addConversationListener"
-  | "removeConversationListener"
-  | "turn/start";
+export type JsonRpcMethod = "initialize" | "thread/start" | "turn/start";
 
 export interface JsonRpcBaseEnvelope {
   jsonrpc: typeof JSONRPC_VERSION;
@@ -139,26 +134,6 @@ export interface TurnStartParams {
   effort?: ReasoningEffort | null;
   summary?: ReasoningSummary | null;
   outputSchema?: JsonValue;
-  [key: string]: unknown;
-}
-
-export interface AddConversationListenerParams {
-  conversationId: string;
-  experimentalRawEvents?: boolean;
-  [key: string]: unknown;
-}
-
-export interface AddConversationListenerResult {
-  subscriptionId: string;
-  [key: string]: unknown;
-}
-
-export interface RemoveConversationListenerParams {
-  subscriptionId: string;
-  [key: string]: unknown;
-}
-
-export interface RemoveConversationListenerResult {
   [key: string]: unknown;
 }
 
@@ -719,26 +694,6 @@ export function isJsonRpcSuccessResponse<Result>(
   if (value.jsonrpc !== JSONRPC_VERSION) return false;
   if (!Object.prototype.hasOwnProperty.call(value, "result")) return false;
   return true;
-}
-
-export function buildAddConversationListenerParams(
-  options: AddConversationListenerParams
-): AddConversationListenerParams & JsonObject {
-  const params: AddConversationListenerParams & JsonObject = {
-    conversationId: String(options.conversationId ?? ""),
-  };
-  if (options.experimentalRawEvents !== undefined) {
-    params.experimentalRawEvents = !!options.experimentalRawEvents;
-  }
-  return params;
-}
-
-export function buildRemoveConversationListenerParams(
-  options: RemoveConversationListenerParams
-): RemoveConversationListenerParams & JsonObject {
-  return {
-    subscriptionId: String(options.subscriptionId ?? ""),
-  };
 }
 
 function normalizeReasoningSummary(value: BuildTurnStartOptions["summary"]): ReasoningSummary {

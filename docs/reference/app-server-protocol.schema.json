@@ -166,35 +166,6 @@
       },
       "$schema": "http://json-schema.org/draft-07/schema#"
     },
-    "AddConversationListenerParams": {
-      "type": "object",
-      "additionalProperties": {},
-      "properties": {
-        "conversationId": {
-          "type": "string"
-        },
-        "experimentalRawEvents": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "conversationId"
-      ],
-      "$schema": "http://json-schema.org/draft-07/schema#"
-    },
-    "RemoveConversationListenerParams": {
-      "type": "object",
-      "additionalProperties": {},
-      "properties": {
-        "subscriptionId": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "subscriptionId"
-      ],
-      "$schema": "http://json-schema.org/draft-07/schema#"
-    },
     "TurnStartParams": {
       "type": "object",
       "additionalProperties": {},
