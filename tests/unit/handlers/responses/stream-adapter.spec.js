@@ -185,6 +185,45 @@ describe("responses stream adapter", () => {
     expect(outputDone?.data?.output_index).toBe(1);
   });
 
+  it("emits done events for dynamic tool calls", async () => {
+    const { createResponsesStreamAdapter } = await import(
+      "../../../../src/handlers/responses/stream-adapter.js"
+    );
+
+    const res = buildRes();
+    const adapter = createResponsesStreamAdapter(res, { model: "gpt-test" });
+
+    adapter.handleEvent({
+      type: "dynamic_tool_call",
+      choiceIndex: 0,
+      payload: { callId: "call_dyn_1", tool: "lookup", arguments: { id: 1 } },
+    });
+    await waitForWrites();
+
+    const entries = parseSSE(res.chunks.join(""));
+    const events = entries.map((entry) => entry.event).filter(Boolean);
+
+    const addedIndex = events.indexOf("response.output_item.added");
+    const deltaIndex = events.indexOf("response.function_call_arguments.delta");
+    const doneIndex = events.indexOf("response.function_call_arguments.done");
+    const outputDoneIndex = events.indexOf("response.output_item.done");
+
+    expect(addedIndex).toBeGreaterThan(-1);
+    expect(deltaIndex).toBeGreaterThan(addedIndex);
+    expect(doneIndex).toBeGreaterThan(deltaIndex);
+    expect(outputDoneIndex).toBeGreaterThan(doneIndex);
+
+    const added = entries.find((entry) => entry.event === "response.output_item.added");
+    const argsDone = entries.find(
+      (entry) => entry.event === "response.function_call_arguments.done"
+    );
+    const outputDone = entries.find((entry) => entry.event === "response.output_item.done");
+
+    expect(added?.data?.item?.name).toBe("lookup");
+    expect(argsDone?.data?.arguments).toBe('{"id":1}');
+    expect(outputDone?.data?.item?.call_id).toBe("call_dyn_1");
+  });
+
   it("emits response.failed when handleEvent encounters an error", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     createToolCallAggregator.mockReturnValue(

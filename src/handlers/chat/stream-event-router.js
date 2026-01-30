@@ -8,6 +8,7 @@ export const createStreamEventRouter = ({
   reqId,
   route = "/v1/chat/completions",
   mode = "chat_stream",
+  dynamicToolCallMode = "delta",
   handleParsedEvent,
   trackToolSignals,
   extractFinishReasonFromMessage,
@@ -63,14 +64,26 @@ export const createStreamEventRouter = ({
         trackToolSignals(toolCallDelta);
       }
       if (toolCallDelta && typeof handleParsedEvent === "function") {
-        handleParsedEvent({
-          type: "agent_message_delta",
-          payload,
-          params,
-          messagePayload: { delta: toolCallDelta },
-          metadataInfo,
-          baseChoiceIndex: parsed.baseChoiceIndex,
-        });
+        if (dynamicToolCallMode === "atomic") {
+          handleParsedEvent({
+            type: "dynamic_tool_call",
+            payload,
+            params,
+            messagePayload,
+            metadataInfo,
+            toolCallDelta,
+            baseChoiceIndex: parsed.baseChoiceIndex,
+          });
+        } else {
+          handleParsedEvent({
+            type: "agent_message_delta",
+            payload,
+            params,
+            messagePayload: { delta: toolCallDelta },
+            metadataInfo,
+            baseChoiceIndex: parsed.baseChoiceIndex,
+          });
+        }
       }
       return { handled: true };
     }

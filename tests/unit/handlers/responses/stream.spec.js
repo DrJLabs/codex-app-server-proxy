@@ -295,4 +295,15 @@ describe("responses stream handler", () => {
     expect(parsed.prompt).toEqual(expect.any(String));
     expect(parsed.op).toBeUndefined();
   });
+
+  it("requests atomic dynamic tool calls for streaming responses", async () => {
+    const { postResponsesStream } = await import("../../../../src/handlers/responses/stream.js");
+    const req = makeReq({ input: "hello", model: "gpt-5.2", stream: true });
+    const res = makeRes();
+
+    await postResponsesStream(req, res);
+
+    const callArgs = runNativeResponsesMock.mock.calls[0]?.[0];
+    expect(callArgs?.dynamicToolCallMode).toBe("atomic");
+  });
 });

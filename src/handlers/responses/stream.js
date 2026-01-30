@@ -562,6 +562,7 @@ export async function postResponsesStream(req, res) {
         onEvent: handleEvent,
         sanitizeMetadata: SANITIZE_METADATA,
         extractMetadataFromPayload,
+        dynamicToolCallMode: "atomic",
       }),
       new Promise((_resolve, reject) => child.once("error", reject)),
     ]);

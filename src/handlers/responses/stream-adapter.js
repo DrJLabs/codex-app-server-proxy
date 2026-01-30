@@ -47,18 +47,6 @@ const mapFinishStatus = (reasons) => {
 
 const isNonEmptyString = (value) => typeof value === "string" && value.length > 0;
 
-const isJsonValue = (value) => {
-  if (!isNonEmptyString(value)) return false;
-  const trimmed = value.trim();
-  if (!trimmed) return false;
-  try {
-    JSON.parse(trimmed);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 const normalizeToolType = (value) => {
   if (typeof value === "string" && value) {
     const lower = value.toLowerCase();
@@ -80,6 +68,14 @@ const getDeltaBytes = (payload) => {
 };
 
 const asTrimmedString = (value) => (typeof value === "string" ? value.trim() : "");
+const stringifyArguments = (value) => {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value ?? {});
+  } catch {
+    return String(value ?? "");
+  }
+};
 
 const normalizeFunctionTool = (tool) => {
   if (!tool || typeof tool !== "object") return null;
@@ -113,6 +109,49 @@ const normalizeToolChoice = (value) => {
     }
   }
   return { mode: "auto", forcedName: null };
+};
+
+const resolveDynamicToolCall = (messagePayload, toolCallDelta) => {
+  const deltaCall = Array.isArray(toolCallDelta?.tool_calls) ? toolCallDelta.tool_calls[0] : null;
+  const payload = messagePayload && typeof messagePayload === "object" ? messagePayload : null;
+
+  if (deltaCall && typeof deltaCall === "object") {
+    const name =
+      asTrimmedString(deltaCall.function?.name) ||
+      asTrimmedString(payload?.tool) ||
+      asTrimmedString(payload?.name);
+    if (!name) return null;
+    const id =
+      asTrimmedString(deltaCall.id) ||
+      asTrimmedString(payload?.callId) ||
+      asTrimmedString(payload?.call_id) ||
+      asTrimmedString(payload?.id);
+    const argsSource =
+      deltaCall.function?.arguments ?? payload?.arguments ?? payload?.args ?? payload?.input;
+    return {
+      id: id || deltaCall.id,
+      type: deltaCall.type || "function",
+      function: {
+        name,
+        arguments: stringifyArguments(argsSource),
+      },
+    };
+  }
+
+  const name = asTrimmedString(payload?.tool) || asTrimmedString(payload?.name);
+  const id =
+    asTrimmedString(payload?.callId) ||
+    asTrimmedString(payload?.call_id) ||
+    asTrimmedString(payload?.id);
+  if (!name || !id) return null;
+  return {
+    id,
+    type: "function",
+    function: {
+      name,
+      arguments: stringifyArguments(payload?.arguments ?? payload?.args ?? payload?.input),
+    },
+  };
 };
 
 const buildToolRegistry = (requestBody = {}) => {
@@ -504,32 +543,6 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
             });
             existing.lastArgs = incoming;
           }
-          if (!existing.doneArguments && !existing.outputDone && isJsonValue(incoming)) {
-            writeEvent("response.function_call_arguments.done", {
-              type: "response.function_call_arguments.done",
-              response_id: responseId,
-              output_index: outputIndex,
-              item_id: existing.id,
-              arguments: incoming,
-            });
-            existing.doneArguments = true;
-          }
-          if (existing.doneArguments && !existing.outputDone) {
-            writeEvent("response.output_item.done", {
-              type: "response.output_item.done",
-              response_id: responseId,
-              output_index: outputIndex,
-              item: {
-                id: existing.id,
-                call_id: existing.id,
-                type: existing.type,
-                name: existing.name,
-                arguments: existing.lastArgs || "",
-                status: "completed",
-              },
-            });
-            existing.outputDone = true;
-          }
         }
       }
     });
@@ -913,6 +926,20 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
           return true;
         }
         emitTextPart(choiceState, choiceIndex, event.text);
+        return true;
+      }
+      if (event.type === "dynamic_tool_call") {
+        const choiceState = ensureChoiceState(choiceIndex);
+        const messagePayload = event.messagePayload || event.payload?.msg || event.payload;
+        const toolCall = resolveDynamicToolCall(messagePayload, event.toolCallDelta);
+        if (toolCall) {
+          toolCallAggregator.ingestMessage(
+            { tool_calls: [toolCall] },
+            { choiceIndex, emitIfMissing: true }
+          );
+          ensureCreated();
+          emitToolCallComplete(choiceState, choiceIndex, toolCall);
+        }
         return true;
       }
       if (event.type === "tool_calls_delta") {

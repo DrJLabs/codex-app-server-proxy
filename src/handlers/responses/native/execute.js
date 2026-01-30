@@ -140,6 +140,7 @@ export const runNativeResponses = async ({
   onEvent,
   sanitizeMetadata = false,
   extractMetadataFromPayload,
+  dynamicToolCallMode,
 } = {}) => {
   const emitEvent = typeof onEvent === "function" ? onEvent : () => {};
   const usageCounts = { prompt: null, completion: null };
@@ -166,9 +167,21 @@ export const runNativeResponses = async ({
 
   const eventRouter = createStreamEventRouter({
     parseStreamEventLine: parseLine,
+    dynamicToolCallMode,
     handleParsedEvent: (parsed) => {
       const choiceIndex = Number.isInteger(parsed?.baseChoiceIndex) ? parsed.baseChoiceIndex : 0;
       const metadataInfo = parsed?.metadataInfo ?? null;
+      if (parsed.type === "dynamic_tool_call") {
+        emitEvent({
+          type: "dynamic_tool_call",
+          messagePayload: parsed.messagePayload,
+          toolCallDelta: parsed.toolCallDelta,
+          payload: parsed.payload,
+          choiceIndex,
+          metadataInfo,
+        });
+        return;
+      }
       if (parsed.type === "agent_message_delta" || parsed.type === "agent_message_content_delta") {
         handleDeltaPayload(parsed.messagePayload?.delta, choiceIndex, emitEvent, metadataInfo);
         return;

@@ -58,4 +58,28 @@ describe("native responses executor", () => {
     expect(textEvent?.metadataInfo?.metadata?.session_id).toBe("s-1");
     expect(textEvent?.metadataInfo?.sources).toContain("delta.metadata");
   });
+
+  it("emits dynamic tool call events when configured as atomic", async () => {
+    const adapter = {
+      async *iterStdoutLines() {
+        yield JSON.stringify({
+          type: "dynamic_tool_call_request",
+          msg: { tool: "getFileTree", arguments: { path: "/" }, callId: "call_123" },
+        });
+        yield JSON.stringify({ type: "task_complete", msg: { finish_reason: "stop" } });
+      },
+    };
+
+    const events = [];
+    await runNativeResponses({
+      adapter,
+      onEvent: (event) => events.push(event),
+      dynamicToolCallMode: "atomic",
+    });
+
+    const toolEvent = events.find((event) => event.type === "dynamic_tool_call");
+    expect(toolEvent?.messagePayload?.tool).toBe("getFileTree");
+    expect(toolEvent?.messagePayload?.callId).toBe("call_123");
+    expect(toolEvent?.messagePayload?.arguments).toEqual({ path: "/" });
+  });
 });
