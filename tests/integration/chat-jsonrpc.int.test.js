@@ -204,10 +204,6 @@ describe("chat JSON-RPC normalization", () => {
       },
     ]);
 
-    const addListenerCapture = findCapture(server.captures, "addConversationListener");
-    expect(addListenerCapture).toBeDefined();
-    expect(addListenerCapture?.payload?.params?.conversationId).toBeDefined();
-
     const turnCapture = findCapture(server.captures, "turn/start");
     expect(turnCapture).toBeDefined();
     const turnParams = turnCapture.payload?.params ?? {};
@@ -224,7 +220,7 @@ describe("chat JSON-RPC normalization", () => {
       type: "text",
       text: payload.messages.find((msg) => msg.role === "user")?.content,
     });
-    expect(turnParams.threadId).toBe(addListenerCapture?.payload?.params?.conversationId);
+    expect(turnParams.threadId).toBeDefined();
   }, 20000);
 
   it("routes streaming requests through turn/start payloads", async () => {

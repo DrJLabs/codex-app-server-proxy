@@ -12,8 +12,6 @@ import { isAppServerMode } from "../backend-mode.js";
 import {
   buildInitializeParams,
   buildThreadStartParams,
-  buildAddConversationListenerParams,
-  buildRemoveConversationListenerParams,
   createUserMessageItem,
   normalizeInputItems,
   buildTurnStartParams,
@@ -503,7 +501,7 @@ class JsonRpcTransport {
     context.conversationId = String(threadId);
     this.contextsByConversation.set(context.conversationId, context);
 
-    context.listenerAttached = true;
+    context.listenerAttached = Boolean(context.subscriptionId);
 
     return context.conversationId;
   }
@@ -514,9 +512,9 @@ class JsonRpcTransport {
       await this.#callWorkerRpc({
         context,
         method: "removeConversationListener",
-        params: buildRemoveConversationListenerParams({
+        params: {
           subscriptionId: context.subscriptionId,
-        }),
+        },
         type: "removeConversationListener",
         timeoutMs: Math.min(CFG.WORKER_REQUEST_TIMEOUT_MS, 2000),
       });

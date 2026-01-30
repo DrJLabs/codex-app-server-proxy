@@ -216,9 +216,7 @@ async function runJsonRpcWorker() {
   }
 
   let conversationSeq = 0;
-  let subscriptionSeq = 0;
   const conversations = new Map();
-  const subscriptions = new Map();
   const resolveThreadId = (params = {}) => {
     const provided = params.threadId || params.thread_id;
     if (provided) {
@@ -307,28 +305,6 @@ async function runJsonRpcWorker() {
             rolloutPath: `/tmp/${convId}.jsonl`,
           },
         });
-        break;
-      }
-      case "addConversationListener": {
-        emitCapture("request", message);
-        const convId = resolveThreadId(params);
-        const subscriptionId = `sub-${++subscriptionSeq}`;
-        subscriptions.set(subscriptionId, convId);
-        write({
-          jsonrpc: "2.0",
-          id,
-          result: {
-            subscription_id: subscriptionId,
-            subscriptionId,
-          },
-        });
-        break;
-      }
-      case "removeConversationListener": {
-        emitCapture("request", message);
-        const subscriptionId = params?.subscription_id || params?.subscriptionId;
-        if (subscriptionId) subscriptions.delete(subscriptionId);
-        write({ jsonrpc: "2.0", id, result: {} });
         break;
       }
       case "account/login/start": {
