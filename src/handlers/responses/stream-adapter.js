@@ -47,6 +47,18 @@ const mapFinishStatus = (reasons) => {
 
 const isNonEmptyString = (value) => typeof value === "string" && value.length > 0;
 
+const isJsonValue = (value) => {
+  if (!isNonEmptyString(value)) return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  try {
+    JSON.parse(trimmed);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const normalizeToolType = (value) => {
   if (typeof value === "string" && value) {
     const lower = value.toLowerCase();
@@ -477,19 +489,47 @@ export function createResponsesStreamAdapter(res, requestBody = {}, req = null) 
       }
 
       if (typeof toolDelta.function?.arguments === "string") {
-        const incoming = toolDelta.function.arguments;
-        const previous = existing.lastArgs || "";
-        const chunk =
-          incoming.length >= previous.length ? incoming.slice(previous.length) : incoming;
-        if (chunk) {
-          writeEvent("response.function_call_arguments.delta", {
-            type: "response.function_call_arguments.delta",
-            response_id: responseId,
-            output_index: outputIndex,
-            item_id: existing.id,
-            delta: chunk,
-          });
-          existing.lastArgs = incoming;
+        if (!existing.doneArguments) {
+          const incoming = toolDelta.function.arguments;
+          const previous = existing.lastArgs || "";
+          const chunk =
+            incoming.length >= previous.length ? incoming.slice(previous.length) : incoming;
+          if (chunk) {
+            writeEvent("response.function_call_arguments.delta", {
+              type: "response.function_call_arguments.delta",
+              response_id: responseId,
+              output_index: outputIndex,
+              item_id: existing.id,
+              delta: chunk,
+            });
+            existing.lastArgs = incoming;
+          }
+          if (!existing.doneArguments && !existing.outputDone && isJsonValue(incoming)) {
+            writeEvent("response.function_call_arguments.done", {
+              type: "response.function_call_arguments.done",
+              response_id: responseId,
+              output_index: outputIndex,
+              item_id: existing.id,
+              arguments: incoming,
+            });
+            existing.doneArguments = true;
+          }
+          if (existing.doneArguments && !existing.outputDone) {
+            writeEvent("response.output_item.done", {
+              type: "response.output_item.done",
+              response_id: responseId,
+              output_index: outputIndex,
+              item: {
+                id: existing.id,
+                call_id: existing.id,
+                type: existing.type,
+                name: existing.name,
+                arguments: existing.lastArgs || "",
+                status: "completed",
+              },
+            });
+            existing.outputDone = true;
+          }
         }
       }
     });
