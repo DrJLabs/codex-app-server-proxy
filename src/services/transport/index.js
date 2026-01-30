@@ -11,14 +11,11 @@ import {
 import { isAppServerMode } from "../backend-mode.js";
 import {
   buildInitializeParams,
-  buildNewConversationParams,
   buildThreadStartParams,
   buildAddConversationListenerParams,
   buildRemoveConversationListenerParams,
   createUserMessageItem,
   normalizeInputItems,
-  buildSendUserMessageParams,
-  buildSendUserTurnParams,
   buildTurnStartParams,
 } from "../../lib/json-rpc/schema.ts";
 import { authErrorBody, normalizeCodexError } from "../../lib/errors.js";
@@ -43,13 +40,6 @@ const normalizeNotificationMethod = (method) => {
   if (!method) return "";
   const value = String(method);
   return value.replace(/^codex\/event\//i, "");
-};
-
-const shouldUseThreadStart = (payload) => {
-  const dynamicTools = payload?.dynamicTools ?? payload?.dynamic_tools;
-  if (Array.isArray(dynamicTools) && dynamicTools.length > 0) return true;
-  if (payload?.protocol === "v2" || payload?.protocolVersion === "v2") return true;
-  return false;
 };
 
 const summarizeTurnParamsForLog = (params) => {
@@ -115,10 +105,9 @@ class RequestContext {
     this.conversationId = null;
     this.subscriptionId = null;
     this.listenerAttached = false;
-    this.protocol = "v1";
     this.emitter = new EventEmitter();
     this.usage = { prompt_tokens: 0, completion_tokens: 0 };
-    this.rpc = { turnId: null, messageId: null };
+    this.rpc = { turnId: null };
     this.result = null;
     this.finalMessage = null;
     this.finishReason = null;
@@ -334,6 +323,15 @@ class JsonRpcTransport {
               console.warn(`${LOG_PREFIX} failed to record handshake success`, err);
             }
           }
+          try {
+            this.#write({
+              jsonrpc: JSONRPC_VERSION,
+              method: "initialized",
+              params: {},
+            });
+          } catch (err) {
+            console.warn(`${LOG_PREFIX} failed to send initialized notification`, err);
+          }
           resolve(this.handshakeData);
         },
         reject: (err) => {
@@ -467,46 +465,29 @@ class JsonRpcTransport {
     }
 
     const dynamicTools = basePayload.dynamicTools ?? basePayload.dynamic_tools ?? undefined;
-    const useThreadStart = shouldUseThreadStart(basePayload);
 
-    const conversationParams = useThreadStart
-      ? buildThreadStartParams({
-          model: basePayload.model ?? undefined,
-          modelProvider: basePayload.modelProvider ?? basePayload.model_provider ?? undefined,
-          profile: basePayload.profile ?? undefined,
-          cwd: basePayload.cwd ?? undefined,
-          approvalPolicy: basePayload.approvalPolicy ?? basePayload.approval_policy ?? undefined,
-          sandbox: basePayload.sandboxPolicy ?? basePayload.sandbox ?? undefined,
-          config: basePayload.config ?? undefined,
-          compactPrompt: basePayload.compactPrompt ?? basePayload.compact_prompt ?? undefined,
-          baseInstructions: basePayload.baseInstructions ?? undefined,
-          developerInstructions: basePayload.developerInstructions ?? undefined,
-          dynamicTools,
-          includeApplyPatchTool:
-            basePayload.includeApplyPatchTool ?? basePayload.include_apply_patch_tool ?? undefined,
-          experimentalRawEvents: false,
-        })
-      : buildNewConversationParams({
-          model: basePayload.model ?? undefined,
-          modelProvider: basePayload.modelProvider ?? basePayload.model_provider ?? undefined,
-          profile: basePayload.profile ?? undefined,
-          cwd: basePayload.cwd ?? undefined,
-          approvalPolicy: basePayload.approvalPolicy ?? basePayload.approval_policy ?? undefined,
-          sandbox: basePayload.sandboxPolicy ?? basePayload.sandbox ?? undefined,
-          config: basePayload.config ?? undefined,
-          compactPrompt: basePayload.compactPrompt ?? basePayload.compact_prompt ?? undefined,
-          baseInstructions: basePayload.baseInstructions ?? undefined,
-          developerInstructions: basePayload.developerInstructions ?? undefined,
-          dynamicTools: basePayload.dynamicTools ?? basePayload.dynamic_tools ?? undefined,
-          includeApplyPatchTool:
-            basePayload.includeApplyPatchTool ?? basePayload.include_apply_patch_tool ?? undefined,
-        });
+    const conversationParams = buildThreadStartParams({
+      model: basePayload.model ?? undefined,
+      modelProvider: basePayload.modelProvider ?? basePayload.model_provider ?? undefined,
+      profile: basePayload.profile ?? undefined,
+      cwd: basePayload.cwd ?? undefined,
+      approvalPolicy: basePayload.approvalPolicy ?? basePayload.approval_policy ?? undefined,
+      sandbox: basePayload.sandboxPolicy ?? basePayload.sandbox ?? undefined,
+      config: basePayload.config ?? undefined,
+      compactPrompt: basePayload.compactPrompt ?? basePayload.compact_prompt ?? undefined,
+      baseInstructions: basePayload.baseInstructions ?? undefined,
+      developerInstructions: basePayload.developerInstructions ?? undefined,
+      dynamicTools,
+      includeApplyPatchTool:
+        basePayload.includeApplyPatchTool ?? basePayload.include_apply_patch_tool ?? undefined,
+      experimentalRawEvents: false,
+    });
 
     const conversationResult = await this.#callWorkerRpc({
       context,
-      method: useThreadStart ? "thread/start" : "newConversation",
+      method: "thread/start",
       params: conversationParams,
-      type: useThreadStart ? "thread/start" : "newConversation",
+      type: "thread/start",
     });
 
     const conversationId =
@@ -516,14 +497,13 @@ class JsonRpcTransport {
       conversationResult?.thread?.id;
 
     if (!conversationId) {
-      throw new TransportError("newConversation did not return a conversation id", {
+      throw new TransportError("thread/start did not return a conversation id", {
         code: "worker_invalid_response",
         retryable: true,
       });
     }
 
     context.conversationId = String(conversationId);
-    context.protocol = useThreadStart ? "v2" : "v1";
     this.contextsByConversation.set(context.conversationId, context);
 
     const listenerResult = await this.#callWorkerRpc({
@@ -653,92 +633,6 @@ class JsonRpcTransport {
     return requestPromise;
   }
 
-  sendUserMessage(context, payload) {
-    if (!context) throw new TransportError("invalid context");
-    if (!this.child) {
-      this.#failContext(
-        context,
-        new TransportError("worker unavailable", { code: "worker_unavailable", retryable: true })
-      );
-      return;
-    }
-    const messageRpcId = this.#nextRpcId();
-    context.rpc.messageId = messageRpcId;
-    const timeout = setTimeout(() => {
-      this.pending.delete(messageRpcId);
-      this.#clearRpcTrace(messageRpcId);
-      this.#failContext(
-        context,
-        new TransportError("sendUserMessage timeout", {
-          code: "worker_request_timeout",
-          retryable: true,
-        })
-      );
-    }, CFG.WORKER_REQUEST_TIMEOUT_MS);
-    this.pending.set(messageRpcId, {
-      type: "sendUserMessage",
-      context,
-      timeout,
-      resolve: (result) => {
-        clearTimeout(timeout);
-        this.pending.delete(messageRpcId);
-        this.#clearRpcTrace(messageRpcId);
-        context.setResult(result);
-        const finishReason = result?.finish_reason || result?.status;
-        context.setFinishReason(finishReason);
-        this.#scheduleCompletionCheck(context);
-      },
-      reject: (err) => {
-        clearTimeout(timeout);
-        this.pending.delete(messageRpcId);
-        this.#clearRpcTrace(messageRpcId);
-        this.#failContext(
-          context,
-          err instanceof Error ? err : new TransportError(String(err), { retryable: true })
-        );
-      },
-    });
-
-    const basePayload = payload && typeof payload === "object" ? { ...(payload || {}) } : {};
-    const fallbackText = typeof basePayload.text === "string" ? basePayload.text : undefined;
-    basePayload.items = normalizeInputItems(basePayload.items, fallbackText);
-    if (!Array.isArray(basePayload.items) || basePayload.items.length === 0) {
-      basePayload.items = [createUserMessageItem(fallbackText ?? "")];
-    }
-    if (basePayload.text !== undefined) {
-      delete basePayload.text;
-    }
-    const params = buildSendUserMessageParams({
-      ...basePayload,
-      conversationId: context.conversationId ?? context.clientConversationId,
-      requestId: context.clientConversationId,
-    });
-    if (context.trace) {
-      this.rpcTraceById.set(messageRpcId, context.trace);
-      logBackendSubmission(context.trace, {
-        rpcId: messageRpcId,
-        method: "sendUserMessage",
-        params,
-      });
-    }
-    try {
-      this.#write({
-        jsonrpc: JSONRPC_VERSION,
-        id: messageRpcId,
-        method: "sendUserMessage",
-        params,
-      });
-    } catch (err) {
-      clearTimeout(timeout);
-      this.pending.delete(messageRpcId);
-      this.#clearRpcTrace(messageRpcId);
-      this.#failContext(
-        context,
-        err instanceof Error ? err : new TransportError(String(err), { retryable: true })
-      );
-    }
-  }
-
   cancelContext(context, error = null) {
     if (!context) return;
     const reason =
@@ -779,14 +673,14 @@ class JsonRpcTransport {
       this.#clearRpcTrace(turnRpcId);
       this.#failContext(
         context,
-        new TransportError("sendUserTurn timeout", {
+        new TransportError("turn/start timeout", {
           code: "worker_request_timeout",
           retryable: true,
         })
       );
     }, CFG.WORKER_REQUEST_TIMEOUT_MS);
     this.pending.set(turnRpcId, {
-      type: "sendUserTurn",
+      type: "turn/start",
       context,
       timeout,
       requestSummary: null,
@@ -824,18 +718,10 @@ class JsonRpcTransport {
       if (basePayload.text !== undefined) {
         delete basePayload.text;
       }
-      const params =
-        context.protocol === "v2"
-          ? buildTurnStartParams({
-              ...basePayload,
-              threadId: context.conversationId ?? context.clientConversationId,
-              conversationId: context.conversationId ?? context.clientConversationId,
-            })
-          : buildSendUserTurnParams({
-              ...basePayload,
-              conversationId: context.conversationId ?? context.clientConversationId,
-              requestId: context.clientConversationId,
-            });
+      const params = buildTurnStartParams({
+        ...basePayload,
+        threadId: context.conversationId ?? context.clientConversationId,
+      });
       const pending = this.pending.get(turnRpcId);
       if (pending) {
         pending.requestSummary = summarizeTurnParamsForLog(params);
@@ -844,14 +730,14 @@ class JsonRpcTransport {
         this.rpcTraceById.set(turnRpcId, context.trace);
         logBackendSubmission(context.trace, {
           rpcId: turnRpcId,
-          method: context.protocol === "v2" ? "turn/start" : "sendUserTurn",
+          method: "turn/start",
           params,
         });
       }
       this.#write({
         jsonrpc: JSONRPC_VERSION,
         id: turnRpcId,
-        method: context.protocol === "v2" ? "turn/start" : "sendUserTurn",
+        method: "turn/start",
         params,
       });
     } catch (err) {
@@ -1089,13 +975,13 @@ class JsonRpcTransport {
         code: message.error?.code || "worker_error",
         retryable: true,
       });
-      if (pending.type === "sendUserTurn" && pending.requestSummary) {
+      if (pending.type === "turn/start" && pending.requestSummary) {
         try {
           console.warn(
-            `${LOG_PREFIX} sendUserTurn rejected; request summary: ${JSON.stringify(pending.requestSummary)}`
+            `${LOG_PREFIX} turn/start rejected; request summary: ${JSON.stringify(pending.requestSummary)}`
           );
         } catch (err) {
-          console.warn(`${LOG_PREFIX} sendUserTurn rejected; unable to log request summary`, err);
+          console.warn(`${LOG_PREFIX} turn/start rejected; unable to log request summary`, err);
         }
       }
       if (trace) {

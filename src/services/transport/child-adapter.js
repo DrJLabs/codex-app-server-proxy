@@ -109,9 +109,6 @@ export class JsonRpcChildAdapter extends EventEmitter {
       if (Object.prototype.hasOwnProperty.call(messagePayload, "text")) {
         delete messagePayload.text;
       }
-      if (this.context.protocol !== "v2") {
-        this.transport.sendUserMessage(this.context, messagePayload);
-      }
       await this.context.promise;
       this.#finalize(0);
     } catch (err) {
