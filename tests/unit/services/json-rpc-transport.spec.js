@@ -465,7 +465,7 @@ describe("JsonRpcTransport request lifecycle", () => {
         if (message.method === "initialize") {
           child.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} }) + "\n");
         }
-        if (message.method === "newConversation") {
+        if (message.method === "thread/start") {
           child.stdout.write(
             JSON.stringify({
               jsonrpc: "2.0",
@@ -483,7 +483,7 @@ describe("JsonRpcTransport request lifecycle", () => {
             }) + "\n"
           );
         }
-        if (message.method === "sendUserTurn") {
+        if (message.method === "turn/start") {
           child.stdout.write(
             JSON.stringify({
               jsonrpc: "2.0",
@@ -521,7 +521,7 @@ describe("JsonRpcTransport request lifecycle", () => {
     await expect(nextPending).resolves.toMatchObject({ code: "request_aborted" });
   });
 
-  it("skips newConversation when an explicit conversation id is provided", async () => {
+  it("skips thread/start when an explicit conversation id is provided", async () => {
     const child = createMockChild();
     const methods = [];
     wireJsonResponder(child, (message) => {
@@ -529,7 +529,7 @@ describe("JsonRpcTransport request lifecycle", () => {
       if (message.method === "initialize") {
         writeRpcResult(child, message.id, { result: {} });
       }
-      if (message.method === "sendUserTurn") {
+      if (message.method === "turn/start") {
         writeRpcResult(child, message.id, { result: { conversation_id: "explicit" } });
       }
     });
@@ -543,8 +543,8 @@ describe("JsonRpcTransport request lifecycle", () => {
     context.emitter.on("error", () => {});
     const pending = context.promise.catch(() => {});
 
-    expect(methods).toContain("sendUserTurn");
-    expect(methods).not.toContain("newConversation");
+    expect(methods).toContain("turn/start");
+    expect(methods).not.toContain("thread/start");
     expect(methods).not.toContain("addConversationListener");
 
     transport.cancelContext(
@@ -554,21 +554,21 @@ describe("JsonRpcTransport request lifecycle", () => {
     await pending;
   });
 
-  it("passes dynamicTools to newConversation when provided on the turn", async () => {
+  it("passes dynamicTools to thread/start when provided on the turn", async () => {
     const child = createMockChild();
-    let newConversationParams = null;
+    let threadStartParams = null;
     wireJsonResponder(child, (message) => {
       if (message.method === "initialize") {
         writeRpcResult(child, message.id, { result: {} });
       }
-      if (message.method === "newConversation") {
-        newConversationParams = message.params;
+      if (message.method === "thread/start") {
+        threadStartParams = message.params;
         writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
       }
       if (message.method === "addConversationListener") {
         writeRpcResult(child, message.id, { result: { subscription_id: "sub-1" } });
       }
-      if (message.method === "sendUserTurn") {
+      if (message.method === "turn/start") {
         writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
       }
     });
@@ -585,7 +585,7 @@ describe("JsonRpcTransport request lifecycle", () => {
     context.emitter.on("error", () => {});
     const pending = context.promise.catch(() => {});
 
-    expect(newConversationParams?.dynamicTools).toEqual([
+    expect(threadStartParams?.dynamicTools).toEqual([
       { name: "lookup", description: "", inputSchema: { type: "object" } },
     ]);
 
@@ -602,13 +602,13 @@ describe("JsonRpcTransport request lifecycle", () => {
       if (message.method === "initialize") {
         writeRpcResult(child, message.id, { result: {} });
       }
-      if (message.method === "newConversation") {
+      if (message.method === "thread/start") {
         writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
       }
       if (message.method === "addConversationListener") {
         writeRpcResult(child, message.id, { result: {} });
       }
-      if (message.method === "sendUserTurn") {
+      if (message.method === "turn/start") {
         writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
       }
     });
@@ -629,13 +629,13 @@ describe("JsonRpcTransport request lifecycle", () => {
     await context.promise.catch(() => {});
   });
 
-  it("throws when newConversation returns no conversation id", async () => {
+  it("throws when thread/start returns no conversation id", async () => {
     const child = createMockChild();
     wireJsonResponder(child, (message) => {
       if (message.method === "initialize") {
         writeRpcResult(child, message.id, { result: {} });
       }
-      if (message.method === "newConversation") {
+      if (message.method === "thread/start") {
         writeRpcResult(child, message.id, { result: {} });
       }
     });
@@ -684,21 +684,21 @@ describe("JsonRpcTransport request lifecycle", () => {
     contexts.set = originalSet;
   });
 
-  it("normalizes sendUserTurn items when no fallback text is provided", async () => {
+  it("normalizes turn/start input when no fallback text is provided", async () => {
     const child = createMockChild();
-    let sendUserTurnParams = null;
+    let turnStartParams = null;
     wireJsonResponder(child, (message) => {
       if (message.method === "initialize") {
         writeRpcResult(child, message.id, { result: {} });
       }
-      if (message.method === "newConversation") {
+      if (message.method === "thread/start") {
         writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
       }
       if (message.method === "addConversationListener") {
         writeRpcResult(child, message.id, { result: { subscription_id: "sub-1" } });
       }
-      if (message.method === "sendUserTurn") {
-        sendUserTurnParams = message.params;
+      if (message.method === "turn/start") {
+        turnStartParams = message.params;
         writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
       }
     });
@@ -712,7 +712,7 @@ describe("JsonRpcTransport request lifecycle", () => {
     context.emitter.on("error", () => {});
     context.promise.catch(() => {});
 
-    expect(sendUserTurnParams?.items).toEqual([]);
+    expect(turnStartParams?.input).toEqual([]);
 
     transport.cancelContext(
       context,
@@ -721,38 +721,36 @@ describe("JsonRpcTransport request lifecycle", () => {
     await context.promise.catch(() => {});
   });
 
-  it("normalizes sendUserMessage text into items and strips text", async () => {
+  it("normalizes turn/start text into user inputs", async () => {
     const child = createMockChild();
-    let sendUserMessageParams = null;
+    let turnStartParams = null;
     wireJsonResponder(child, (message) => {
       if (message.method === "initialize") {
         writeRpcResult(child, message.id, { result: {} });
       }
-      if (message.method === "newConversation") {
+      if (message.method === "thread/start") {
         writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
       }
       if (message.method === "addConversationListener") {
         writeRpcResult(child, message.id, { result: { subscription_id: "sub-1" } });
       }
-      if (message.method === "sendUserTurn") {
+      if (message.method === "turn/start") {
+        turnStartParams = message.params;
         writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
-      }
-      if (message.method === "sendUserMessage") {
-        sendUserMessageParams = message.params;
       }
     });
     __setChild(child);
 
     const transport = getJsonRpcTransport();
-    const context = await transport.createChatRequest({ requestId: "req-message-items" });
+    const context = await transport.createChatRequest({
+      requestId: "req-message-items",
+      turnParams: { text: "Hello" },
+    });
     context.emitter.on("error", () => {});
     context.promise.catch(() => {});
-
-    transport.sendUserMessage(context, { text: "Hello" });
     await flushAsync();
 
-    expect(sendUserMessageParams?.text).toBeUndefined();
-    expect(sendUserMessageParams?.items).toEqual([{ type: "text", data: { text: "Hello" } }]);
+    expect(turnStartParams?.input).toEqual([{ type: "text", text: "Hello", text_elements: [] }]);
 
     transport.cancelContext(
       context,
@@ -773,7 +771,7 @@ describe("JsonRpcTransport request lifecycle", () => {
         if (message.method === "initialize") {
           child.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} }) + "\n");
         }
-        if (message.method === "newConversation") {
+        if (message.method === "thread/start") {
           child.stdout.write(
             JSON.stringify({
               jsonrpc: "2.0",
@@ -791,7 +789,7 @@ describe("JsonRpcTransport request lifecycle", () => {
             }) + "\n"
           );
         }
-        if (message.method === "sendUserTurn") {
+        if (message.method === "turn/start") {
           child.stdout.write(
             JSON.stringify({
               jsonrpc: "2.0",
@@ -799,8 +797,6 @@ describe("JsonRpcTransport request lifecycle", () => {
               result: { conversation_id: "server-conv" },
             }) + "\n"
           );
-        }
-        if (message.method === "sendUserMessage") {
           child.stdout.write(
             JSON.stringify({
               jsonrpc: "2.0",
@@ -830,8 +826,8 @@ describe("JsonRpcTransport request lifecycle", () => {
           child.stdout.write(
             JSON.stringify({
               jsonrpc: "2.0",
-              id: message.id,
-              result: { status: "complete", finish_reason: "stop" },
+              method: "task_complete",
+              params: { output: "done", finish_reason: "stop" },
             }) + "\n"
           );
         }
@@ -849,7 +845,6 @@ describe("JsonRpcTransport request lifecycle", () => {
     context.emitter.on("message", (payload) => messages.push(payload));
     context.emitter.on("usage", (payload) => usageEvents.push(payload));
 
-    transport.sendUserMessage(context, { text: "Hello" });
     const result = await context.promise;
 
     expect(deltas).toEqual([{ conversation_id: "server-conv", delta: "Hi" }]);
@@ -865,7 +860,7 @@ describe("JsonRpcTransport request lifecycle", () => {
       finalMessage: { conversation_id: "server-conv", text: "Hello world!" },
       usage: { prompt_tokens: 5, completion_tokens: 7 },
       deltas: [{ conversation_id: "server-conv", delta: "Hi" }],
-      result: { status: "complete", finish_reason: "stop" },
+      result: { output: "done", finish_reason: "stop" },
     });
 
     const followUp = await transport.createChatRequest({ requestId: "req-11" });
@@ -882,9 +877,9 @@ describe("JsonRpcTransport request lifecycle", () => {
     const child = createMockChild();
     const responses = {
       initialize: { result: {} },
-      newConversation: { result: { conversation_id: "server-conv" } },
+      "thread/start": { result: { conversation_id: "server-conv" } },
       addConversationListener: { result: { subscription_id: "sub-1" } },
-      sendUserTurn: { result: { conversation_id: "server-conv" } },
+      "turn/start": { result: { conversation_id: "server-conv" } },
     };
     wireJsonResponder(child, (message) => {
       if (Object.prototype.hasOwnProperty.call(responses, message.method)) {
@@ -923,9 +918,9 @@ describe("JsonRpcTransport request lifecycle", () => {
     const child = createMockChild();
     const responses = {
       initialize: { result: {} },
-      newConversation: { result: { conversation_id: "server-conv" } },
+      "thread/start": { result: { conversation_id: "server-conv" } },
       addConversationListener: { result: { subscription_id: "sub-1" } },
-      sendUserTurn: { result: { conversation_id: "server-conv" } },
+      "turn/start": { result: { conversation_id: "server-conv" } },
     };
     wireJsonResponder(child, (message) => {
       if (Object.prototype.hasOwnProperty.call(responses, message.method)) {
@@ -961,9 +956,9 @@ describe("JsonRpcTransport request lifecycle", () => {
     const child = createMockChild();
     const responses = {
       initialize: { result: {} },
-      newConversation: { result: { conversation_id: "server-conv" } },
+      "thread/start": { result: { conversation_id: "server-conv" } },
       addConversationListener: { result: { subscription_id: "sub-1" } },
-      sendUserTurn: { result: { conversation_id: "server-conv" } },
+      "turn/start": { result: { conversation_id: "server-conv" } },
     };
     wireJsonResponder(child, (message) => {
       if (Object.prototype.hasOwnProperty.call(responses, message.method)) {
@@ -1014,9 +1009,9 @@ describe("JsonRpcTransport request lifecycle", () => {
     const child = createMockChild();
     const responses = {
       initialize: { result: {} },
-      newConversation: { result: { conversation_id: "server-conv" } },
+      "thread/start": { result: { conversation_id: "server-conv" } },
       addConversationListener: { result: { subscription_id: "sub-1" } },
-      sendUserTurn: { result: { conversation_id: "server-conv" } },
+      "turn/start": { result: { conversation_id: "server-conv" } },
     };
     wireJsonResponder(child, (message) => {
       if (Object.prototype.hasOwnProperty.call(responses, message.method)) {
@@ -1050,9 +1045,9 @@ describe("JsonRpcTransport request lifecycle", () => {
     const child = createMockChild();
     const responses = {
       initialize: { result: {} },
-      newConversation: { result: { conversation_id: "server-conv" } },
+      "thread/start": { result: { conversation_id: "server-conv" } },
       addConversationListener: { result: { subscription_id: "sub-1" } },
-      sendUserTurn: { result: { conversation_id: "server-conv" } },
+      "turn/start": { result: { conversation_id: "server-conv" } },
     };
     wireJsonResponder(child, (message) => {
       if (Object.prototype.hasOwnProperty.call(responses, message.method)) {
@@ -1086,7 +1081,7 @@ describe("JsonRpcTransport request lifecycle", () => {
         if (message.method === "initialize") {
           child.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} }) + "\n");
         }
-        if (message.method === "newConversation") {
+        if (message.method === "thread/start") {
           child.stdout.write(
             JSON.stringify({
               jsonrpc: "2.0",
@@ -1104,7 +1099,7 @@ describe("JsonRpcTransport request lifecycle", () => {
             }) + "\n"
           );
         }
-        if (message.method === "sendUserTurn") {
+        if (message.method === "turn/start") {
           child.stdout.write(
             JSON.stringify({
               jsonrpc: "2.0",
@@ -1148,13 +1143,13 @@ describe("trace logging instrumentation", () => {
         case "initialize":
           writeRpcResult(child, message.id, { result: { advertised_models: ["codex-5"] } });
           break;
-        case "newConversation":
+        case "thread/start":
           writeRpcResult(child, message.id, { result: { conversation_id: conversationId } });
           break;
         case "addConversationListener":
           writeRpcResult(child, message.id, { result: { subscription_id: "sub-trace" } });
           break;
-        case "sendUserTurn":
+        case "turn/start":
           writeRpcResult(child, message.id, { result: { conversation_id: conversationId } });
           setTimeout(() => {
             const heavy = "x".repeat(256);
@@ -1195,13 +1190,13 @@ describe("trace logging instrumentation", () => {
 
     const events = appendProtoEvent.mock.calls.map(([payload]) => payload);
     const rpcRequest = events.find(
-      (event) => event.kind === "rpc_request" && event.method === "sendUserTurn"
+      (event) => event.kind === "rpc_request" && event.method === "turn/start"
     );
     expect(rpcRequest).toBeTruthy();
     expect(rpcRequest.req_id).toBe(trace.reqId);
 
     const rpcResponse = events.find(
-      (event) => event.kind === "rpc_response" && event.method === "sendUserTurn"
+      (event) => event.kind === "rpc_response" && event.method === "turn/start"
     );
     expect(rpcResponse).toBeTruthy();
     expect(rpcResponse.rpc_id).toBe(rpcRequest.rpc_id);
@@ -1234,13 +1229,13 @@ describe("trace logging instrumentation", () => {
         case "initialize":
           writeRpcResult(child, message.id, { result: { advertised_models: ["codex-5"] } });
           break;
-        case "newConversation":
+        case "thread/start":
           writeRpcResult(child, message.id, { result: { conversation_id: "conv-error" } });
           break;
         case "addConversationListener":
           writeRpcResult(child, message.id, { result: { subscription_id: "sub-error" } });
           break;
-        case "sendUserTurn":
+        case "turn/start":
           writeRpcResult(child, message.id, {
             error: {
               code: 500,
@@ -1269,7 +1264,7 @@ describe("trace logging instrumentation", () => {
     const events = appendProtoEvent.mock.calls.map(([payload]) => payload);
     const rpcRequest = [...events]
       .reverse()
-      .find((event) => event.kind === "rpc_request" && event.method === "sendUserTurn");
+      .find((event) => event.kind === "rpc_request" && event.method === "turn/start");
     expect(rpcRequest).toBeTruthy();
 
     const rpcError = events.find((event) => event.kind === "rpc_error");
