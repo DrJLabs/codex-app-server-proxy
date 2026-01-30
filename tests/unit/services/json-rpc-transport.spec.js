@@ -470,7 +470,7 @@ describe("JsonRpcTransport request lifecycle", () => {
             JSON.stringify({
               jsonrpc: "2.0",
               id: message.id,
-              result: { conversation_id: "server-conv" },
+              result: { threadId: "server-conv" },
             }) + "\n"
           );
         }
@@ -488,7 +488,7 @@ describe("JsonRpcTransport request lifecycle", () => {
             JSON.stringify({
               jsonrpc: "2.0",
               id: message.id,
-              result: { conversation_id: "server-conv" },
+              result: { threadId: "server-conv" },
             }) + "\n"
           );
         }
@@ -521,7 +521,7 @@ describe("JsonRpcTransport request lifecycle", () => {
     await expect(nextPending).resolves.toMatchObject({ code: "request_aborted" });
   });
 
-  it("skips thread/start when an explicit conversation id is provided", async () => {
+  it("skips thread/start when an explicit thread id is provided", async () => {
     const child = createMockChild();
     const methods = [];
     wireJsonResponder(child, (message) => {
@@ -530,7 +530,7 @@ describe("JsonRpcTransport request lifecycle", () => {
         writeRpcResult(child, message.id, { result: {} });
       }
       if (message.method === "turn/start") {
-        writeRpcResult(child, message.id, { result: { conversation_id: "explicit" } });
+        writeRpcResult(child, message.id, { result: { threadId: "explicit" } });
       }
     });
     __setChild(child);
@@ -538,10 +538,14 @@ describe("JsonRpcTransport request lifecycle", () => {
     const transport = getJsonRpcTransport();
     const context = await transport.createChatRequest({
       requestId: "req-explicit",
-      turnParams: { conversation_id: "explicit" },
+      turnParams: { threadId: "explicit" },
     });
     context.emitter.on("error", () => {});
     const pending = context.promise.catch(() => {});
+
+    await flushAsync();
+    await new Promise((resolve) => setImmediate(resolve));
+    await flushAsync();
 
     expect(methods).toContain("turn/start");
     expect(methods).not.toContain("thread/start");
@@ -563,13 +567,13 @@ describe("JsonRpcTransport request lifecycle", () => {
       }
       if (message.method === "thread/start") {
         threadStartParams = message.params;
-        writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
+        writeRpcResult(child, message.id, { result: { threadId: "server-conv" } });
       }
       if (message.method === "addConversationListener") {
         writeRpcResult(child, message.id, { result: { subscription_id: "sub-1" } });
       }
       if (message.method === "turn/start") {
-        writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
+        writeRpcResult(child, message.id, { result: { threadId: "server-conv" } });
       }
     });
     __setChild(child);
@@ -603,13 +607,13 @@ describe("JsonRpcTransport request lifecycle", () => {
         writeRpcResult(child, message.id, { result: {} });
       }
       if (message.method === "thread/start") {
-        writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
+        writeRpcResult(child, message.id, { result: { threadId: "server-conv" } });
       }
       if (message.method === "addConversationListener") {
         writeRpcResult(child, message.id, { result: {} });
       }
       if (message.method === "turn/start") {
-        writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
+        writeRpcResult(child, message.id, { result: { threadId: "server-conv" } });
       }
     });
     __setChild(child);
@@ -692,14 +696,14 @@ describe("JsonRpcTransport request lifecycle", () => {
         writeRpcResult(child, message.id, { result: {} });
       }
       if (message.method === "thread/start") {
-        writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
+        writeRpcResult(child, message.id, { result: { threadId: "server-conv" } });
       }
       if (message.method === "addConversationListener") {
         writeRpcResult(child, message.id, { result: { subscription_id: "sub-1" } });
       }
       if (message.method === "turn/start") {
         turnStartParams = message.params;
-        writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
+        writeRpcResult(child, message.id, { result: { threadId: "server-conv" } });
       }
     });
     __setChild(child);
@@ -711,6 +715,7 @@ describe("JsonRpcTransport request lifecycle", () => {
     });
     context.emitter.on("error", () => {});
     context.promise.catch(() => {});
+    await flushAsync();
 
     expect(turnStartParams?.input).toEqual([]);
 
@@ -729,14 +734,14 @@ describe("JsonRpcTransport request lifecycle", () => {
         writeRpcResult(child, message.id, { result: {} });
       }
       if (message.method === "thread/start") {
-        writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
+        writeRpcResult(child, message.id, { result: { threadId: "server-conv" } });
       }
       if (message.method === "addConversationListener") {
         writeRpcResult(child, message.id, { result: { subscription_id: "sub-1" } });
       }
       if (message.method === "turn/start") {
         turnStartParams = message.params;
-        writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
+        writeRpcResult(child, message.id, { result: { threadId: "server-conv" } });
       }
     });
     __setChild(child);
@@ -776,7 +781,7 @@ describe("JsonRpcTransport request lifecycle", () => {
             JSON.stringify({
               jsonrpc: "2.0",
               id: message.id,
-              result: { conversation_id: "server-conv" },
+              result: { threadId: "server-conv" },
             }) + "\n"
           );
         }
@@ -794,21 +799,21 @@ describe("JsonRpcTransport request lifecycle", () => {
             JSON.stringify({
               jsonrpc: "2.0",
               id: message.id,
-              result: { conversation_id: "server-conv" },
+              result: { threadId: "server-conv" },
             }) + "\n"
           );
           child.stdout.write(
             JSON.stringify({
               jsonrpc: "2.0",
               method: "agentMessageDelta",
-              params: { conversation_id: "server-conv", delta: "Hi" },
+              params: { threadId: "server-conv", delta: "Hi" },
             }) + "\n"
           );
           child.stdout.write(
             JSON.stringify({
               jsonrpc: "2.0",
               method: "agentMessage",
-              params: { conversation_id: "server-conv", text: "Hello world!" },
+              params: { threadId: "server-conv", text: "Hello world!" },
             }) + "\n"
           );
           child.stdout.write(
@@ -816,7 +821,7 @@ describe("JsonRpcTransport request lifecycle", () => {
               jsonrpc: "2.0",
               method: "tokenCount",
               params: {
-                conversation_id: "server-conv",
+                threadId: "server-conv",
                 prompt_tokens: 5,
                 completion_tokens: 7,
                 finish_reason: "stop",
@@ -847,8 +852,8 @@ describe("JsonRpcTransport request lifecycle", () => {
 
     const result = await context.promise;
 
-    expect(deltas).toEqual([{ conversation_id: "server-conv", delta: "Hi" }]);
-    expect(messages).toEqual([{ conversation_id: "server-conv", text: "Hello world!" }]);
+    expect(deltas).toEqual([{ threadId: "server-conv", delta: "Hi" }]);
+    expect(messages).toEqual([{ threadId: "server-conv", text: "Hello world!" }]);
     expect(usageEvents.at(-1)).toMatchObject({
       prompt_tokens: 5,
       completion_tokens: 7,
@@ -857,9 +862,9 @@ describe("JsonRpcTransport request lifecycle", () => {
     expect(result).toMatchObject({
       conversationId: "server-conv",
       finishReason: "stop",
-      finalMessage: { conversation_id: "server-conv", text: "Hello world!" },
+      finalMessage: { threadId: "server-conv", text: "Hello world!" },
       usage: { prompt_tokens: 5, completion_tokens: 7 },
-      deltas: [{ conversation_id: "server-conv", delta: "Hi" }],
+      deltas: [{ threadId: "server-conv", delta: "Hi" }],
       result: { output: "done", finish_reason: "stop" },
     });
 
@@ -877,9 +882,9 @@ describe("JsonRpcTransport request lifecycle", () => {
     const child = createMockChild();
     const responses = {
       initialize: { result: {} },
-      "thread/start": { result: { conversation_id: "server-conv" } },
+      "thread/start": { result: { threadId: "server-conv" } },
       addConversationListener: { result: { subscription_id: "sub-1" } },
-      "turn/start": { result: { conversation_id: "server-conv" } },
+      "turn/start": { result: { threadId: "server-conv" } },
     };
     wireJsonResponder(child, (message) => {
       if (Object.prototype.hasOwnProperty.call(responses, message.method)) {
@@ -896,7 +901,7 @@ describe("JsonRpcTransport request lifecycle", () => {
     context.emitter.on("error", () => {});
 
     writeRpcNotification(child, "codex/event/app_server_v2_deprecation_notice", {
-      conversation_id: "server-conv",
+      threadId: "server-conv",
       msg: { notice: "deprecation" },
     });
     await flushAsync();
@@ -905,7 +910,7 @@ describe("JsonRpcTransport request lifecycle", () => {
     expect(notifications[0]).toMatchObject({
       method: "codex/event/app_server_v2_deprecation_notice",
       params: {
-        conversation_id: "server-conv",
+        threadId: "server-conv",
         msg: { notice: "deprecation" },
       },
     });
@@ -918,9 +923,9 @@ describe("JsonRpcTransport request lifecycle", () => {
     const child = createMockChild();
     const responses = {
       initialize: { result: {} },
-      "thread/start": { result: { conversation_id: "server-conv" } },
+      "thread/start": { result: { threadId: "server-conv" } },
       addConversationListener: { result: { subscription_id: "sub-1" } },
-      "turn/start": { result: { conversation_id: "server-conv" } },
+      "turn/start": { result: { threadId: "server-conv" } },
     };
     wireJsonResponder(child, (message) => {
       if (Object.prototype.hasOwnProperty.call(responses, message.method)) {
@@ -937,7 +942,7 @@ describe("JsonRpcTransport request lifecycle", () => {
     context.emitter.on("error", () => {});
 
     writeRpcNotification(child, "codex/event/response.function_call_arguments.delta", {
-      conversation_id: "server-conv",
+      threadId: "server-conv",
       msg: { delta: '{"x":' },
     });
     await flushAsync();
@@ -956,9 +961,9 @@ describe("JsonRpcTransport request lifecycle", () => {
     const child = createMockChild();
     const responses = {
       initialize: { result: {} },
-      "thread/start": { result: { conversation_id: "server-conv" } },
+      "thread/start": { result: { threadId: "server-conv" } },
       addConversationListener: { result: { subscription_id: "sub-1" } },
-      "turn/start": { result: { conversation_id: "server-conv" } },
+      "turn/start": { result: { threadId: "server-conv" } },
     };
     wireJsonResponder(child, (message) => {
       if (Object.prototype.hasOwnProperty.call(responses, message.method)) {
@@ -972,27 +977,27 @@ describe("JsonRpcTransport request lifecycle", () => {
     context.emitter.on("error", () => {});
 
     writeRpcNotification(child, "codex/event/agent_message_content_delta", {
-      conversation_id: "server-conv",
+      threadId: "server-conv",
       msg: { content: [{ text: "hi" }] },
     });
     writeRpcNotification(child, "codex/event/agent_message_delta", {
-      conversation_id: "server-conv",
+      threadId: "server-conv",
       msg: { delta: { text: "structured" } },
     });
     writeRpcNotification(child, "codex/event/agent_message_delta", {
-      conversation_id: "server-conv",
+      threadId: "server-conv",
       msg: { delta: "skip" },
     });
     writeRpcNotification(child, "codex/event/token_count", {
-      conversation_id: "server-conv",
+      threadId: "server-conv",
       msg: { token_count: { prompt_tokens: 2, completion_tokens: 3 } },
     });
     writeRpcNotification(child, "codex/event/agent_message", {
-      conversation_id: "server-conv",
+      threadId: "server-conv",
       msg: { message: "final", finish_reason: "stop" },
     });
     writeRpcNotification(child, "codex/event/task_complete", {
-      conversation_id: "server-conv",
+      threadId: "server-conv",
       msg: { output: "done", finish_reason: "stop" },
     });
 
@@ -1009,9 +1014,9 @@ describe("JsonRpcTransport request lifecycle", () => {
     const child = createMockChild();
     const responses = {
       initialize: { result: {} },
-      "thread/start": { result: { conversation_id: "server-conv" } },
+      "thread/start": { result: { threadId: "server-conv" } },
       addConversationListener: { result: { subscription_id: "sub-1" } },
-      "turn/start": { result: { conversation_id: "server-conv" } },
+      "turn/start": { result: { threadId: "server-conv" } },
     };
     wireJsonResponder(child, (message) => {
       if (Object.prototype.hasOwnProperty.call(responses, message.method)) {
@@ -1025,7 +1030,7 @@ describe("JsonRpcTransport request lifecycle", () => {
     context.emitter.on("error", () => {});
 
     writeRpcNotification(child, "codex/event/item_completed", {
-      conversation_id: "server-conv",
+      threadId: "server-conv",
       msg: {
         item: {
           type: "agent_message",
@@ -1045,9 +1050,9 @@ describe("JsonRpcTransport request lifecycle", () => {
     const child = createMockChild();
     const responses = {
       initialize: { result: {} },
-      "thread/start": { result: { conversation_id: "server-conv" } },
+      "thread/start": { result: { threadId: "server-conv" } },
       addConversationListener: { result: { subscription_id: "sub-1" } },
-      "turn/start": { result: { conversation_id: "server-conv" } },
+      "turn/start": { result: { threadId: "server-conv" } },
     };
     wireJsonResponder(child, (message) => {
       if (Object.prototype.hasOwnProperty.call(responses, message.method)) {
@@ -1062,7 +1067,7 @@ describe("JsonRpcTransport request lifecycle", () => {
     const pending = context.promise.catch((err) => err);
 
     writeRpcNotification(child, "codex/event/requestTimeout", {
-      conversation_id: "server-conv",
+      threadId: "server-conv",
       msg: { reason: "timeout" },
     });
 
@@ -1086,7 +1091,7 @@ describe("JsonRpcTransport request lifecycle", () => {
             JSON.stringify({
               jsonrpc: "2.0",
               id: message.id,
-              result: { conversation_id: "server-conv" },
+              result: { threadId: "server-conv" },
             }) + "\n"
           );
         }
@@ -1104,7 +1109,7 @@ describe("JsonRpcTransport request lifecycle", () => {
             JSON.stringify({
               jsonrpc: "2.0",
               id: message.id,
-              result: { conversation_id: "server-conv" },
+              result: { threadId: "server-conv" },
             }) + "\n"
           );
         }
@@ -1144,17 +1149,17 @@ describe("trace logging instrumentation", () => {
           writeRpcResult(child, message.id, { result: { advertised_models: ["codex-5"] } });
           break;
         case "thread/start":
-          writeRpcResult(child, message.id, { result: { conversation_id: conversationId } });
+          writeRpcResult(child, message.id, { result: { threadId: conversationId } });
           break;
         case "addConversationListener":
           writeRpcResult(child, message.id, { result: { subscription_id: "sub-trace" } });
           break;
         case "turn/start":
-          writeRpcResult(child, message.id, { result: { conversation_id: conversationId } });
+          writeRpcResult(child, message.id, { result: { threadId: conversationId } });
           setTimeout(() => {
             const heavy = "x".repeat(256);
             writeRpcNotification(child, "codex/event/agent_message", {
-              conversation_id: conversationId,
+              threadId: conversationId,
               request_id: "ctx-trace",
               msg: {
                 metadata: { chunk: heavy },
@@ -1167,7 +1172,7 @@ describe("trace logging instrumentation", () => {
               },
             });
             writeRpcNotification(child, "codex/event/task_complete", {
-              conversation_id: conversationId,
+              threadId: conversationId,
               msg: { finish_reason: "stop" },
             });
           }, 0);
@@ -1230,7 +1235,7 @@ describe("trace logging instrumentation", () => {
           writeRpcResult(child, message.id, { result: { advertised_models: ["codex-5"] } });
           break;
         case "thread/start":
-          writeRpcResult(child, message.id, { result: { conversation_id: "conv-error" } });
+          writeRpcResult(child, message.id, { result: { threadId: "conv-error" } });
           break;
         case "addConversationListener":
           writeRpcResult(child, message.id, { result: { subscription_id: "sub-error" } });

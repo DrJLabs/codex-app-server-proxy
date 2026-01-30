@@ -45,7 +45,6 @@ const setupAdapter = async (options = {}) => {
 
   transport = {
     createChatRequest: vi.fn(async () => context),
-    sendUserMessage: vi.fn(),
     cancelContext: vi.fn(),
   };
 
@@ -101,7 +100,6 @@ describe("JsonRpcChildAdapter auth handling", () => {
 
     transport = {
       createChatRequest: vi.fn(async () => context),
-      sendUserMessage: vi.fn(),
       cancelContext: vi.fn(),
     };
 
@@ -150,7 +148,6 @@ describe("JsonRpcChildAdapter auth handling", () => {
 
     transport = {
       createChatRequest: vi.fn(async () => context),
-      sendUserMessage: vi.fn(),
       cancelContext: vi.fn(),
       getAuthLoginDetails: vi.fn(async () => ({
         auth_url: "https://example.test/login",
@@ -205,7 +202,6 @@ describe("JsonRpcChildAdapter auth handling", () => {
 
     transport = {
       createChatRequest: vi.fn(async () => context),
-      sendUserMessage: vi.fn(),
       cancelContext: vi.fn(),
     };
 
@@ -245,15 +241,18 @@ describe("JsonRpcChildAdapter auth handling", () => {
 
 describe("JsonRpcChildAdapter normalization", () => {
   it("uses op items to derive the prompt for message items", async () => {
-    const { adapter, context, resolvePromise } = await setupAdapter();
+    const { adapter, resolvePromise } = await setupAdapter({
+      normalizedRequest: { turn: { items: [] } },
+    });
 
     adapter.stdin.write(JSON.stringify({ op: { items: [{ text: "from-op" }] } }));
     await flushAsync();
 
-    expect(transport.sendUserMessage).toHaveBeenCalledWith(
-      context,
+    expect(transport.createChatRequest).toHaveBeenCalledWith(
       expect.objectContaining({
-        items: [{ type: "text", data: { text: "from-op" } }],
+        turnParams: expect.objectContaining({
+          items: [{ type: "text", data: { text: "from-op" } }],
+        }),
       })
     );
 
@@ -262,15 +261,18 @@ describe("JsonRpcChildAdapter normalization", () => {
   });
 
   it("uses prompt text when op items are missing", async () => {
-    const { adapter, context, resolvePromise } = await setupAdapter();
+    const { adapter, resolvePromise } = await setupAdapter({
+      normalizedRequest: { turn: { items: [] } },
+    });
 
     adapter.stdin.write(JSON.stringify({ prompt: "from-prompt" }));
     await flushAsync();
 
-    expect(transport.sendUserMessage).toHaveBeenCalledWith(
-      context,
+    expect(transport.createChatRequest).toHaveBeenCalledWith(
       expect.objectContaining({
-        items: [{ type: "text", data: { text: "from-prompt" } }],
+        turnParams: expect.objectContaining({
+          items: [{ type: "text", data: { text: "from-prompt" } }],
+        }),
       })
     );
 
@@ -278,25 +280,26 @@ describe("JsonRpcChildAdapter normalization", () => {
     await flushAsync();
   });
 
-  it("forwards tools from turn payload to message payload", async () => {
+  it("propagates tools into turn params when provided on message payload", async () => {
     const tools = {
       definitions: [{ type: "function", function: { name: "tool" } }],
       choice: "auto",
       parallelToolCalls: true,
     };
-    const { adapter, context, resolvePromise } = await setupAdapter({
+    const { adapter, resolvePromise } = await setupAdapter({
       normalizedRequest: {
-        turn: { items: [], tools },
-        message: { items: [] },
+        turn: { items: [] },
+        message: { items: [], tools },
       },
     });
 
     adapter.stdin.write(JSON.stringify({ prompt: "hello" }));
     await flushAsync();
 
-    expect(transport.sendUserMessage).toHaveBeenCalledWith(
-      context,
-      expect.objectContaining({ tools })
+    expect(transport.createChatRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        turnParams: expect.objectContaining({ tools }),
+      })
     );
 
     resolvePromise();
@@ -304,17 +307,20 @@ describe("JsonRpcChildAdapter normalization", () => {
   });
 
   it("ignores duplicate writes and falls back on invalid JSON", async () => {
-    const { adapter, context, resolvePromise } = await setupAdapter();
+    const { adapter, resolvePromise } = await setupAdapter({
+      normalizedRequest: { turn: { items: [] } },
+    });
 
     adapter.stdin.write("{not json");
     adapter.stdin.write(JSON.stringify({ prompt: "ignored" }));
     await flushAsync();
 
     expect(transport.createChatRequest).toHaveBeenCalledTimes(1);
-    expect(transport.sendUserMessage).toHaveBeenCalledWith(
-      context,
+    expect(transport.createChatRequest).toHaveBeenCalledWith(
       expect.objectContaining({
-        items: [{ type: "text", data: { text: "" } }],
+        turnParams: expect.objectContaining({
+          items: [{ type: "text", data: { text: "" } }],
+        }),
       })
     );
 
@@ -336,9 +342,9 @@ describe("JsonRpcChildAdapter normalization", () => {
     emitter.emit("notification", { method: "custom_event", params: { ok: true } });
     await flushAsync();
 
-    const messagePayload = transport.sendUserMessage.mock.calls[0][1];
-    expect(messagePayload.text).toBeUndefined();
-    expect(messagePayload.items).toEqual([{ type: "text", data: { text: "hello" } }]);
+    const turnPayload = transport.createChatRequest.mock.calls[0][0].turnParams;
+    expect(turnPayload.text).toBeUndefined();
+    expect(turnPayload.items).toEqual([{ type: "text", data: { text: "hello" } }]);
     expect(stdout).toContainEqual({ type: "custom_event", msg: { ok: true } });
 
     resolvePromise();

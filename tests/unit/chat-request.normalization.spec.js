@@ -5,6 +5,8 @@ import {
 } from "../../src/handlers/chat/request.js";
 
 const EFFECTIVE_MODEL = "gpt-5.2";
+const INTERNAL_TOOLS_INSTRUCTION =
+  "Never use internal tools (shell/exec_command/apply_patch/update_plan/view_image). Request only dynamic tool calls provided by the client.";
 
 const normalize = (overrides = {}) =>
   normalizeChatJsonRpcRequest({
@@ -31,7 +33,7 @@ describe("normalizeChatJsonRpcRequest", () => {
     ];
 
     const normalized = normalize({ body: { messages }, messages });
-    expect(normalized.turn.baseInstructions).toBeUndefined();
+    expect(normalized.turn.baseInstructions).toBe(INTERNAL_TOOLS_INSTRUCTION);
     expect(normalized.turn.items).toHaveLength(1);
     const prompt = normalized.turn.items[0]?.data?.text || "";
     expect(prompt).not.toContain("You are a bot");
@@ -49,7 +51,7 @@ describe("normalizeChatJsonRpcRequest", () => {
     });
 
     expect(normalized.message.responseFormat).toMatchObject({ type: "json_object" });
-    expect(normalized.turn.finalOutputJsonSchema).toBeUndefined();
+    expect(normalized.turn.outputSchema).toBeUndefined();
   });
 
   it("accepts legacy functions and function_call aliases", () => {
@@ -151,7 +153,7 @@ describe("normalizeChatJsonRpcRequest", () => {
       { name: "build", description: "", inputSchema: { type: "object" } },
     ]);
     expect(normalized.message.tools).toBeUndefined();
-    expect(normalized.turn.finalOutputJsonSchema).toEqual(normalized.message.finalOutputJsonSchema);
+    expect(normalized.turn.outputSchema).toEqual(normalized.message.outputSchema);
     expect(normalized.turn.effort).toBe("low");
     expect(normalized.message.reasoning).toMatchObject({ effort: "low" });
     expect(normalized.turn.choiceCount).toBeUndefined();
@@ -348,7 +350,7 @@ describe("normalizeChatJsonRpcRequest", () => {
     });
 
     expect(normalized.message.responseFormat?.type).toBe("json_schema");
-    expect(normalized.turn.finalOutputJsonSchema).toMatchObject({ type: "object" });
+    expect(normalized.turn.outputSchema).toMatchObject({ type: "object" });
   });
 
   it("rejects response_format without a type", () => {

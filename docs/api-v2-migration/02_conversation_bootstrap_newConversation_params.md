@@ -1,194 +1,64 @@
-# Subtask 02 — Conversation Bootstrap: `newConversation` params for V2
+# Subtask 02 — Conversation Bootstrap: `thread/start` params for V2
 
-## Reasoning:
+## Reasoning
 - **Assumptions**
-  - The proxy creates a Codex App Server conversation via JSON-RPC `newConversation` from the transport layer.
-  - Conversation-scoped parameters must match the Codex JSON-RPC schema implemented in `src/lib/json-rpc/schema.ts` (pinned to Codex CLI protocol v0.89.0).
-  - The transport should pass through only supported `NewConversationParams` fields and rely on `buildNewConversationParams()` for normalization (string trimming, enum normalization, dropping invalid values).
+  - The proxy creates a Codex App Server thread via JSON-RPC `thread/start` from the transport layer.
+  - Conversation-scoped parameters must match the Codex JSON-RPC schema implemented in `src/lib/json-rpc/schema.ts` (pinned to Codex CLI protocol v0.92.0).
+  - Transport should pass through only supported `ThreadStartParams` fields and rely on `buildThreadStartParams()` for normalization (string trimming, enum normalization, dropping invalid values).
 - **Logic**
   - Keep schema ownership centralized in `schema.ts` and avoid duplicating validation logic in transport.
-  - Ensure transport forwards *all* supported conversation-scoped fields that clients/handlers may provide (`config`, `compactPrompt`), since `schema.ts` already supports them.
-  - Add unit tests for edge cases explicitly called out in the plan (invalid sandbox shapes, config passthrough, compactPrompt passthrough) to prevent regression.
+  - Forward all supported v2 conversation-scoped fields (`config`, `dynamicTools`, instruction fields) and drop legacy v1-only params (`compactPrompt`, `includeApplyPatchTool`).
 
 ---
 
 ## Objective
 
-Ensure the proxy's conversation bootstrap (`newConversation`) payload is fully aligned with the current `NewConversationParams` schema by:
+Ensure the proxy's conversation bootstrap (`thread/start`) payload is aligned with `ThreadStartParams` by:
 
-- forwarding *all supported* conversation-scoped fields from the transport layer
+- forwarding supported conversation-scoped fields from the transport layer
 - preserving current normalization behavior (`sandbox`, `approvalPolicy`, instruction trimming)
 - forwarding `dynamicTools` (thread-start tool manifest) when provided
-- expanding unit tests to cover edge cases and optional fields
+- avoiding legacy v1 fields (`compactPrompt`, `includeApplyPatchTool`, snake_case aliases)
 
 ---
 
 ## Verified current state (repo)
 
-### Schema support already exists
-`src/lib/json-rpc/schema.ts` already supports these conversation-scoped fields:
+### Schema support
+`src/lib/json-rpc/schema.ts` supports these thread-start fields:
 
 - `config?: Record<string, unknown> | null`
-- `compactPrompt?: string | null`
-- `dynamicTools?: JsonValue[] | null` (v2 thread-start tool definitions)
+- `dynamicTools?: JsonValue[] | null`
+- `baseInstructions?: string | null`
+- `developerInstructions?: string | null`
 
-…and normalizes sandbox modes from either strings or `{ type | mode }` objects while dropping invalid types.
+### Transport mapping
+`src/services/transport/index.js` builds `thread/start` params with `buildThreadStartParams()` and forwards:
 
-### Transport is missing pass-through fields
-`src/services/transport/index.js` builds `conversationParams` for `newConversation` but currently does **not** forward:
 - `config`
-- `compactPrompt`
+- `dynamicTools`
+- instruction fields
 
-Dynamic tool manifests **must** be forwarded via `dynamicTools` so they reach
-`newConversation` at thread start (per app-server 0.92 tools schema).
+Legacy v1 params are not forwarded.
 
-So even though the schema supports these fields, they never reach the worker unless added at the call site.
-
-### Tests cover happy-path only
-`tests/unit/json-rpc-schema.test.ts` includes a basic `buildNewConversationParams` test, but does not cover:
-- `config` passthrough
-- `compactPrompt` passthrough
-- invalid `sandbox` types (e.g., boolean)
-- legacy sandbox policy objects (e.g., `{ type: "read-only" }`)
-
----
-
-## Tasks
-
-### 1) Update transport mapping to include missing fields
-**File:** `src/services/transport/index.js`  
-**Location:** `JsonRpcTransport.#ensureConversation()` conversation bootstrap section (where `conversationParams` is built)
-
-Add `config` and `compactPrompt` (including snake_case alias for `compact_prompt`) to the `buildNewConversationParams()` call:
-
-- `config: basePayload.config`
-- `compactPrompt: basePayload.compactPrompt ?? basePayload.compact_prompt`
-- `dynamicTools: basePayload.dynamicTools ?? basePayload.dynamic_tools`
-
-Keep existing mapping for `sandbox` (`sandboxPolicy` or `sandbox`) and other fields.
-
-#### Optional: legacy instruction aliasing (only if needed)
-If you have any client path that can arrive at transport with legacy top-level instruction keys, you may also map:
-- `baseInstructions: basePayload.baseInstructions ?? basePayload.instructions ?? basePayload.system_prompt`
-
-**Note:** for `/v1/chat/completions` and `/v1/responses`, the repo already normalizes instructions earlier (in request normalizers). Do not add this aliasing unless you have evidence it is needed for a specific ingress path.
-
----
-
-### 2) Expand unit tests for edge cases and new fields
-**File:** `tests/unit/json-rpc-schema.test.ts`  
-**Location:** near the existing `"builds newConversation params with normalized optional fields"` test
-
-Add tests to assert:
-
-- `config` object is preserved
-- `compactPrompt` is preserved
-- boolean sandbox is dropped (undefined)
-- legacy sandbox objects normalize to a valid mode string
-
-This locks in the behavior already implemented by `normalizeSandboxModeOption()` and `buildNewConversationParams()`.
-
----
-
-### 3) Quick sanity validation
-Run unit tests and ensure no schema regression:
-
-- `npm run test:unit -- tests/unit/json-rpc-schema.test.ts`
-
-(If you rely on AJV schema validation integration tests, also run the integration suite that validates JSON-RPC payloads.)
-
----
-
-## Suggested patch snippets
-
-### A) Transport: forward `config` and `compactPrompt`
-
-```js
-// src/services/transport/index.js
-// inside JsonRpcTransport.#ensureConversation()
-
-const conversationParams = buildNewConversationParams({
-  model: basePayload.model ?? undefined,
-  modelProvider: basePayload.modelProvider ?? basePayload.model_provider ?? undefined,
-  profile: basePayload.profile ?? undefined,
-  cwd: basePayload.cwd ?? undefined,
-  approvalPolicy: basePayload.approvalPolicy ?? basePayload.approval_policy ?? undefined,
-  sandbox: basePayload.sandboxPolicy ?? basePayload.sandbox ?? undefined,
-
-  // Added: supported by schema.ts but not forwarded previously
-  config: basePayload.config ?? undefined,
-  compactPrompt: basePayload.compactPrompt ?? basePayload.compact_prompt ?? undefined,
-
-  baseInstructions: basePayload.baseInstructions ?? undefined,
-  developerInstructions: basePayload.developerInstructions ?? undefined,
-  includeApplyPatchTool:
-    basePayload.includeApplyPatchTool ?? basePayload.include_apply_patch_tool ?? undefined,
-});
-```
-
----
-
-### B) Unit tests: add edge cases
-
-```ts
-// tests/unit/json-rpc-schema.test.ts
-// near the existing buildNewConversationParams test
-
-it("passes through optional config object", () => {
-  const config = { featureFlags: { experimental: true } };
-  const params = buildNewConversationParams({ config });
-  expect(params.config).toEqual(config);
-});
-
-it("passes through compactPrompt", () => {
-  const params = buildNewConversationParams({ compactPrompt: "true" });
-  expect(params.compactPrompt).toBe("true");
-});
-
-it("drops invalid sandbox types (e.g. boolean)", () => {
-  const params = buildNewConversationParams({
-    // @ts-expect-error testing runtime validation
-    sandbox: true,
-  });
-  expect(params.sandbox).toBeUndefined();
-});
-
-it("extracts sandbox mode from legacy policy object", () => {
-  const params = buildNewConversationParams({
-    // @ts-expect-error testing legacy object shape support
-    sandbox: { type: "read-only" },
-  });
-  expect(params.sandbox).toBe("read-only");
-});
-```
+### Tests
+`tests/unit/json-rpc-schema.test.ts` already covers `buildThreadStartParams` behavior for config + dynamicTools passthrough.
 
 ---
 
 ## Acceptance criteria
 
-- `newConversation` params include `config` and `compactPrompt` when provided by upstream handlers/clients.
-- No change in existing normalization behavior:
-  - sandbox mode normalization still accepts string or `{ type | mode }` and drops invalid types.
+- `thread/start` params include `config` and `dynamicTools` when provided by upstream handlers/clients.
+- Normalization behavior remains unchanged:
+  - sandbox mode normalization accepts string or `{ type | mode }` and drops invalid types.
   - instruction strings are trimmed; empty strings collapse to null/undefined per `schema.ts`.
-- Unit tests cover the new passthrough fields and sandbox edge cases.
+- No legacy v1 params are emitted in `thread/start`.
 
 ---
 
 ## Status checklist
 
-- `config` forwarded by transport: **TODO**
-- `compactPrompt` forwarded by transport: **TODO**
+- `config` forwarded by transport: **DONE**
 - `dynamicTools` forwarded by transport: **DONE**
-- Unit tests for `config`/`compactPrompt`: **TODO**
-- Unit tests for sandbox edge cases: **TODO**
-- Schema definition in `schema.ts`: **DONE**
-- Conversation ID normalization (`conversation_id` vs `conversationId`): **DONE** (existing transport behavior)
-
----
-
-## Deliverable
-
-A PR that:
-- updates `src/services/transport/index.js` to forward `config` + `compactPrompt`
-- adds the unit tests above to `tests/unit/json-rpc-schema.test.ts`
-- passes unit/integration suites
+- legacy params removed (`compactPrompt`, `includeApplyPatchTool`): **DONE**
+- schema definition in `schema.ts`: **DONE**

@@ -219,8 +219,8 @@ async function runJsonRpcWorker() {
   let subscriptionSeq = 0;
   const conversations = new Map();
   const subscriptions = new Map();
-  const resolveConversationId = (params = {}) => {
-    const provided = params.conversation_id || params.conversationId;
+  const resolveThreadId = (params = {}) => {
+    const provided = params.threadId || params.thread_id;
     if (provided) {
       if (!conversations.has(provided)) conversations.set(provided, {});
       return provided;
@@ -228,6 +228,15 @@ async function runJsonRpcWorker() {
     const generated = `conv-${++conversationSeq}`;
     conversations.set(generated, {});
     return generated;
+  };
+  const emitTurnCompleted = (convId, requestId, finishReason) => {
+    const params = {
+      threadId: convId,
+      turn: { status: "completed" },
+    };
+    if (requestId) params.request_id = requestId;
+    if (finishReason) params.finish_reason = finishReason;
+    write({ jsonrpc: "2.0", method: "turn/completed", params });
   };
 
   const handleLine = async (line) => {
@@ -278,7 +287,11 @@ async function runJsonRpcWorker() {
         });
         break;
       }
-      case "newConversation": {
+      case "initialized": {
+        emitCapture("request", message);
+        break;
+      }
+      case "thread/start": {
         emitCapture("request", message);
         const convId = `conv-${++conversationSeq}`;
         conversations.set(convId, { lastTurn: null });
@@ -286,8 +299,7 @@ async function runJsonRpcWorker() {
           jsonrpc: "2.0",
           id,
           result: {
-            conversation_id: convId,
-            conversationId: convId,
+            threadId: convId,
             model: params?.model || process.env.CODEX_MODEL || "codex-5",
             reasoning_effort: null,
             reasoningEffort: null,
@@ -299,7 +311,7 @@ async function runJsonRpcWorker() {
       }
       case "addConversationListener": {
         emitCapture("request", message);
-        const convId = resolveConversationId(params);
+        const convId = resolveThreadId(params);
         const subscriptionId = `sub-${++subscriptionSeq}`;
         subscriptions.set(subscriptionId, convId);
         write({
@@ -341,17 +353,11 @@ async function runJsonRpcWorker() {
         });
         break;
       }
-      case "sendUserTurn": {
+      case "turn/start": {
         emitCapture("request", message);
-        const convId = resolveConversationId(params);
+        const convId = resolveThreadId(params);
         const existing = conversations.get(convId) || {};
         conversations.set(convId, { ...existing, lastTurn: params });
-        write({ jsonrpc: "2.0", id, result: { conversation_id: convId } });
-        break;
-      }
-      case "sendUserMessage": {
-        emitCapture("request", message);
-        const convId = resolveConversationId(params);
         if (hangMode === "message") {
           // Simulate a stalled worker by not emitting any response.
           return;
@@ -361,8 +367,8 @@ async function runJsonRpcWorker() {
             jsonrpc: "2.0",
             method: "error",
             params: {
-              conversation_id: convId,
-              request_id: params.request_id || convId,
+              threadId: convId,
+              request_id: params.request_id || params.requestId || null,
               codexErrorInfo: "unauthorized",
               willRetry: false,
             },
@@ -370,13 +376,13 @@ async function runJsonRpcWorker() {
           return;
         }
         const scenario = String(process.env.FAKE_CODEX_MODE || "").toLowerCase();
-        const requestId = params.request_id || convId;
+        const requestId = params.request_id || params.requestId || null;
         if (scenario === "stream_hang") {
           write({
             jsonrpc: "2.0",
             method: "agentMessageDelta",
             params: {
-              conversation_id: convId,
+              threadId: convId,
               request_id: requestId,
               delta: "Hello (pre-hang)",
             },
@@ -398,7 +404,7 @@ async function runJsonRpcWorker() {
               jsonrpc: "2.0",
               method: "agentMessageDelta",
               params: {
-                conversation_id: convId,
+                threadId: convId,
                 request_id: requestId,
                 delta: `tick-${i} `,
               },
@@ -426,7 +432,7 @@ async function runJsonRpcWorker() {
             jsonrpc: "2.0",
             method: "agentMessage",
             params: {
-              conversation_id: convId,
+              threadId: convId,
               request_id: requestId,
               message: {
                 role: "assistant",
@@ -438,16 +444,18 @@ async function runJsonRpcWorker() {
             jsonrpc: "2.0",
             method: "tokenCount",
             params: {
-              conversation_id: convId,
+              threadId: convId,
               request_id: requestId,
               prompt_tokens: 8,
               completion_tokens: 12,
             },
           });
+          emitTurnCompleted(convId, requestId, "stop");
           write({
             jsonrpc: "2.0",
             id,
             result: {
+              threadId: convId,
               finish_reason: "stop",
             },
           });
@@ -473,7 +481,7 @@ async function runJsonRpcWorker() {
           return;
         }
         if (scenario === "multi_choice_tool") {
-          const convId = resolveConversationId(params);
+          const convId = resolveThreadId(params);
           const calls = [
             { id: "multi_tool_0", name: "lookup_user" },
             { id: "multi_tool_1", name: "send_email" },
@@ -485,8 +493,8 @@ async function runJsonRpcWorker() {
               jsonrpc: "2.0",
               method: "agentMessageDelta",
               params: {
-                conversation_id: convId,
-                request_id: params.request_id || convId,
+                threadId: convId,
+                request_id: params.request_id || params.requestId || null,
                 delta: {
                   tool_calls: [
                     {
@@ -506,8 +514,8 @@ async function runJsonRpcWorker() {
                 jsonrpc: "2.0",
                 method: "agentMessageDelta",
                 params: {
-                  conversation_id: convId,
-                  request_id: params.request_id || convId,
+                  threadId: convId,
+                  request_id: params.request_id || params.requestId || null,
                   delta: {
                     tool_calls: [
                       {
@@ -527,8 +535,8 @@ async function runJsonRpcWorker() {
               jsonrpc: "2.0",
               method: "agentMessage",
               params: {
-                conversation_id: convId,
-                request_id: params.request_id || convId,
+                threadId: convId,
+                request_id: params.request_id || params.requestId || null,
                 message: {
                   role: "assistant",
                   content: null,
@@ -549,25 +557,27 @@ async function runJsonRpcWorker() {
             jsonrpc: "2.0",
             method: "tokenCount",
             params: {
-              conversation_id: convId,
-              request_id: params.request_id || convId,
+              threadId: convId,
+              request_id: params.request_id || params.requestId || null,
               prompt_tokens: 5,
               completion_tokens: 5,
               finish_reason: "tool_calls",
             },
           });
+          emitTurnCompleted(convId, params.request_id || params.requestId || null, "tool_calls");
           write({
             jsonrpc: "2.0",
             id,
             result: {
+              threadId: convId,
               finish_reason: "tool_calls",
             },
           });
           return;
         }
         if (scenario === "multi_choice_tool_call") {
-          const convId = resolveConversationId(params);
-          const requestId = params.request_id || convId;
+          const convId = resolveThreadId(params);
+          const requestId = params.request_id || params.requestId || null;
           const totalChoices = choiceCount ?? 2;
           const toolChoiceSet = new Set(toolCallChoices ?? [0]);
           const argumentValue = configuredToolArgument || '{"id":"42"}';
@@ -579,7 +589,7 @@ async function runJsonRpcWorker() {
                 jsonrpc: "2.0",
                 method: "agentMessageDelta",
                 params: {
-                  conversation_id: convId,
+                  threadId: convId,
                   request_id: requestId,
                   delta: { content: `Choice ${idx}`, choice_index: idx },
                   choice_index: idx,
@@ -591,7 +601,7 @@ async function runJsonRpcWorker() {
               jsonrpc: "2.0",
               method: "agentMessageDelta",
               params: {
-                conversation_id: convId,
+                threadId: convId,
                 request_id: requestId,
                 delta: {
                   tool_calls: [
@@ -612,7 +622,7 @@ async function runJsonRpcWorker() {
                 jsonrpc: "2.0",
                 method: "agentMessageDelta",
                 params: {
-                  conversation_id: convId,
+                  threadId: convId,
                   request_id: requestId,
                   delta: {
                     tool_calls: [
@@ -635,7 +645,7 @@ async function runJsonRpcWorker() {
                 jsonrpc: "2.0",
                 method: "agentMessage",
                 params: {
-                  conversation_id: convId,
+                  threadId: convId,
                   request_id: requestId,
                   message: {
                     role: "assistant",
@@ -651,7 +661,7 @@ async function runJsonRpcWorker() {
               jsonrpc: "2.0",
               method: "agentMessage",
               params: {
-                conversation_id: convId,
+                threadId: convId,
                 request_id: requestId,
                 message: {
                   role: "assistant",
@@ -673,17 +683,19 @@ async function runJsonRpcWorker() {
             jsonrpc: "2.0",
             method: "tokenCount",
             params: {
-              conversation_id: convId,
+              threadId: convId,
               request_id: requestId,
               prompt_tokens: 5,
               completion_tokens: 5,
               finish_reason: "tool_calls",
             },
           });
+          emitTurnCompleted(convId, requestId, "tool_calls");
           write({
             jsonrpc: "2.0",
             id,
             result: {
+              threadId: convId,
               finish_reason: "tool_calls",
             },
           });
@@ -812,8 +824,8 @@ async function runJsonRpcWorker() {
               jsonrpc: "2.0",
               method: "agentMessageDelta",
               params: {
-                conversation_id: convId,
-                request_id: params.request_id || convId,
+                threadId: convId,
+                request_id: params.request_id || params.requestId || null,
                 parallel_tool_calls: parallelToolCalls || effectiveToolCallCount > 1,
                 delta: {
                   tool_calls: [
@@ -836,8 +848,8 @@ async function runJsonRpcWorker() {
                   jsonrpc: "2.0",
                   method: "agentMessageDelta",
                   params: {
-                    conversation_id: convId,
-                    request_id: params.request_id || convId,
+                    threadId: convId,
+                    request_id: params.request_id || params.requestId || null,
                     delta: {
                       tool_calls: [
                         {
@@ -861,8 +873,8 @@ async function runJsonRpcWorker() {
                 jsonrpc: "2.0",
                 method: "agentMessageDelta",
                 params: {
-                  conversation_id: convId,
-                  request_id: params.request_id || convId,
+                  threadId: convId,
+                  request_id: params.request_id || params.requestId || null,
                   delta: chunk,
                 },
               });
@@ -886,8 +898,8 @@ async function runJsonRpcWorker() {
               jsonrpc: "2.0",
               method: "agentMessageDelta",
               params: {
-                conversation_id: convId,
-                request_id: params.request_id || convId,
+                threadId: convId,
+                request_id: params.request_id || params.requestId || null,
                 delta: chunk,
               },
             });
@@ -909,8 +921,8 @@ async function runJsonRpcWorker() {
         if (metadataPayload) assistantMessage.metadata = metadataPayload;
 
         const messageEnvelope = {
-          conversation_id: convId,
-          request_id: params.request_id || convId,
+          threadId: convId,
+          request_id: params.request_id || params.requestId || null,
           message: assistantMessage,
         };
         if (toolCalls) {
@@ -951,8 +963,8 @@ async function runJsonRpcWorker() {
           completionTokens = 9;
         }
         const usagePayload = {
-          conversation_id: convId,
-          request_id: params.request_id || convId,
+          threadId: convId,
+          request_id: params.request_id || params.requestId || null,
           prompt_tokens: promptTokens,
           completion_tokens: completionTokens,
         };
@@ -982,8 +994,8 @@ async function runJsonRpcWorker() {
             jsonrpc: "2.0",
             method: "agentMessage",
             params: {
-              conversation_id: convId,
-              request_id: params.request_id || convId,
+              threadId: convId,
+              request_id: params.request_id || params.requestId || null,
               message: {
                 role: "assistant",
                 content: null,
@@ -995,6 +1007,7 @@ async function runJsonRpcWorker() {
             jsonrpc: "2.0",
             id,
             result: {
+              threadId: convId,
               finish_reason: "tool_calls",
             },
           });
@@ -1003,10 +1016,12 @@ async function runJsonRpcWorker() {
           return;
         }
 
+        emitTurnCompleted(convId, params.request_id || params.requestId || null, finishReason);
         write({
           jsonrpc: "2.0",
           id,
           result: {
+            threadId: convId,
             finish_reason: finishReason,
           },
         });

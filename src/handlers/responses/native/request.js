@@ -364,7 +364,7 @@ export const normalizeResponsesRequest = (body = {}) => {
     );
   };
 
-  const { responseFormat, finalOutputJsonSchema } = ensureValidator(() =>
+  const { responseFormat, outputSchema } = ensureValidator(() =>
     normalizeResponseFormat(body?.text?.format)
   );
   const tools = normalizeResponsesTools(body.tools);
@@ -413,7 +413,7 @@ export const normalizeResponsesRequest = (body = {}) => {
     developerInstructions,
     inputItems: items,
     responseFormat,
-    finalOutputJsonSchema,
+    outputSchema,
     tools,
     toolChoice,
     parallelToolCalls,

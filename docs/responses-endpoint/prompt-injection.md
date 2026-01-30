@@ -5,7 +5,7 @@ This document describes the exact tool-call prompt text injected by the proxy fo
 Scope:
 - Endpoint: `/v1/responses`
 - Injection site: `src/handlers/responses/native/request.js`
-- Injection channel: `developerInstructions` passed to app-server on `newConversation`
+- Injection channel: `developerInstructions` passed to app-server on `thread/start`
 - Applies only when function tools are present
 
 ## Injection trigger
@@ -63,10 +63,7 @@ This section describes how tool prompt injection relates to the tool definitions
      3. `input` items with role `system` or `developer`
 
 3) **Forwarding to app-server**
-   - The normalized tool list is forwarded to app-server as `turn.tools`:
-     - `definitions` = the (normalized) function tools
-     - `choice` = normalized `tool_choice` (`auto`, `none`, `required`, or forced name)
-     - `parallelToolCalls` = normalized `parallel_tool_calls`
+   - The normalized tool list is forwarded to app-server as `thread/start.dynamicTools`.
    - The tool injection text is sent via `developerInstructions`, separate from user transcript.
 
 4) **Streaming parser configuration**

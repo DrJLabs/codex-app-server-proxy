@@ -7,7 +7,7 @@ The Codex app-server does **not** accept per-request tool manifests in JSON-RPC.
 - Built-in tools toggled in config (`web_search`, `view_image`)
 - MCP tools loaded from configured MCP servers
 
-As a result, `/v1/responses` requests that include `tools` are accepted by the proxy ingress but **cannot be forwarded** to the app-server as tool definitions. The JSON-RPC `SendUserTurnParams` only accepts `items` (text/image/localImage/skill), so client tool manifests are dropped before Codex core sees them.
+As a result, `/v1/responses` requests that include `tools` are accepted by the proxy ingress but **cannot be forwarded** to the app-server as per-turn tool definitions. Tool manifests are only accepted at thread start via `thread/start.dynamicTools`; `turn/start` accepts only `input` and execution controls.
 
 ## Evidence (Codex 0.89.0)
 
@@ -19,10 +19,10 @@ Exported schema (from the live CLI) confirms no `tools` field on the request par
 codex app-server generate-json-schema --out /tmp/app-server-schema
 ```
 
-- `SendUserTurnParams` only supports `conversation_id`, `items`, `cwd`, `approval_policy`, `sandbox_policy`, `model`, etc.
+- `TurnStartParams` only supports `threadId`, `input`, `cwd`, `approvalPolicy`, `sandboxPolicy`, `model`, etc.
   - `/tmp/app-server-schema/codex_app_server_protocol.schemas.json` (exported schema)
-  - `/external/codex/codex-rs/app-server-protocol/src/protocol/v1.rs`
-- `SendUserMessageParams` only supports `conversationId` and `items`.
+  - `/external/codex/codex-rs/app-server-protocol/src/protocol/v2.rs`
+- `ThreadStartParams` supports `dynamicTools` (tool manifests), `developerInstructions`, and conversation-scoped config.
   - `/tmp/app-server-schema/codex_app_server_protocol.schemas.json` (exported schema)
 
 ### Tool configuration is config + MCP only

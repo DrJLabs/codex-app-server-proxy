@@ -441,7 +441,9 @@ class JsonRpcTransport {
       throw err;
     }
 
-    this.#sendUserTurn(context, turnParams);
+    setImmediate(() => {
+      if (!context.completed) this.#sendUserTurn(context, turnParams);
+    });
     return context;
   }
 
@@ -456,30 +458,26 @@ class JsonRpcTransport {
 
     const basePayload = payload && typeof payload === "object" ? { ...(payload || {}) } : {};
 
-    const explicitConversationId =
-      basePayload.conversationId || basePayload.conversation_id || null;
-    if (explicitConversationId) {
-      context.conversationId = String(explicitConversationId);
+    const explicitThreadId = basePayload.threadId || basePayload.thread_id || null;
+    if (explicitThreadId) {
+      context.conversationId = String(explicitThreadId);
       this.contextsByConversation.set(context.conversationId, context);
       return context.conversationId;
     }
 
-    const dynamicTools = basePayload.dynamicTools ?? basePayload.dynamic_tools ?? undefined;
+    const dynamicTools = basePayload.dynamicTools ?? undefined;
 
     const conversationParams = buildThreadStartParams({
       model: basePayload.model ?? undefined,
-      modelProvider: basePayload.modelProvider ?? basePayload.model_provider ?? undefined,
+      modelProvider: basePayload.modelProvider ?? undefined,
       profile: basePayload.profile ?? undefined,
       cwd: basePayload.cwd ?? undefined,
-      approvalPolicy: basePayload.approvalPolicy ?? basePayload.approval_policy ?? undefined,
+      approvalPolicy: basePayload.approvalPolicy ?? undefined,
       sandbox: basePayload.sandboxPolicy ?? basePayload.sandbox ?? undefined,
       config: basePayload.config ?? undefined,
-      compactPrompt: basePayload.compactPrompt ?? basePayload.compact_prompt ?? undefined,
       baseInstructions: basePayload.baseInstructions ?? undefined,
       developerInstructions: basePayload.developerInstructions ?? undefined,
       dynamicTools,
-      includeApplyPatchTool:
-        basePayload.includeApplyPatchTool ?? basePayload.include_apply_patch_tool ?? undefined,
       experimentalRawEvents: false,
     });
 
@@ -490,20 +488,19 @@ class JsonRpcTransport {
       type: "thread/start",
     });
 
-    const conversationId =
-      conversationResult?.conversation_id ||
-      conversationResult?.conversationId ||
-      conversationResult?.conversation?.id ||
+    const threadId =
+      conversationResult?.threadId ||
+      conversationResult?.thread_id ||
       conversationResult?.thread?.id;
 
-    if (!conversationId) {
-      throw new TransportError("thread/start did not return a conversation id", {
+    if (!threadId) {
+      throw new TransportError("thread/start did not return a thread id", {
         code: "worker_invalid_response",
         retryable: true,
       });
     }
 
-    context.conversationId = String(conversationId);
+    context.conversationId = String(threadId);
     this.contextsByConversation.set(context.conversationId, context);
 
     const listenerResult = await this.#callWorkerRpc({
@@ -688,10 +685,10 @@ class JsonRpcTransport {
         clearTimeout(timeout);
         this.pending.delete(turnRpcId);
         this.#clearRpcTrace(turnRpcId);
-        const serverConversationId = result?.conversation_id || result?.conversationId || null;
-        if (serverConversationId) {
-          context.conversationId = String(serverConversationId);
-          if (serverConversationId !== context.clientConversationId) {
+        const serverThreadId = result?.threadId || result?.thread_id || null;
+        if (serverThreadId) {
+          context.conversationId = String(serverThreadId);
+          if (serverThreadId !== context.clientConversationId) {
             this.contextsByConversation.set(context.conversationId, context);
           }
         }
@@ -867,12 +864,7 @@ class JsonRpcTransport {
 
     const params = message.params && typeof message.params === "object" ? message.params : {};
     const callId = params.callId || params.call_id || params.id || params.callID || null;
-    const threadId =
-      params.threadId ||
-      params.thread_id ||
-      params.conversationId ||
-      params.conversation_id ||
-      null;
+    const threadId = params.threadId || params.thread_id || null;
     const tool = params.tool || params.name || null;
     const argumentsPayload = Object.prototype.hasOwnProperty.call(params, "arguments")
       ? params.arguments
@@ -883,9 +875,7 @@ class JsonRpcTransport {
       return;
     }
 
-    const context =
-      this.contextsByConversation.get(threadId) ||
-      this.#resolveContext({ conversationId: threadId, conversation_id: threadId });
+    const context = this.contextsByConversation.get(threadId) || this.#resolveContext({ threadId });
 
     if (context?.trace) {
       try {
@@ -913,7 +903,6 @@ class JsonRpcTransport {
           callId: key,
           threadId: String(threadId),
           turnId: params.turnId || params.turn_id || null,
-          conversationId: String(threadId),
         },
       });
     } catch (err) {
@@ -1204,10 +1193,11 @@ class JsonRpcTransport {
 
   #resolveContext(params) {
     const idCandidates = [
-      params?.conversation_id,
-      params?.conversationId,
+      params?.threadId,
+      params?.thread_id,
       params?.conversation?.id,
-      params?.context?.conversation_id,
+      params?.context?.thread_id,
+      params?.context?.threadId,
       params?.request_id,
       params?.requestId,
     ];

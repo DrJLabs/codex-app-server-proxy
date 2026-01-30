@@ -5,6 +5,21 @@ import { config as CFG } from "../../src/config/index.js";
 
 const CAPTURE_TIMEOUT_MS = 4000;
 const MAX_ATTEMPTS = 5;
+const INTERNAL_TOOLS_INSTRUCTION =
+  "Never use internal tools (shell/exec_command/apply_patch/update_plan/view_image). Request only dynamic tool calls provided by the client.";
+
+const mapSandboxPolicyType = (mode) => {
+  switch (String(mode || "").trim()) {
+    case "read-only":
+      return "readOnly";
+    case "workspace-write":
+      return "workspaceWrite";
+    case "danger-full-access":
+      return "dangerFullAccess";
+    default:
+      return mode;
+  }
+};
 
 const attachCaptureCollector = (stream, out) => {
   if (!stream) return;
@@ -155,25 +170,28 @@ describe("chat JSON-RPC normalization", () => {
     expect(response.status).toBe(200);
     await response.json();
 
-    await waitForCapture(server.captures, (entry) => entry?.payload?.method === "sendUserMessage");
+    await waitForCapture(server.captures, (entry) => entry?.payload?.method === "turn/start");
 
-    const newConversationCapture = findCapture(server.captures, "newConversation");
-    expect(newConversationCapture).toBeDefined();
-    const newConversationParams = newConversationCapture?.payload?.params ?? {};
-    expect(newConversationParams.model).toBe(CFG.CODEX_MODEL);
-    expect(newConversationParams.cwd).toBe(CFG.PROXY_CODEX_WORKDIR);
-    expect(newConversationParams.sandbox).toBe(CFG.PROXY_SANDBOX_MODE);
-    expect(newConversationParams.baseInstructions).toBe(
-      payload.messages.find((msg) => msg.role === "system")?.content ?? undefined
-    );
+    const threadStartCapture = findCapture(server.captures, "thread/start");
+    expect(threadStartCapture).toBeDefined();
+    const threadStartParams = threadStartCapture?.payload?.params ?? {};
+    expect(threadStartParams.model).toBe(CFG.CODEX_MODEL);
+    expect(threadStartParams.cwd).toBe(CFG.PROXY_CODEX_WORKDIR);
+    expect(threadStartParams.sandbox).toBe(CFG.PROXY_SANDBOX_MODE);
+    const expectedBaseInstructions = [
+      payload.messages.find((msg) => msg.role === "system")?.content ?? undefined,
+      CFG.PROXY_DISABLE_INTERNAL_TOOLS ? INTERNAL_TOOLS_INSTRUCTION : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    expect(threadStartParams.baseInstructions).toBe(expectedBaseInstructions);
     const expectedApproval = (() => {
       const raw = process.env.PROXY_APPROVAL_POLICY ?? process.env.CODEX_APPROVAL_POLICY ?? "never";
       const normalized = String(raw).trim().toLowerCase();
       return normalized || "never";
     })();
-    expect(newConversationParams.approvalPolicy).toBe(expectedApproval);
-    expect(newConversationParams.includeApplyPatchTool).toBe(true);
-    expect(newConversationParams.dynamicTools).toEqual([
+    expect(threadStartParams.approvalPolicy).toBe(expectedApproval);
+    expect(threadStartParams.dynamicTools).toEqual([
       {
         name: "list_files",
         description: "lists files",
@@ -190,7 +208,7 @@ describe("chat JSON-RPC normalization", () => {
     expect(addListenerCapture).toBeDefined();
     expect(addListenerCapture?.payload?.params?.conversationId).toBeDefined();
 
-    const turnCapture = findCapture(server.captures, "sendUserTurn");
+    const turnCapture = findCapture(server.captures, "turn/start");
     expect(turnCapture).toBeDefined();
     const turnParams = turnCapture.payload?.params ?? {};
     expect(turnParams.model).toBe(CFG.CODEX_MODEL);
@@ -198,30 +216,18 @@ describe("chat JSON-RPC normalization", () => {
     expect(turnParams.cwd).toBe(CFG.PROXY_CODEX_WORKDIR);
     expect(turnParams.summary).toBe("auto");
     expect(turnParams.effort).toBe("medium");
-    expect(turnParams.sandboxPolicy).toMatchObject({ type: CFG.PROXY_SANDBOX_MODE });
-    expect(turnParams.metadata).toBeUndefined();
-    expect(turnParams.items).toBeInstanceOf(Array);
-    expect(turnParams.items?.[0]).toMatchObject({
-      type: "text",
-      data: { text: payload.messages.find((msg) => msg.role === "user")?.content },
+    expect(turnParams.sandboxPolicy).toMatchObject({
+      type: mapSandboxPolicyType(CFG.PROXY_SANDBOX_MODE),
     });
-    expect(turnParams.conversationId).toMatch(/^conv-/);
-
-    const messageCapture = findCapture(server.captures, "sendUserMessage");
-    expect(messageCapture).toBeDefined();
-    const params = messageCapture.payload.params;
-    expect(params.conversationId).toBe(turnParams.conversationId);
-    expect(params.metadata).toBeUndefined();
-    expect(params.includeUsage).toBe(true);
-    expect(params.items).toBeInstanceOf(Array);
-    expect(params.items?.[0]).toMatchObject({
+    expect(turnParams.input).toBeInstanceOf(Array);
+    expect(turnParams.input?.[0]).toMatchObject({
       type: "text",
-      data: { text: payload.messages.find((msg) => msg.role === "user")?.content },
+      text: payload.messages.find((msg) => msg.role === "user")?.content,
     });
-    expect(params.items).toEqual(turnParams.items);
+    expect(turnParams.threadId).toBe(addListenerCapture?.payload?.params?.conversationId);
   }, 20000);
 
-  it("flags streaming requests and include_usage in JSON-RPC payload", async () => {
+  it("routes streaming requests through turn/start payloads", async () => {
     server = await startServerWithCapture({ PROXY_API_KEY: "test-sk-ci" });
 
     const payload = {
@@ -238,18 +244,15 @@ describe("chat JSON-RPC normalization", () => {
       response.body?.destroy?.();
     } catch {}
 
-    await waitForCapture(server.captures, (entry) => entry?.payload?.method === "sendUserMessage");
-    const turnCapture = findCapture(server.captures, "sendUserTurn");
+    await waitForCapture(server.captures, (entry) => entry?.payload?.method === "turn/start");
+    const turnCapture = findCapture(server.captures, "turn/start");
     expect(turnCapture).toBeDefined();
     const streamingTurnParams = turnCapture?.payload?.params ?? {};
     expect(streamingTurnParams.model).toBe(CFG.CODEX_MODEL);
-    expect(streamingTurnParams.sandboxPolicy).toMatchObject({ type: CFG.PROXY_SANDBOX_MODE });
-    expect(streamingTurnParams.items?.[0]?.data?.text).toBe("Stream hello");
-    const messageCapture = findCapture(server.captures, "sendUserMessage");
-    expect(messageCapture).toBeDefined();
-    expect(messageCapture.payload.params.conversationId).toBe(streamingTurnParams.conversationId);
-    expect(messageCapture.payload.params.items?.[0]?.data?.text).toBe("Stream hello");
-    expect(messageCapture.payload.params.includeUsage).toBe(true);
+    expect(streamingTurnParams.sandboxPolicy).toMatchObject({
+      type: mapSandboxPolicyType(CFG.PROXY_SANDBOX_MODE),
+    });
+    expect(streamingTurnParams.input?.[0]?.text).toBe("Stream hello");
   }, 20000);
 
   it("returns invalid_request_error for non-numeric temperature", async () => {
@@ -424,10 +427,10 @@ describe("chat JSON-RPC normalization", () => {
     expect(response.status).toBe(200);
     await response.json();
 
-    await waitForCapture(server.captures, (entry) => entry?.payload?.method === "sendUserTurn");
-    const turnCapture = findCapture(server.captures, "sendUserTurn");
+    await waitForCapture(server.captures, (entry) => entry?.payload?.method === "turn/start");
+    const turnCapture = findCapture(server.captures, "turn/start");
     expect(turnCapture).toBeDefined();
-    const promptText = turnCapture.payload?.params?.items?.[0]?.data?.text || "";
+    const promptText = turnCapture.payload?.params?.input?.[0]?.text || "";
     expect(promptText).toContain("[assistant] previous reply");
     expect(promptText).toContain("[user] continue");
   }, 20000);

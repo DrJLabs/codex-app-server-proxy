@@ -45,7 +45,7 @@ describe("dev-trace backend logging", () => {
       { reqId: "req-1", route: "/v1/chat", mode: "chat", trace_id: "trace-1" },
       {
         rpcId: 2,
-        method: "sendUserTurn",
+        method: "turn/start",
         params: { message: "hi" },
       }
     );
@@ -133,7 +133,7 @@ describe("dev-trace backend logging", () => {
       { reqId: "req-7", route: "/v1/responses", mode: "responses_stream" },
       {
         rpcId: 9,
-        method: "sendUserTurn",
+        method: "turn/start",
         params: { input: "hi" },
       }
     );

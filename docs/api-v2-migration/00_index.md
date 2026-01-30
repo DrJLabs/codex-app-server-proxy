@@ -8,9 +8,9 @@ Upgrade the proxy to speak **Codex app-server protocol API V2** end-to-end (not 
 - Each file contains: scope, concrete TODOs, “where to look” pointers, search patterns, and **proposed patch snippets**.
 
 ## Migration checklist (working order)
-- [ ] 01: JSON-RPC `initialize` handshake sends `protocolVersion: "v2"` + `capabilities: {}` (plus optional v1 fallback) and passes shim compatibility checks.
-- [ ] 02: `newConversation` bootstrap forwards `config` + `compactPrompt`, preserves sandbox normalization, and adds unit tests for edge cases.
-- [ ] 03: Request path uses `sendUserMessage(stream:true)` explicitly for streaming, preserves non-stream behavior; **nonstream buffering fallback is optional** (enable only if upstream requires streaming), and keeps dynamic tool injection end-to-end.
+- [ ] 01: JSON-RPC `initialize` handshake sends `protocolVersion: "v2"` + `capabilities: {}` and emits `initialized` (no v1 fallback).
+- [ ] 02: `thread/start` bootstrap forwards `config` + `dynamicTools`, preserves sandbox normalization, and drops legacy v1 params.
+- [ ] 03: Request path uses `turn/start` for both streaming and non-stream behavior; no `sendUserTurn` / `sendUserMessage` methods.
 - [ ] 04: Streaming notifications accept v2 `response.*` tool-call lifecycle events without dropping text deltas; **adapter raw `response.*` handling is optional** unless raw events reach the adapter; add tests for aggregator + adapter behavior.
 - [ ] 05: `/v1/responses` output parity: output item typing, SSE ordering, `output_index` semantics, tool argument normalization, and policy choice for `usage`/`finish_reason`.
 - [ ] 06: Error mapping + completion semantics: normalize Codex errors to OpenAI envelopes, preserve auth/rate-limit, and ensure exactly-once termination for streaming.

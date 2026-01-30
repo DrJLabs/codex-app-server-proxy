@@ -189,12 +189,9 @@ describe("json-rpc schema bindings", () => {
         method: "thread/start",
         params: { model: "gpt-5.2" },
       });
-      const conversationId =
-        threadResp.result?.conversation_id ||
-        (threadResp.result as Record<string, unknown>).conversationId ||
-        (threadResp.result as Record<string, unknown>).thread_id ||
-        (threadResp.result as Record<string, unknown>).threadId;
-      expect(typeof conversationId === "string").toBe(true);
+      const threadId =
+        threadResp.result?.threadId || (threadResp.result as Record<string, unknown>).thread_id;
+      expect(typeof threadId === "string").toBe(true);
 
       const requestId = "req-text";
       const turnRequest = {
@@ -202,7 +199,7 @@ describe("json-rpc schema bindings", () => {
         id: 3,
         method: "turn/start",
         params: {
-          threadId: conversationId,
+          threadId,
           input: [{ type: "text", text: "User says hello", text_elements: [] }],
           approvalPolicy: "never",
           summary: "auto",
@@ -232,7 +229,7 @@ describe("json-rpc schema bindings", () => {
       expect(delta).toBeDefined();
       if (delta) {
         const params = (delta as AgentMessageDeltaNotification).params;
-        expect(extractConversationId(params)).toBe(conversationId);
+        expect(extractConversationId(params)).toBe(threadId);
         if (extractRequestId(params)) {
           expect(extractRequestId(params)).toBe(requestId);
         }
@@ -288,18 +285,15 @@ describe("json-rpc schema bindings", () => {
         method: "thread/start",
         params: { model: "gpt-5.2" },
       });
-      const conversationId =
-        threadResp.result?.conversation_id ||
-        (threadResp.result as Record<string, unknown>).conversationId ||
-        (threadResp.result as Record<string, unknown>).thread_id ||
-        (threadResp.result as Record<string, unknown>).threadId;
+      const threadId =
+        threadResp.result?.threadId || (threadResp.result as Record<string, unknown>).thread_id;
 
       const turnRequest = {
         jsonrpc: JSONRPC_VERSION,
         id: 13,
         method: "turn/start",
         params: {
-          threadId: conversationId,
+          threadId,
           input: [{ type: "text", text: "Execute tool", text_elements: [] }],
           approvalPolicy: "never",
           summary: "auto",
@@ -345,11 +339,6 @@ describe("json-rpc schema bindings", () => {
 
       const tokenCount = notifications.find(isTokenCountNotification);
       expect(tokenCount).toBeDefined();
-
-      expect(isSendUserMessageResult(messageResponse?.result)).toBe(true);
-      if (messageResponse?.result?.finish_reason) {
-        expect(typeof messageResponse.result.finish_reason).toBe("string");
-      }
     } finally {
       worker.reader.close();
       worker.stderr?.close();
@@ -359,7 +348,7 @@ describe("json-rpc schema bindings", () => {
 
   it("deserializes parity fixture streams into notification envelopes", async () => {
     const fixture = await loadTranscript("streaming-tool-calls.json", { backend: "app" });
-    const conversationId = "fixture-conv";
+    const threadId = "fixture-conv";
     const requestId = "fixture-req";
 
     const notifications: Record<string, unknown>[] = [];
@@ -378,7 +367,7 @@ describe("json-rpc schema bindings", () => {
           jsonrpc: JSONRPC_VERSION,
           method: "agentMessageDelta",
           params: {
-            conversation_id: conversationId,
+            threadId,
             request_id: requestId,
             delta,
           },
@@ -401,7 +390,7 @@ describe("json-rpc schema bindings", () => {
           jsonrpc: JSONRPC_VERSION,
           method: "tokenCount",
           params: {
-            conversation_id: conversationId,
+            threadId,
             request_id: requestId,
             prompt_tokens: entry.data.usage.prompt_tokens,
             completion_tokens: entry.data.usage.completion_tokens,
@@ -416,7 +405,7 @@ describe("json-rpc schema bindings", () => {
       jsonrpc: JSONRPC_VERSION,
       method: "agentMessage",
       params: {
-        conversation_id: conversationId,
+        threadId,
         request_id: requestId,
         message: {
           role: "assistant",
@@ -451,7 +440,6 @@ describe("json-rpc schema bindings", () => {
         sandbox: { type: "workspace-write", writable_roots: ["/tmp"] },
         baseInstructions: "  base ",
         developerInstructions: null,
-        includeApplyPatchTool: true,
       });
       expect(params.model).toBe("gpt-5.2");
       expect(params.profile).toBeNull();
@@ -460,7 +448,6 @@ describe("json-rpc schema bindings", () => {
       expect(params.sandbox).toBe("workspace-write");
       expect(params.baseInstructions).toBe("base");
       expect(params.developerInstructions).toBeNull();
-      expect(params).not.toHaveProperty("includeApplyPatchTool");
     });
 
     it("passes through config and dynamicTools in thread/start params", () => {
@@ -468,7 +455,6 @@ describe("json-rpc schema bindings", () => {
       const dynamicTools = [{ name: "lookup", description: "", inputSchema: { type: "object" } }];
       const params = buildThreadStartParams({
         config,
-        compactPrompt: "true",
         dynamicTools,
       });
       expect(params.config).toEqual(config);
@@ -497,7 +483,7 @@ describe("json-rpc schema bindings", () => {
       const item = createUserMessageItem("hello", { message_count: 1, messageCount: 1 });
       const params = buildTurnStartParams({
         items: [item],
-        conversationId: "conv-1",
+        threadId: "conv-1",
         approvalPolicy: "NEVER",
         sandboxPolicy: { type: "workspace-write", writable_roots: ["/tmp"] },
         summary: "concise",
@@ -517,42 +503,19 @@ describe("json-rpc schema bindings", () => {
     it("normalizes output schema options for turn/start params", () => {
       const item = createUserMessageItem("hello");
       const outputSchema = { type: "object", properties: { title: { type: "string" } } };
-      const snakeSchema = { type: "array" };
-      const legacySchema = { type: "string" };
       const params = buildTurnStartParams({
         items: [item],
-        conversationId: "conv-schema",
+        threadId: "conv-schema",
         outputSchema,
-        output_schema: snakeSchema,
-        finalOutputJsonSchema: legacySchema,
       });
 
       expect(params.outputSchema).toEqual(outputSchema);
-      expect(params).not.toHaveProperty("output_schema");
-
-      const paramsSnake = buildTurnStartParams({
-        items: [item],
-        conversationId: "conv-schema-snake",
-        output_schema: snakeSchema,
-      });
-
-      expect(paramsSnake.outputSchema).toEqual(snakeSchema);
-      expect(paramsSnake).not.toHaveProperty("output_schema");
-
-      const paramsLegacy = buildTurnStartParams({
-        items: [item],
-        conversationId: "conv-schema-legacy",
-        finalOutputJsonSchema: legacySchema,
-      });
-
-      expect(paramsLegacy.outputSchema).toEqual(legacySchema);
-      expect(paramsLegacy).not.toHaveProperty("output_schema");
     });
 
     it("normalizes legacy item shapes to typed input items", () => {
       const params = buildTurnStartParams({
         items: ["hi", { text: "hello" }, { data: { text: "hey" } }],
-        conversationId: "conv-legacy",
+        threadId: "conv-legacy",
         approvalPolicy: "never",
         sandboxPolicy: "read-only",
         summary: "auto",

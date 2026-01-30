@@ -358,7 +358,6 @@ export async function postResponsesNonStream(req, res) {
     approvalPolicy: APPROVAL_POLICY,
     sandboxPolicy: SANDBOX_MODE ? { type: SANDBOX_MODE } : undefined,
     summary: "auto",
-    includeApplyPatchTool: !disableInternalTools,
   };
   if (Number.isInteger(nValue) && nValue > 0) turn.choiceCount = nValue;
   if (dynamicTools !== undefined) turn.dynamicTools = dynamicTools;
@@ -368,8 +367,8 @@ export async function postResponsesNonStream(req, res) {
   if (baseInstructions) {
     turn.baseInstructions = baseInstructions;
   }
-  if (normalized.finalOutputJsonSchema !== undefined) {
-    turn.finalOutputJsonSchema = normalized.finalOutputJsonSchema;
+  if (normalized.outputSchema !== undefined) {
+    turn.outputSchema = normalized.outputSchema;
   }
 
   const message = {
@@ -378,8 +377,8 @@ export async function postResponsesNonStream(req, res) {
   };
   if (maxOutputTokens !== undefined) message.maxOutputTokens = maxOutputTokens;
   if (normalized.responseFormat !== undefined) message.responseFormat = normalized.responseFormat;
-  if (normalized.finalOutputJsonSchema !== undefined) {
-    message.finalOutputJsonSchema = normalized.finalOutputJsonSchema;
+  if (normalized.outputSchema !== undefined) {
+    message.outputSchema = normalized.outputSchema;
   }
   if (dynamicTools !== undefined) message.dynamicTools = dynamicTools;
 

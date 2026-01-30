@@ -3,6 +3,7 @@ import { describe, expect, test, vi, beforeEach } from "vitest";
 const selectBackendModeMock = vi.fn();
 const isWorkerSupervisorReadyMock = vi.fn();
 const getWorkerStatusMock = vi.fn();
+const ensureHandshakeMock = vi.fn();
 const applyCorsMock = vi.fn();
 
 vi.mock("../../../src/services/backend-mode.js", () => ({
@@ -14,6 +15,10 @@ vi.mock("../../../src/services/backend-mode.js", () => ({
 vi.mock("../../../src/services/worker/supervisor.js", () => ({
   isWorkerSupervisorReady: () => isWorkerSupervisorReadyMock(),
   getWorkerStatus: () => getWorkerStatusMock(),
+}));
+
+vi.mock("../../../src/services/transport/index.js", () => ({
+  getJsonRpcTransport: () => ({ ensureHandshake: ensureHandshakeMock }),
 }));
 
 vi.mock("../../../src/utils.js", () => ({
@@ -35,6 +40,7 @@ describe("requireWorkerReady", () => {
     selectBackendModeMock.mockReset();
     isWorkerSupervisorReadyMock.mockReset();
     getWorkerStatusMock.mockReset();
+    ensureHandshakeMock.mockReset();
     applyCorsMock.mockReset();
   });
 
@@ -72,16 +78,32 @@ describe("requireWorkerReady", () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
-  test("returns 503 when supervisor is not ready", () => {
+  test("attempts handshake before allowing request when supervisor is not ready", async () => {
     selectBackendModeMock.mockReturnValue("app-server");
     isWorkerSupervisorReadyMock.mockReturnValue(false);
+    ensureHandshakeMock.mockResolvedValue({ ok: true });
+    const req = {};
+    const res = createRes();
+    const next = vi.fn();
+
+    await requireWorkerReady(req, res, next);
+
+    expect(ensureHandshakeMock).toHaveBeenCalled();
+    expect(next).toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  test("returns 503 when handshake attempt fails", async () => {
+    selectBackendModeMock.mockReturnValue("app-server");
+    isWorkerSupervisorReadyMock.mockReturnValue(false);
+    ensureHandshakeMock.mockRejectedValue(new Error("handshake failed"));
     const statusPayload = { ready: false };
     getWorkerStatusMock.mockReturnValue(statusPayload);
     const req = {};
     const res = createRes();
     const next = vi.fn();
 
-    requireWorkerReady(req, res, next);
+    await requireWorkerReady(req, res, next);
 
     expect(next).not.toHaveBeenCalled();
     expect(applyCorsMock).toHaveBeenCalled();

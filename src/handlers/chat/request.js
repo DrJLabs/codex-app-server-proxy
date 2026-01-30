@@ -310,8 +310,7 @@ const normalizeReasoningControls = (reasoningEffort, rawReasoning) => {
 };
 
 const normalizeResponseFormat = (responseFormat) => {
-  if (responseFormat === undefined)
-    return { responseFormat: undefined, finalOutputJsonSchema: undefined };
+  if (responseFormat === undefined) return { responseFormat: undefined, outputSchema: undefined };
   if (responseFormat === null) {
     throw new ChatJsonRpcNormalizationError(
       invalidRequestBody("response_format", "response_format must be an object when provided")
@@ -333,7 +332,7 @@ const normalizeResponseFormat = (responseFormat) => {
     );
   }
   if (type === "text" || type === "json_object") {
-    return { responseFormat: { ...responseFormat, type }, finalOutputJsonSchema: undefined };
+    return { responseFormat: { ...responseFormat, type }, outputSchema: undefined };
   }
   if (type !== "json_schema") {
     throw new ChatJsonRpcNormalizationError(
@@ -373,7 +372,7 @@ const normalizeResponseFormat = (responseFormat) => {
       type: "json_schema",
       json_schema: normalizedSchemaContainer,
     },
-    finalOutputJsonSchema: schema,
+    outputSchema: schema,
   };
 };
 
@@ -476,7 +475,7 @@ export const normalizeChatJsonRpcRequest = ({
   const combinedText = transcript || fallbackText;
   const turnItems = [createUserMessageItem(combinedText)];
   const messageItems = turnItems.map((item) => ({ ...item }));
-  const { responseFormat, finalOutputJsonSchema } = normalizeResponseFormat(body.response_format);
+  const { responseFormat, outputSchema } = normalizeResponseFormat(body.response_format);
   const dynamicTools = buildDynamicTools(definitions, toolChoice);
   const { turnEffort, reasoningPayload } = normalizeReasoningControls(
     reasoningEffort,
@@ -496,7 +495,6 @@ export const normalizeChatJsonRpcRequest = ({
     effort: turnEffort,
     summary: "auto",
     stream: !!stream,
-    includeApplyPatchTool: !disableInternalTools,
   };
 
   if (Number.isInteger(choiceCount) && choiceCount > 0) {
@@ -518,8 +516,8 @@ export const normalizeChatJsonRpcRequest = ({
     turn.dynamicTools = dynamicTools;
   }
 
-  if (finalOutputJsonSchema !== undefined) {
-    turn.finalOutputJsonSchema = finalOutputJsonSchema;
+  if (outputSchema !== undefined) {
+    turn.outputSchema = outputSchema;
   }
 
   const messagePayload = {
@@ -540,8 +538,8 @@ export const normalizeChatJsonRpcRequest = ({
   if (reasoningPayload !== undefined) {
     messagePayload.reasoning = reasoningPayload;
   }
-  if (finalOutputJsonSchema !== undefined) {
-    messagePayload.finalOutputJsonSchema = finalOutputJsonSchema;
+  if (outputSchema !== undefined) {
+    messagePayload.outputSchema = outputSchema;
   }
 
   return { turn, message: messagePayload };

@@ -55,7 +55,7 @@ describe("json-rpc schema helper behavior", () => {
   it("applies approval, summary, and sandbox fallbacks", () => {
     const params = buildTurnStartParams({
       items: [],
-      conversationId: "conv",
+      threadId: "conv",
       approvalPolicy: "invalid",
       sandboxPolicy: { type: "unknown" },
       summary: "unknown",
@@ -69,7 +69,7 @@ describe("json-rpc schema helper behavior", () => {
   it("preserves workspace-write sandbox options", () => {
     const params = buildTurnStartParams({
       items: [],
-      conversationId: "conv",
+      threadId: "conv",
       approvalPolicy: "never",
       sandboxPolicy: {
         type: "workspace-write",
@@ -88,19 +88,6 @@ describe("json-rpc schema helper behavior", () => {
       excludeTmpdirEnvVar: true,
       excludeSlashTmp: true,
     });
-  });
-
-  it("ignores choiceCount on turn/start params", () => {
-    const params = buildTurnStartParams({
-      items: [],
-      conversationId: "conv",
-      approvalPolicy: "never",
-      sandboxPolicy: "read-only",
-      summary: "auto",
-      choiceCount: "2",
-    });
-
-    expect(params).not.toHaveProperty("choiceCount");
   });
 
   it("normalizes optional approval and sandbox modes for thread start", () => {
@@ -143,10 +130,10 @@ describe("json-rpc schema helper behavior", () => {
   });
 
   it("extracts conversation and request ids from nested payloads", () => {
-    expect(extractConversationId({ conversation_id: "conv-1" })).toBe("conv-1");
-    expect(extractConversationId({ conversationId: "conv-1b" })).toBe("conv-1b");
+    expect(extractConversationId({ threadId: "conv-1" })).toBe("conv-1");
+    expect(extractConversationId({ threadId: "conv-1b" })).toBe("conv-1b");
     expect(extractConversationId({ conversation: { id: "conv-2" } })).toBe("conv-2");
-    expect(extractConversationId({ context: { conversation_id: "conv-3" } })).toBe("conv-3");
+    expect(extractConversationId({ context: { threadId: "conv-3" } })).toBe("conv-3");
 
     expect(extractRequestId({ request_id: "req-1" })).toBe("req-1");
     expect(extractRequestId({ requestId: "req-1b" })).toBe("req-1b");
@@ -158,27 +145,23 @@ describe("json-rpc schema helper behavior", () => {
       sandbox: { mode: "read-only" },
       profile: "",
       config: "nope" as unknown as Record<string, unknown>,
-      includeApplyPatchTool: true,
     });
 
     expect(params.sandbox).toBe("read-only");
     expect(params.profile).toBeNull();
     expect(params).not.toHaveProperty("config");
-    expect(params).not.toHaveProperty("includeApplyPatchTool");
   });
 
-  it("skips invalid choice counts", () => {
+  it("skips invalid effort values", () => {
     const params = buildTurnStartParams({
       items: [],
-      conversationId: "conv",
+      threadId: "conv",
       approvalPolicy: "never",
       sandboxPolicy: "read-only",
       summary: "auto",
-      choiceCount: "0",
       effort: "invalid" as unknown as string,
     });
 
-    expect(params).not.toHaveProperty("choiceCount");
     expect(params).not.toHaveProperty("effort");
   });
 
@@ -186,7 +169,7 @@ describe("json-rpc schema helper behavior", () => {
     const notification = {
       jsonrpc: JSONRPC_VERSION,
       method: "requestTimeout",
-      params: { request_id: "req-1", conversation_id: "conv-1" },
+      params: { request_id: "req-1", threadId: "conv-1" },
     };
     const success = { jsonrpc: JSONRPC_VERSION, id: 1, result: { ok: true } };
     const error = { jsonrpc: JSONRPC_VERSION, id: 2, error: { code: "bad", message: "boom" } };
@@ -206,14 +189,14 @@ describe("json-rpc schema helper behavior", () => {
     const badDelta = {
       jsonrpc: JSONRPC_VERSION,
       method: "agentMessageDelta",
-      params: { conversation_id: "conv" },
+      params: { threadId: "conv" },
     };
     expect(isAgentMessageDeltaNotification(badDelta)).toBe(false);
 
     const badToken = {
       jsonrpc: JSONRPC_VERSION,
       method: "tokenCount",
-      params: { conversation_id: "conv" },
+      params: { threadId: "conv" },
     };
     expect(isTokenCountNotification(badToken)).toBe(false);
 
@@ -229,7 +212,7 @@ describe("json-rpc schema helper behavior", () => {
     const delta = {
       jsonrpc: JSONRPC_VERSION,
       method: "agentMessageDelta",
-      params: { conversation_id: "conv-1", delta: { content: "hello" } },
+      params: { threadId: "conv-1", delta: { content: "hello" } },
     };
 
     expect(isAgentMessageDeltaNotification(delta)).toBe(true);
@@ -239,7 +222,7 @@ describe("json-rpc schema helper behavior", () => {
     const agentMessage = {
       jsonrpc: JSONRPC_VERSION,
       method: "agentMessage",
-      params: { conversationId: "conv-1", message: { role: "assistant" } },
+      params: { threadId: "conv-1", message: { role: "assistant" } },
     };
     expect(isAgentMessageNotification(agentMessage)).toBe(true);
 

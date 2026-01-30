@@ -13,10 +13,9 @@ Primary bundle:
 
 From the generated schema:
 
-- `SendUserTurnParams.properties` = `approvalPolicy`, `conversationId`, `cwd`, `effort`, `items`, `model`, `outputSchema`, `sandboxPolicy`, `summary`
-- `SendUserMessageParams.properties` = `conversationId`, `items`
+- `v2.TurnStartParams.properties` = `threadId`, `input`, `approvalPolicy`, `cwd`, `effort`, `model`, `outputSchema`, `sandboxPolicy`, `summary`
 
-There is still **no `tools` field** on the v1 request types.
+There is still **no `tools` field** on the v2 `turn/start` request payload.
 
 ## v2 thread start params (dynamic tools added)
 
@@ -87,4 +86,4 @@ This is a **capability flag**, not a tool manifest.
 Dynamic tools can now be declared at thread start (`dynamicTools`) and routed over
 `dynamic_tool_call_request` events, which enables client-side execution without
 relying on model-authored XML tool-call blocks. Per-request tool manifests are
-still not supported on v1 `sendUserTurn`/`sendUserMessage`.
+still not supported on `turn/start`.

@@ -15,13 +15,10 @@ export type JsonRpcId = number | string;
 
 export type JsonRpcMethod =
   | "initialize"
-  | "newConversation"
   | "thread/start"
   | "addConversationListener"
   | "removeConversationListener"
-  | "sendUserTurn"
-  | "turn/start"
-  | "sendUserMessage";
+  | "turn/start";
 
 export interface JsonRpcBaseEnvelope {
   jsonrpc: typeof JSONRPC_VERSION;
@@ -93,13 +90,6 @@ export type FinishReason =
   | "function_call"
   | string;
 
-export interface TokenUsage {
-  prompt_tokens?: number;
-  completion_tokens?: number;
-  total_tokens?: number;
-  [key: string]: unknown;
-}
-
 export type SandboxPolicy =
   | { type: "danger-full-access" }
   | { type: "read-only" }
@@ -121,22 +111,6 @@ export type UserInput =
   | { type: "image"; url: string }
   | { type: "localImage"; path: string }
   | { type: "skill"; name: string; path: string };
-
-export interface NewConversationParams {
-  model?: string | null;
-  modelProvider?: string | null;
-  profile?: string | null;
-  cwd?: string | null;
-  approvalPolicy?: AskForApproval | null;
-  sandbox?: SandboxMode | null;
-  config?: Record<string, unknown> | null;
-  dynamicTools?: JsonValue[] | null;
-  baseInstructions?: string | null;
-  developerInstructions?: string | null;
-  compactPrompt?: string | null;
-  includeApplyPatchTool?: boolean | null;
-  [key: string]: unknown;
-}
 
 export interface ThreadStartParams {
   model?: string | null;
@@ -168,14 +142,6 @@ export interface TurnStartParams {
   [key: string]: unknown;
 }
 
-export interface NewConversationResult {
-  conversationId: string;
-  model: string;
-  reasoningEffort?: ReasoningEffort | null;
-  rolloutPath?: string;
-  [key: string]: unknown;
-}
-
 export interface AddConversationListenerParams {
   conversationId: string;
   experimentalRawEvents?: boolean;
@@ -184,55 +150,6 @@ export interface AddConversationListenerParams {
 
 export interface AddConversationListenerResult {
   subscriptionId: string;
-  [key: string]: unknown;
-}
-
-export interface SendUserTurnParams {
-  conversationId: string;
-  items: InputItem[];
-  cwd: string;
-  approvalPolicy: AskForApproval;
-  sandboxPolicy: SandboxPolicy;
-  model: string;
-  choiceCount?: number;
-  choice_count?: number;
-  effort?: ReasoningEffort | null;
-  summary: ReasoningSummary;
-  outputSchema?: JsonValue;
-  output_schema?: JsonValue;
-  metadata?: Record<string, unknown> | null;
-  [key: string]: unknown;
-}
-
-export interface SendUserTurnResult {
-  [key: string]: unknown;
-}
-
-export interface SendUserMessageParams {
-  conversationId: string;
-  items: InputItem[];
-  includeUsage?: boolean;
-  include_usage?: boolean;
-  metadata?: JsonValue;
-  stream?: boolean;
-  temperature?: number;
-  topP?: number;
-  top_p?: number;
-  maxOutputTokens?: number;
-  max_output_tokens?: number;
-  responseFormat?: JsonValue;
-  response_format?: JsonValue;
-  reasoning?: JsonValue;
-  finalOutputJsonSchema?: JsonValue;
-  final_output_json_schema?: JsonValue;
-  [key: string]: unknown;
-}
-
-export interface SendUserMessageResult {
-  finish_reason?: FinishReason;
-  status?: FinishReason;
-  usage?: TokenUsage;
-  response?: JsonValue;
   [key: string]: unknown;
 }
 
@@ -251,15 +168,13 @@ export type JsonValue = unknown;
 const APPROVAL_FALLBACK: AskForApproval = "on-request";
 const SUMMARY_FALLBACK: ReasoningSummary = "auto";
 
-const SANDBOX_FALLBACK: SandboxPolicy = { type: "read-only" };
-
 export interface BuildInitializeOptions {
   clientInfo: ClientInfo;
   capabilities?: JsonObject | null;
   protocolVersion?: string;
 }
 
-export interface BuildNewConversationOptions {
+export interface BuildThreadStartOptions {
   model?: string | null;
   modelProvider?: string | null;
   profile?: string | null;
@@ -270,49 +185,21 @@ export interface BuildNewConversationOptions {
   dynamicTools?: JsonValue[] | null;
   baseInstructions?: string | null;
   developerInstructions?: string | null;
-  compactPrompt?: string | null;
-  includeApplyPatchTool?: boolean | null;
-}
-
-export interface BuildThreadStartOptions extends BuildNewConversationOptions {
   experimentalRawEvents?: boolean | null;
   ephemeral?: boolean | null;
   personality?: string | null;
 }
 
-export interface BuildSendUserTurnOptions {
-  conversationId?: string | null;
+export interface BuildTurnStartOptions {
+  threadId?: string | null;
   items?: InputItem[] | null;
   cwd?: string;
   approvalPolicy?: AskForApproval | string | null;
   sandboxPolicy?: SandboxPolicy | { type?: string; mode?: string; [key: string]: unknown } | null;
   model?: string;
-  choiceCount?: number | string | null;
-  choice_count?: number | string | null;
   effort?: ReasoningEffort | string | null;
   summary?: ReasoningSummary | string | null;
   outputSchema?: JsonValue;
-  output_schema?: JsonValue;
-  finalOutputJsonSchema?: JsonValue;
-}
-
-export interface BuildTurnStartOptions extends BuildSendUserTurnOptions {
-  threadId?: string | null;
-}
-
-export interface BuildSendUserMessageOptions {
-  conversationId?: string | null;
-  items?: InputItem[] | null;
-  dynamicTools?: JsonValue[] | null;
-  includeUsage?: boolean;
-  metadata?: JsonValue;
-  stream?: boolean;
-  temperature?: number;
-  topP?: number;
-  maxOutputTokens?: number;
-  responseFormat?: JsonValue;
-  reasoning?: JsonValue;
-  finalOutputJsonSchema?: JsonValue;
 }
 
 const VALID_APPROVAL_POLICIES: Set<string> = new Set([
@@ -392,62 +279,6 @@ export function buildInitializeParams(
   if (options.protocolVersion) {
     params.protocolVersion = options.protocolVersion;
   }
-  // Maintain backward compatibility with older CLI versions that expected snake_case.
-  params.client_info = clientInfo;
-  if (options.capabilities !== undefined) {
-    params.capabilities = options.capabilities ?? null;
-  }
-  if (options.protocolVersion) {
-    params.protocol_version = options.protocolVersion;
-  }
-  return params;
-}
-
-export function buildNewConversationParams(
-  options: BuildNewConversationOptions = {}
-): NewConversationParams & JsonObject {
-  const params: NewConversationParams & JsonObject = {};
-
-  const model = toNullableString(options.model);
-  if (typeof model === "string") params.model = model;
-
-  const modelProvider = toNullableString(options.modelProvider);
-  if (typeof modelProvider === "string") params.modelProvider = modelProvider;
-
-  const profile = toNullableString(options.profile);
-  if (profile !== undefined) params.profile = profile;
-
-  const cwd = toNullableString(options.cwd);
-  if (typeof cwd === "string") params.cwd = cwd;
-
-  const approval = normalizeOptionalApprovalPolicy(options.approvalPolicy);
-  if (typeof approval === "string") params.approvalPolicy = approval;
-
-  const sandbox = normalizeSandboxModeOption(options.sandbox);
-  if (typeof sandbox === "string") params.sandbox = sandbox;
-
-  if (options.config && typeof options.config === "object") {
-    params.config = options.config ?? null;
-  }
-
-  if (Array.isArray(options.dynamicTools)) {
-    params.dynamicTools = options.dynamicTools;
-    params.dynamic_tools = options.dynamicTools;
-  }
-
-  const baseInstructions = toNullableString(options.baseInstructions);
-  if (typeof baseInstructions === "string") params.baseInstructions = baseInstructions;
-
-  const developerInstructions = toNullableString(options.developerInstructions);
-  if (developerInstructions !== undefined) params.developerInstructions = developerInstructions;
-
-  const compactPrompt = toNullableString(options.compactPrompt);
-  if (typeof compactPrompt === "string") params.compactPrompt = compactPrompt;
-
-  if (typeof options.includeApplyPatchTool === "boolean") {
-    params.includeApplyPatchTool = options.includeApplyPatchTool;
-  }
-
   return params;
 }
 
@@ -500,10 +331,10 @@ export function buildThreadStartParams(
   if (typeof cwd === "string") params.cwd = cwd;
 
   const approval = normalizeOptionalApprovalPolicy(options.approvalPolicy);
-  if (typeof approval === "string" || approval === null) params.approvalPolicy = approval;
+  if (typeof approval === "string") params.approvalPolicy = approval;
 
   const sandbox = normalizeSandboxModeOption(options.sandbox);
-  if (typeof sandbox === "string" || sandbox === null) params.sandbox = sandbox;
+  if (typeof sandbox === "string") params.sandbox = sandbox;
 
   if (options.config && typeof options.config === "object") {
     params.config = options.config ?? null;
@@ -573,7 +404,7 @@ const mapSandboxPolicyToV2 = (policy: unknown) => {
 export function buildTurnStartParams(options: BuildTurnStartOptions): TurnStartParams & JsonObject {
   const input = normalizeUserInputs(options.items);
   const params: TurnStartParams & JsonObject = {
-    threadId: String(options.threadId ?? options.conversationId ?? ""),
+    threadId: String(options.threadId ?? ""),
     input,
   };
 
@@ -596,133 +427,25 @@ export function buildTurnStartParams(options: BuildTurnStartOptions): TurnStartP
   const summary = normalizeReasoningSummary(options.summary);
   if (summary !== undefined) params.summary = summary;
 
-  const rawOutputSchema =
-    options.outputSchema ?? options.output_schema ?? options.finalOutputJsonSchema;
-  if (rawOutputSchema !== undefined) {
-    params.outputSchema = rawOutputSchema;
-  }
-
-  return params;
-}
-
-export function buildSendUserTurnParams(
-  options: BuildSendUserTurnOptions
-): SendUserTurnParams & JsonObject {
-  const items: InputItem[] = normalizeInputItems(options.items);
-
-  const sandbox = normalizeSandboxPolicy(options.sandboxPolicy);
-  const approval = normalizeApprovalPolicy(options.approvalPolicy);
-  const effort = normalizeReasoningEffort(options.effort);
-  const summary = normalizeReasoningSummary(options.summary);
-
-  const params: SendUserTurnParams & JsonObject = {
-    conversationId: String(options.conversationId ?? ""),
-    items,
-    cwd: String(options.cwd ?? ""),
-    approvalPolicy: approval,
-    sandboxPolicy: sandbox,
-    model: String(options.model ?? ""),
-    summary,
-  };
-
-  const rawChoiceCount = options.choiceCount ?? (options as any).choice_count;
-  if (rawChoiceCount !== undefined && rawChoiceCount !== null) {
-    let parsed;
-    if (typeof rawChoiceCount === "number") {
-      parsed = rawChoiceCount;
-    } else if (typeof rawChoiceCount === "string" && rawChoiceCount.trim() !== "") {
-      const numeric = Number(rawChoiceCount);
-      if (Number.isFinite(numeric)) parsed = numeric;
-    }
-    if (parsed !== undefined && Number.isInteger(parsed) && parsed > 0) {
-      params.choiceCount = parsed;
-      params.choice_count = parsed;
-    }
-  }
-
-  if (effort !== undefined) {
-    params.effort = effort;
-  }
-
-  const rawOutputSchema =
-    options.outputSchema ?? options.output_schema ?? options.finalOutputJsonSchema;
-  if (rawOutputSchema !== undefined) {
-    params.outputSchema = rawOutputSchema;
-    params.output_schema = rawOutputSchema;
-  }
-
-  return params;
-}
-
-export function buildSendUserMessageParams(
-  options: BuildSendUserMessageOptions
-): SendUserMessageParams & JsonObject {
-  const items: InputItem[] = normalizeInputItems(options.items);
-
-  const params: SendUserMessageParams & JsonObject = {
-    conversationId: String(options.conversationId ?? ""),
-    items,
-  };
-
-  if (Array.isArray(options.dynamicTools)) {
-    params.dynamicTools = options.dynamicTools;
-    params.dynamic_tools = options.dynamicTools;
-  }
-
-  if (options.includeUsage !== undefined) {
-    const value = !!options.includeUsage;
-    params.includeUsage = value;
-    params.include_usage = value;
-  }
-
-  if (options.metadata !== undefined) {
-    params.metadata = options.metadata ?? null;
-  }
-
-  if (options.stream !== undefined) {
-    params.stream = options.stream;
-  }
-
-  if (options.temperature !== undefined) {
-    params.temperature = options.temperature;
-  }
-
-  if (options.topP !== undefined) {
-    params.topP = options.topP;
-    params.top_p = options.topP;
-  }
-
-  if (options.maxOutputTokens !== undefined) {
-    params.maxOutputTokens = options.maxOutputTokens;
-    params.max_output_tokens = options.maxOutputTokens;
-  }
-
-  if (options.responseFormat !== undefined) {
-    const format = options.responseFormat ?? null;
-    params.responseFormat = format;
-    params.response_format = format;
-  }
-
-  if (options.reasoning !== undefined) {
-    params.reasoning = options.reasoning ?? null;
-  }
-
-  if (options.finalOutputJsonSchema !== undefined) {
-    const schema = options.finalOutputJsonSchema ?? null;
-    params.finalOutputJsonSchema = schema;
-    params.final_output_json_schema = schema;
+  if (options.outputSchema !== undefined) {
+    params.outputSchema = options.outputSchema;
   }
 
   return params;
 }
 
 export interface NotificationContextPayload {
-  conversation_id?: string;
-  conversationId?: string;
+  thread_id?: string;
+  threadId?: string;
   request_id?: string;
   requestId?: string;
   conversation?: { id?: string | null } | null;
-  context?: { conversation_id?: string | null; request_id?: string | null } | null;
+  context?: {
+    thread_id?: string | null;
+    threadId?: string | null;
+    request_id?: string | null;
+    requestId?: string | null;
+  } | null;
   [key: string]: unknown;
 }
 
@@ -827,6 +550,12 @@ export interface RequestTimeoutParams extends NotificationContextPayload {
   [key: string]: unknown;
 }
 
+export interface TurnCompletedParams extends NotificationContextPayload {
+  turn?: { status?: string | null } | null;
+  finish_reason?: FinishReason;
+  [key: string]: unknown;
+}
+
 export interface JsonRpcNotification<Method extends JsonRpcNotificationMethod, Params>
   extends JsonRpcBaseEnvelope {
   method: Method;
@@ -847,11 +576,14 @@ export type RequestTimeoutNotification = JsonRpcNotification<
   RequestTimeoutParams
 >;
 
+export type TurnCompletedNotification = JsonRpcNotification<"turn/completed", TurnCompletedParams>;
+
 export type ChatNotification =
   | AgentMessageDeltaNotification
   | AgentMessageNotification
   | TokenCountNotification
-  | RequestTimeoutNotification;
+  | RequestTimeoutNotification
+  | TurnCompletedNotification;
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
@@ -869,10 +601,11 @@ function pickNumber(value: unknown): number | null {
 
 function hasConversationIdentifiers(params: NotificationContextPayload): boolean {
   if (!isObject(params)) return false;
-  if (pickString(params.conversation_id)) return true;
-  if (pickString(params.conversationId)) return true;
+  if (pickString(params.thread_id)) return true;
+  if (pickString(params.threadId)) return true;
   if (isObject(params.conversation) && pickString(params.conversation.id)) return true;
-  if (isObject(params.context) && pickString(params.context.conversation_id)) return true;
+  if (isObject(params.context) && pickString(params.context.thread_id)) return true;
+  if (isObject(params.context) && pickString(params.context.threadId)) return true;
   if (pickString(params.request_id)) return true;
   if (pickString(params.requestId)) return true;
   return false;
@@ -881,10 +614,11 @@ function hasConversationIdentifiers(params: NotificationContextPayload): boolean
 export function extractConversationId(params: NotificationContextPayload): string | null {
   if (!isObject(params)) return null;
   return (
-    pickString(params.conversation_id) ||
-    pickString(params.conversationId) ||
+    pickString(params.thread_id) ||
+    pickString(params.threadId) ||
     (isObject(params.conversation) ? pickString(params.conversation.id) : null) ||
-    (isObject(params.context) ? pickString(params.context.conversation_id) : null) ||
+    (isObject(params.context) ? pickString(params.context.thread_id) : null) ||
+    (isObject(params.context) ? pickString(params.context.threadId) : null) ||
     null
   );
 }
@@ -902,25 +636,6 @@ export function extractRequestId(params: NotificationContextPayload): string | n
 export function isInitializeResult(value: unknown): value is InitializeResult {
   if (!isObject(value)) return false;
   if (value.advertised_models && !Array.isArray(value.advertised_models)) return false;
-  return true;
-}
-
-export function isSendUserTurnResult(value: unknown): value is SendUserTurnResult {
-  if (!isObject(value)) return false;
-  const conv =
-    pickString(value.conversation_id) ||
-    pickString(value.conversationId) ||
-    (isObject(value.context)
-      ? pickString((value.context as Record<string, unknown>).conversation_id)
-      : null);
-  return conv !== null;
-}
-
-export function isSendUserMessageResult(value: unknown): value is SendUserMessageResult {
-  if (!isObject(value)) return false;
-  const fr = value.finish_reason ?? value.status;
-  if (fr !== undefined && typeof fr !== "string") return false;
-  if (value.usage && !isObject(value.usage)) return false;
   return true;
 }
 
@@ -970,12 +685,21 @@ export function isRequestTimeoutNotification(value: unknown): value is RequestTi
   return hasConversationIdentifiers(value.params as NotificationContextPayload);
 }
 
+export function isTurnCompletedNotification(value: unknown): value is TurnCompletedNotification {
+  if (!isObject(value)) return false;
+  if (value.jsonrpc !== JSONRPC_VERSION) return false;
+  if (value.method !== "turn/completed") return false;
+  if (!isObject(value.params)) return false;
+  return hasConversationIdentifiers(value.params as NotificationContextPayload);
+}
+
 export function isJsonRpcNotification(value: unknown): value is ChatNotification {
   return (
     isAgentMessageDeltaNotification(value) ||
     isAgentMessageNotification(value) ||
     isTokenCountNotification(value) ||
-    isRequestTimeoutNotification(value)
+    isRequestTimeoutNotification(value) ||
+    isTurnCompletedNotification(value)
   );
 }
 
@@ -1017,19 +741,7 @@ export function buildRemoveConversationListenerParams(
   };
 }
 
-function normalizeApprovalPolicy(
-  value: BuildSendUserTurnOptions["approvalPolicy"]
-): AskForApproval {
-  if (typeof value === "string") {
-    const normalized = (value as string).trim().toLowerCase();
-    if (VALID_APPROVAL_POLICIES.has(normalized)) {
-      return normalized as AskForApproval;
-    }
-  }
-  return APPROVAL_FALLBACK;
-}
-
-function normalizeReasoningSummary(value: BuildSendUserTurnOptions["summary"]): ReasoningSummary {
+function normalizeReasoningSummary(value: BuildTurnStartOptions["summary"]): ReasoningSummary {
   if (typeof value === "string") {
     const normalized = (value as string).trim().toLowerCase();
     if (VALID_REASONING_SUMMARIES.has(normalized)) {
@@ -1040,7 +752,7 @@ function normalizeReasoningSummary(value: BuildSendUserTurnOptions["summary"]): 
 }
 
 function normalizeReasoningEffort(
-  value: BuildSendUserTurnOptions["effort"]
+  value: BuildTurnStartOptions["effort"]
 ): ReasoningEffort | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value === "string") {
@@ -1052,60 +764,6 @@ function normalizeReasoningEffort(
   return undefined;
 }
 
-function normalizeSandboxPolicy(value: BuildSendUserTurnOptions["sandboxPolicy"]): SandboxPolicy {
-  if (value && typeof value === "object") {
-    const raw =
-      typeof (value as any).type === "string"
-        ? (value as any).type
-        : typeof (value as any).mode === "string"
-          ? (value as any).mode
-          : "";
-    const mode = String(raw || "")
-      .trim()
-      .toLowerCase();
-    if (!VALID_SANDBOX_MODES.has(mode)) {
-      return SANDBOX_FALLBACK;
-    }
-    if (mode === "workspace-write") {
-      const policy: SandboxPolicy = {
-        type: "workspace-write",
-      };
-      if (Array.isArray((value as any).writable_roots)) {
-        policy.writable_roots = [...((value as any).writable_roots as string[])];
-      }
-      if (typeof (value as any).network_access === "boolean") {
-        policy.network_access = (value as any).network_access as boolean;
-      }
-      if (typeof (value as any).exclude_tmpdir_env_var === "boolean") {
-        policy.exclude_tmpdir_env_var = (value as any).exclude_tmpdir_env_var as boolean;
-      }
-      if (typeof (value as any).exclude_slash_tmp === "boolean") {
-        policy.exclude_slash_tmp = (value as any).exclude_slash_tmp as boolean;
-      }
-      return policy;
-    }
-    if (mode === "read-only") {
-      return { type: "read-only" };
-    }
-    return { type: "danger-full-access" };
-  }
-
-  if (typeof value === "string") {
-    const normalized = (value as string).trim().toLowerCase();
-    if (VALID_SANDBOX_MODES.has(normalized)) {
-      if (normalized === "workspace-write") {
-        return { type: "workspace-write" };
-      }
-      if (normalized === "read-only") {
-        return { type: "read-only" };
-      }
-      return { type: "danger-full-access" };
-    }
-  }
-
-  return SANDBOX_FALLBACK;
-}
-
 function toNullableString(value: unknown): string | null | undefined {
   if (value === undefined) return undefined;
   if (value === null) return null;
@@ -1115,7 +773,7 @@ function toNullableString(value: unknown): string | null | undefined {
 }
 
 function normalizeOptionalApprovalPolicy(
-  value: BuildSendUserTurnOptions["approvalPolicy"]
+  value: BuildTurnStartOptions["approvalPolicy"]
 ): AskForApproval | null | undefined {
   if (value === undefined) return undefined;
   if (value === null) return null;
@@ -1130,7 +788,7 @@ function normalizeOptionalApprovalPolicy(
 }
 
 function normalizeSandboxModeOption(
-  value: BuildNewConversationOptions["sandbox"]
+  value: BuildThreadStartOptions["sandbox"]
 ): SandboxMode | null | undefined {
   if (value === undefined) return undefined;
   if (value === null) return null;

@@ -55,15 +55,15 @@ function buildSupervisorArgs() {
   if (provider) pushConfig("model_provider", quote(provider));
 
   if (CFG.PROXY_ENABLE_PARALLEL_TOOL_CALLS) {
-    pushConfig("parallel_tool_calls", quote("true"));
+    pushConfig("parallel_tool_calls", "true");
   }
 
   if (CFG.PROXY_ENABLE_WEB_SEARCH_REQUEST) {
-    pushConfig("web_search_request", quote("true"));
-    pushConfig("tools.web_search", quote("false"));
+    pushConfig("web_search_request", "true");
+    pushConfig("tools.web_search", "false");
   } else if (CFG.PROXY_DISABLE_INTERNAL_TOOLS) {
     // Force-disable built-in web search when internal tools are disabled.
-    pushConfig("tools.web_search", quote("false"));
+    pushConfig("tools.web_search", "false");
   }
 
   return args;
