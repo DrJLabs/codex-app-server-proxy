@@ -64,6 +64,7 @@ function buildSupervisorArgs() {
   } else if (CFG.PROXY_DISABLE_INTERNAL_TOOLS) {
     // Force-disable built-in web search when internal tools are disabled.
     pushConfig("tools.web_search", "false");
+    pushConfig("tools.view_image", "false");
   }
 
   return args;
