@@ -5,9 +5,8 @@ import {
   createUserMessageItem,
   buildAddConversationListenerParams,
   buildInitializeParams,
-  buildNewConversationParams,
-  buildSendUserMessageParams,
-  buildSendUserTurnParams,
+  buildThreadStartParams,
+  buildTurnStartParams,
   extractConversationId,
   extractRequestId,
   isAgentMessageDeltaNotification,
@@ -17,8 +16,6 @@ import {
   isJsonRpcNotification,
   isJsonRpcSuccessResponse,
   isRequestTimeoutNotification,
-  isSendUserMessageResult,
-  isSendUserTurnResult,
   isTokenCountNotification,
   normalizeInputItems,
 } from "../../src/lib/json-rpc/schema.ts";
@@ -56,26 +53,23 @@ describe("json-rpc schema helper behavior", () => {
   });
 
   it("applies approval, summary, and sandbox fallbacks", () => {
-    const params = buildSendUserTurnParams({
+    const params = buildTurnStartParams({
       items: [],
       conversationId: "conv",
-      cwd: "/tmp",
       approvalPolicy: "invalid",
       sandboxPolicy: { type: "unknown" },
-      model: "gpt-5.2",
       summary: "unknown",
     });
 
     expect(params.approvalPolicy).toBe("on-request");
     expect(params.summary).toBe("auto");
-    expect(params.sandboxPolicy).toEqual({ type: "read-only" });
+    expect(params.sandboxPolicy).toEqual({ type: "unknown" });
   });
 
   it("preserves workspace-write sandbox options", () => {
-    const params = buildSendUserTurnParams({
+    const params = buildTurnStartParams({
       items: [],
       conversationId: "conv",
-      cwd: "/tmp",
       approvalPolicy: "never",
       sandboxPolicy: {
         type: "workspace-write",
@@ -84,37 +78,33 @@ describe("json-rpc schema helper behavior", () => {
         exclude_tmpdir_env_var: true,
         exclude_slash_tmp: true,
       },
-      model: "gpt-5.2",
       summary: "auto",
     });
 
     expect(params.sandboxPolicy).toMatchObject({
-      type: "workspace-write",
-      writable_roots: ["/tmp"],
-      network_access: true,
-      exclude_tmpdir_env_var: true,
-      exclude_slash_tmp: true,
+      type: "workspaceWrite",
+      writableRoots: ["/tmp"],
+      networkAccess: true,
+      excludeTmpdirEnvVar: true,
+      excludeSlashTmp: true,
     });
   });
 
-  it("parses choiceCount values when valid", () => {
-    const params = buildSendUserTurnParams({
+  it("ignores choiceCount on turn/start params", () => {
+    const params = buildTurnStartParams({
       items: [],
       conversationId: "conv",
-      cwd: "/tmp",
       approvalPolicy: "never",
       sandboxPolicy: "read-only",
-      model: "gpt-5.2",
       summary: "auto",
       choiceCount: "2",
     });
 
-    expect(params.choiceCount).toBe(2);
-    expect(params.choice_count).toBe(2);
+    expect(params).not.toHaveProperty("choiceCount");
   });
 
-  it("normalizes optional approval and sandbox modes for new conversations", () => {
-    const params = buildNewConversationParams({
+  it("normalizes optional approval and sandbox modes for thread start", () => {
+    const params = buildThreadStartParams({
       approvalPolicy: "bad",
       sandbox: { mode: "read-only" },
     });
@@ -122,7 +112,7 @@ describe("json-rpc schema helper behavior", () => {
     expect(params.approvalPolicy).toBe("on-request");
     expect(params.sandbox).toBe("read-only");
 
-    const nullParams = buildNewConversationParams({ approvalPolicy: null });
+    const nullParams = buildThreadStartParams({ approvalPolicy: null });
     expect(nullParams.approvalPolicy).toBeUndefined();
   });
 
@@ -130,25 +120,25 @@ describe("json-rpc schema helper behavior", () => {
     const params = buildInitializeParams({
       clientInfo: { name: "tester", version: "1.0.0" },
       capabilities: { feature: true },
-      protocolVersion: "1.2.3",
+      protocolVersion: "v2",
     });
 
-    expect(params.protocolVersion).toBe("1.2.3");
-    expect(params.protocol_version).toBe("1.2.3");
+    expect(params.protocolVersion).toBe("v2");
+    expect(params).not.toHaveProperty("protocol_version");
     expect(params.capabilities).toEqual({ feature: true });
   });
 
-  it("fills initialize defaults and snake_case fields", () => {
+  it("fills initialize defaults without snake_case fields", () => {
     const params = buildInitializeParams({
       clientInfo: {},
       capabilities: null,
-      protocolVersion: "2.0.0",
+      protocolVersion: "v2",
     });
 
     expect(params.clientInfo.name).toBe("codex-app-server-proxy");
-    expect(params.clientInfo.version).toBe("0.89.0");
-    expect(params.client_info).toEqual(params.clientInfo);
-    expect(params.protocol_version).toBe("2.0.0");
+    expect(params.clientInfo.version).toBe("0.92.0");
+    expect(params).not.toHaveProperty("client_info");
+    expect(params).not.toHaveProperty("protocol_version");
     expect(params.capabilities).toBeNull();
   });
 
@@ -163,8 +153,8 @@ describe("json-rpc schema helper behavior", () => {
     expect(extractRequestId({ context: { request_id: "req-2" } })).toBe("req-2");
   });
 
-  it("builds new conversation params with nullable fields", () => {
-    const params = buildNewConversationParams({
+  it("builds thread/start params with nullable fields", () => {
+    const params = buildThreadStartParams({
       sandbox: { mode: "read-only" },
       profile: "",
       config: "nope" as unknown as Record<string, unknown>,
@@ -174,45 +164,22 @@ describe("json-rpc schema helper behavior", () => {
     expect(params.sandbox).toBe("read-only");
     expect(params.profile).toBeNull();
     expect(params).not.toHaveProperty("config");
-    expect(params.includeApplyPatchTool).toBe(true);
+    expect(params).not.toHaveProperty("includeApplyPatchTool");
   });
 
   it("skips invalid choice counts", () => {
-    const params = buildSendUserTurnParams({
+    const params = buildTurnStartParams({
       items: [],
       conversationId: "conv",
-      cwd: "/tmp",
       approvalPolicy: "never",
       sandboxPolicy: "read-only",
-      model: "gpt-5.2",
       summary: "auto",
       choiceCount: "0",
       effort: "invalid" as unknown as string,
     });
 
-    expect(params.choiceCount).toBeUndefined();
-    expect(params.choice_count).toBeUndefined();
+    expect(params).not.toHaveProperty("choiceCount");
     expect(params).not.toHaveProperty("effort");
-  });
-
-  it("sets snake_case response fields in sendUserMessage params", () => {
-    const params = buildSendUserMessageParams({
-      conversationId: "conv",
-      items: [],
-      includeUsage: false,
-      metadata: null,
-      topP: 0.9,
-      maxOutputTokens: 8,
-      responseFormat: null,
-      finalOutputJsonSchema: null,
-    });
-
-    expect(params.includeUsage).toBe(false);
-    expect(params.include_usage).toBe(false);
-    expect(params.top_p).toBe(0.9);
-    expect(params.max_output_tokens).toBe(8);
-    expect(params.response_format).toBeNull();
-    expect(params.final_output_json_schema).toBeNull();
   });
 
   it("identifies jsonrpc notifications and responses", () => {
@@ -291,11 +258,8 @@ describe("json-rpc schema helper behavior", () => {
     expect(isRequestTimeoutNotification(timeout)).toBe(true);
   });
 
-  it("validates send-user results for type mismatches", () => {
+  it("validates initialize results for type mismatches", () => {
     expect(isInitializeResult({ advertised_models: "not-array" })).toBe(false);
-    expect(isSendUserTurnResult({ context: { conversation_id: "conv" } })).toBe(true);
-    expect(isSendUserMessageResult({ finish_reason: 12 })).toBe(false);
-    expect(isSendUserMessageResult({ usage: "bad" })).toBe(false);
   });
 
   it("rejects invalid jsonrpc responses", () => {
@@ -304,7 +268,7 @@ describe("json-rpc schema helper behavior", () => {
   });
 
   it("includes experimentalRawEvents for addConversationListener", () => {
-    const params = buildNewConversationParams({ model: "gpt-5.2" });
+    const params = buildThreadStartParams({ model: "gpt-5.2" });
     const listener = buildAddConversationListenerParams({
       conversationId: "conv-1",
       experimentalRawEvents: true,

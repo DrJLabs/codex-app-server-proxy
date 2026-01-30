@@ -5,11 +5,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   buildInitializeParams,
-  buildNewConversationParams,
   buildAddConversationListenerParams,
   buildRemoveConversationListenerParams,
-  buildSendUserMessageParams,
-  buildSendUserTurnParams,
+  buildThreadStartParams,
+  buildTurnStartParams,
 } from "../../src/lib/json-rpc/schema.ts";
 import { normalizeChatJsonRpcRequest } from "../../src/handlers/chat/request.js";
 
@@ -33,7 +32,7 @@ async function loadValidator() {
 }
 
 describe("json-rpc payload schema", () => {
-  it("produces initialize/sendUserTurn/sendUserMessage payloads that satisfy schema", async () => {
+  it("produces initialize/thread-start/turn-start payloads that satisfy schema", async () => {
     const validator = await loadValidator();
 
     const sampleBody = {
@@ -82,7 +81,7 @@ describe("json-rpc payload schema", () => {
       clientInfo: { name: "schema-validator", version: "1.0.0" },
       capabilities: {},
     });
-    const newConversationParams = buildNewConversationParams({
+    const threadStartParams = buildThreadStartParams({
       model: normalized.turn.model,
       modelProvider: null,
       profile: null,
@@ -91,17 +90,9 @@ describe("json-rpc payload schema", () => {
       sandbox: normalized.turn.sandboxPolicy,
       baseInstructions: normalized.turn.baseInstructions ?? undefined,
     });
-    const turnParams = buildSendUserTurnParams({
+    const turnParams = buildTurnStartParams({
       ...normalized.turn,
-      conversationId: "conv-validator",
-      requestId: "req-validator",
-    });
-    expect(turnParams.choiceCount).toBe(1);
-    expect(turnParams.choice_count).toBe(1);
-    const messageParams = buildSendUserMessageParams({
-      ...normalized.message,
-      conversationId: "conv-validator",
-      requestId: "req-validator",
+      threadId: "conv-validator",
     });
     const addListenerParams = buildAddConversationListenerParams({
       conversationId: "conv-validator",
@@ -112,10 +103,9 @@ describe("json-rpc payload schema", () => {
     });
 
     expect(validator.validate("InitializeParams", initializeParams)).toBe(true);
-    expect(validator.validate("NewConversationParams", newConversationParams)).toBe(true);
+    expect(validator.validate("ThreadStartParams", threadStartParams)).toBe(true);
     expect(validator.validate("AddConversationListenerParams", addListenerParams)).toBe(true);
     expect(validator.validate("RemoveConversationListenerParams", removeListenerParams)).toBe(true);
-    expect(validator.validate("SendUserTurnParams", turnParams)).toBe(true);
-    expect(validator.validate("SendUserMessageParams", messageParams)).toBe(true);
+    expect(validator.validate("TurnStartParams", turnParams)).toBe(true);
   });
 });
