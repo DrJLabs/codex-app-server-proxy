@@ -503,21 +503,6 @@ class JsonRpcTransport {
     context.conversationId = String(threadId);
     this.contextsByConversation.set(context.conversationId, context);
 
-    const listenerResult = await this.#callWorkerRpc({
-      context,
-      method: "addConversationListener",
-      params: buildAddConversationListenerParams({
-        conversationId: context.conversationId,
-        experimentalRawEvents: false,
-      }),
-      type: "addConversationListener",
-    });
-
-    const subscriptionId =
-      listenerResult?.subscription_id || listenerResult?.subscriptionId || null;
-    if (subscriptionId) {
-      context.subscriptionId = String(subscriptionId);
-    }
     context.listenerAttached = true;
 
     return context.conversationId;

@@ -558,6 +558,43 @@ describe("JsonRpcTransport request lifecycle", () => {
     await pending;
   });
 
+  it("does not call addConversationListener after thread/start", async () => {
+    const child = createMockChild();
+    const methods = [];
+    wireJsonResponder(child, (message) => {
+      methods.push(message.method);
+      if (message.method === "initialize") {
+        writeRpcResult(child, message.id, { result: {} });
+      }
+      if (message.method === "thread/start") {
+        writeRpcResult(child, message.id, { result: { threadId: "thr-1" } });
+      }
+      if (message.method === "turn/start") {
+        writeRpcResult(child, message.id, { result: {} });
+      }
+    });
+    __setChild(child);
+
+    const transport = getJsonRpcTransport();
+    const context = await transport.createChatRequest({ requestId: "req-1" });
+    context.emitter.on("error", () => {});
+    const pending = context.promise.catch(() => {});
+
+    await flushAsync();
+    await new Promise((resolve) => setImmediate(resolve));
+    await flushAsync();
+
+    expect(methods).toContain("thread/start");
+    expect(methods).toContain("turn/start");
+    expect(methods).not.toContain("addConversationListener");
+
+    transport.cancelContext(
+      context,
+      new TransportError("request aborted", { code: "request_aborted", retryable: false })
+    );
+    await pending;
+  });
+
   it("passes dynamicTools to thread/start when provided on the turn", async () => {
     const child = createMockChild();
     let threadStartParams = null;
