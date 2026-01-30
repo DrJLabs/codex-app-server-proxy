@@ -342,6 +342,15 @@ export async function postResponsesNonStream(req, res) {
   const maxOutputTokens = normalized.maxOutputTokens ?? (fallbackMax > 0 ? fallbackMax : undefined);
   const dynamicTools = buildDynamicTools(functionTools, normalized.toolChoice);
 
+  const disableInternalTools = CFG.PROXY_DISABLE_INTERNAL_TOOLS;
+  const internalToolsInstruction = disableInternalTools
+    ? "Never use internal tools (shell/exec_command/apply_patch/update_plan/view_image). Request only dynamic tool calls provided by the client."
+    : "";
+  const developerInstructions = [normalized.developerInstructions, internalToolsInstruction]
+    .filter(Boolean)
+    .join("\n\n");
+  const baseInstructions = internalToolsInstruction || undefined;
+
   const turn = {
     model: effectiveModel,
     items: normalized.inputItems,
@@ -349,12 +358,15 @@ export async function postResponsesNonStream(req, res) {
     approvalPolicy: APPROVAL_POLICY,
     sandboxPolicy: SANDBOX_MODE ? { type: SANDBOX_MODE } : undefined,
     summary: "auto",
-    includeApplyPatchTool: true,
+    includeApplyPatchTool: !disableInternalTools,
   };
   if (Number.isInteger(nValue) && nValue > 0) turn.choiceCount = nValue;
   if (dynamicTools !== undefined) turn.dynamicTools = dynamicTools;
-  if (normalized.developerInstructions) {
-    turn.developerInstructions = normalized.developerInstructions;
+  if (developerInstructions) {
+    turn.developerInstructions = developerInstructions;
+  }
+  if (baseInstructions) {
+    turn.baseInstructions = baseInstructions;
   }
   if (normalized.finalOutputJsonSchema !== undefined) {
     turn.finalOutputJsonSchema = normalized.finalOutputJsonSchema;
@@ -369,6 +381,7 @@ export async function postResponsesNonStream(req, res) {
   if (normalized.finalOutputJsonSchema !== undefined) {
     message.finalOutputJsonSchema = normalized.finalOutputJsonSchema;
   }
+  if (dynamicTools !== undefined) message.dynamicTools = dynamicTools;
 
   const ingressToolCount = functionTools.length;
   const turnToolCount = countDynamicTools(turn.dynamicTools);

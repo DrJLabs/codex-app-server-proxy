@@ -170,8 +170,8 @@ describe("json-rpc schema bindings", () => {
     ensureTranscripts(["streaming-tool-calls.json"], { backend: "app" });
   }, 30000);
 
-  it("pins the schema to Codex CLI 0.89.0", () => {
-    expect(CODEX_CLI_VERSION).toBe("0.89.0");
+  it("pins the schema to Codex CLI 0.92.0", () => {
+    expect(CODEX_CLI_VERSION).toBe("0.92.0");
   });
 
   it("parses streaming text notifications and token counts", async () => {
@@ -472,6 +472,7 @@ describe("json-rpc schema bindings", () => {
       expect(params.config).toEqual(config);
       expect(params.compactPrompt).toBe("true");
       expect(params.dynamicTools).toEqual(dynamicTools);
+      expect(params.dynamic_tools).toEqual(dynamicTools);
     });
 
     it("drops invalid sandbox types in newConversation params", () => {

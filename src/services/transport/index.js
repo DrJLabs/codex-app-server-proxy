@@ -12,12 +12,14 @@ import { isAppServerMode } from "../backend-mode.js";
 import {
   buildInitializeParams,
   buildNewConversationParams,
+  buildThreadStartParams,
   buildAddConversationListenerParams,
   buildRemoveConversationListenerParams,
   createUserMessageItem,
   normalizeInputItems,
   buildSendUserMessageParams,
   buildSendUserTurnParams,
+  buildTurnStartParams,
 } from "../../lib/json-rpc/schema.ts";
 import { authErrorBody, normalizeCodexError } from "../../lib/errors.js";
 import {
@@ -41,6 +43,13 @@ const normalizeNotificationMethod = (method) => {
   if (!method) return "";
   const value = String(method);
   return value.replace(/^codex\/event\//i, "");
+};
+
+const shouldUseThreadStart = (payload) => {
+  const dynamicTools = payload?.dynamicTools ?? payload?.dynamic_tools;
+  if (Array.isArray(dynamicTools) && dynamicTools.length > 0) return true;
+  if (payload?.protocol === "v2" || payload?.protocolVersion === "v2") return true;
+  return false;
 };
 
 const summarizeTurnParamsForLog = (params) => {
@@ -106,6 +115,7 @@ class RequestContext {
     this.conversationId = null;
     this.subscriptionId = null;
     this.listenerAttached = false;
+    this.protocol = "v1";
     this.emitter = new EventEmitter();
     this.usage = { prompt_tokens: 0, completion_tokens: 0 };
     this.rpc = { turnId: null, messageId: null };
@@ -153,6 +163,15 @@ class RequestContext {
       }
       if (Number.isFinite(payload.completion_tokens)) {
         this.usage.completion_tokens = Number(payload.completion_tokens);
+      }
+      const lastUsage = payload?.tokenUsage?.last || payload?.tokenUsage?.last_token_usage || null;
+      if (lastUsage && typeof lastUsage === "object") {
+        if (Number.isFinite(lastUsage.inputTokens)) {
+          this.usage.prompt_tokens = Number(lastUsage.inputTokens);
+        }
+        if (Number.isFinite(lastUsage.outputTokens)) {
+          this.usage.completion_tokens = Number(lastUsage.outputTokens);
+        }
       }
       if (payload.finish_reason && typeof payload.finish_reason === "string") {
         this.finishReason = payload.finish_reason;
@@ -447,33 +466,54 @@ class JsonRpcTransport {
       return context.conversationId;
     }
 
-    const conversationParams = buildNewConversationParams({
-      model: basePayload.model ?? undefined,
-      modelProvider: basePayload.modelProvider ?? basePayload.model_provider ?? undefined,
-      profile: basePayload.profile ?? undefined,
-      cwd: basePayload.cwd ?? undefined,
-      approvalPolicy: basePayload.approvalPolicy ?? basePayload.approval_policy ?? undefined,
-      sandbox: basePayload.sandboxPolicy ?? basePayload.sandbox ?? undefined,
-      config: basePayload.config ?? undefined,
-      compactPrompt: basePayload.compactPrompt ?? basePayload.compact_prompt ?? undefined,
-      baseInstructions: basePayload.baseInstructions ?? undefined,
-      developerInstructions: basePayload.developerInstructions ?? undefined,
-      dynamicTools: basePayload.dynamicTools ?? basePayload.dynamic_tools ?? undefined,
-      includeApplyPatchTool:
-        basePayload.includeApplyPatchTool ?? basePayload.include_apply_patch_tool ?? undefined,
-    });
+    const dynamicTools = basePayload.dynamicTools ?? basePayload.dynamic_tools ?? undefined;
+    const useThreadStart = shouldUseThreadStart(basePayload);
+
+    const conversationParams = useThreadStart
+      ? buildThreadStartParams({
+          model: basePayload.model ?? undefined,
+          modelProvider: basePayload.modelProvider ?? basePayload.model_provider ?? undefined,
+          profile: basePayload.profile ?? undefined,
+          cwd: basePayload.cwd ?? undefined,
+          approvalPolicy: basePayload.approvalPolicy ?? basePayload.approval_policy ?? undefined,
+          sandbox: basePayload.sandboxPolicy ?? basePayload.sandbox ?? undefined,
+          config: basePayload.config ?? undefined,
+          compactPrompt: basePayload.compactPrompt ?? basePayload.compact_prompt ?? undefined,
+          baseInstructions: basePayload.baseInstructions ?? undefined,
+          developerInstructions: basePayload.developerInstructions ?? undefined,
+          dynamicTools,
+          includeApplyPatchTool:
+            basePayload.includeApplyPatchTool ?? basePayload.include_apply_patch_tool ?? undefined,
+          experimentalRawEvents: false,
+        })
+      : buildNewConversationParams({
+          model: basePayload.model ?? undefined,
+          modelProvider: basePayload.modelProvider ?? basePayload.model_provider ?? undefined,
+          profile: basePayload.profile ?? undefined,
+          cwd: basePayload.cwd ?? undefined,
+          approvalPolicy: basePayload.approvalPolicy ?? basePayload.approval_policy ?? undefined,
+          sandbox: basePayload.sandboxPolicy ?? basePayload.sandbox ?? undefined,
+          config: basePayload.config ?? undefined,
+          compactPrompt: basePayload.compactPrompt ?? basePayload.compact_prompt ?? undefined,
+          baseInstructions: basePayload.baseInstructions ?? undefined,
+          developerInstructions: basePayload.developerInstructions ?? undefined,
+          dynamicTools: basePayload.dynamicTools ?? basePayload.dynamic_tools ?? undefined,
+          includeApplyPatchTool:
+            basePayload.includeApplyPatchTool ?? basePayload.include_apply_patch_tool ?? undefined,
+        });
 
     const conversationResult = await this.#callWorkerRpc({
       context,
-      method: "newConversation",
+      method: useThreadStart ? "thread/start" : "newConversation",
       params: conversationParams,
-      type: "newConversation",
+      type: useThreadStart ? "thread/start" : "newConversation",
     });
 
     const conversationId =
       conversationResult?.conversation_id ||
       conversationResult?.conversationId ||
-      conversationResult?.conversation?.id;
+      conversationResult?.conversation?.id ||
+      conversationResult?.thread?.id;
 
     if (!conversationId) {
       throw new TransportError("newConversation did not return a conversation id", {
@@ -483,6 +523,7 @@ class JsonRpcTransport {
     }
 
     context.conversationId = String(conversationId);
+    context.protocol = useThreadStart ? "v2" : "v1";
     this.contextsByConversation.set(context.conversationId, context);
 
     const listenerResult = await this.#callWorkerRpc({
@@ -783,11 +824,18 @@ class JsonRpcTransport {
       if (basePayload.text !== undefined) {
         delete basePayload.text;
       }
-      const params = buildSendUserTurnParams({
-        ...basePayload,
-        conversationId: context.conversationId ?? context.clientConversationId,
-        requestId: context.clientConversationId,
-      });
+      const params =
+        context.protocol === "v2"
+          ? buildTurnStartParams({
+              ...basePayload,
+              threadId: context.conversationId ?? context.clientConversationId,
+              conversationId: context.conversationId ?? context.clientConversationId,
+            })
+          : buildSendUserTurnParams({
+              ...basePayload,
+              conversationId: context.conversationId ?? context.clientConversationId,
+              requestId: context.clientConversationId,
+            });
       const pending = this.pending.get(turnRpcId);
       if (pending) {
         pending.requestSummary = summarizeTurnParamsForLog(params);
@@ -796,14 +844,14 @@ class JsonRpcTransport {
         this.rpcTraceById.set(turnRpcId, context.trace);
         logBackendSubmission(context.trace, {
           rpcId: turnRpcId,
-          method: "sendUserTurn",
+          method: context.protocol === "v2" ? "turn/start" : "sendUserTurn",
           params,
         });
       }
       this.#write({
         jsonrpc: JSONRPC_VERSION,
         id: turnRpcId,
-        method: "sendUserTurn",
+        method: context.protocol === "v2" ? "turn/start" : "sendUserTurn",
         params,
       });
     } catch (err) {
@@ -1087,7 +1135,51 @@ class JsonRpcTransport {
     }
     const method = normalizeNotificationMethod(message.method);
     const payload = params.msg && typeof params.msg === "object" ? params.msg : params;
+    if (CFG.PROXY_DISABLE_INTERNAL_TOOLS) {
+      const rawToolType = payload?.item?.type ?? payload?.type ?? null;
+      const toolType = typeof rawToolType === "string" ? rawToolType.trim() : (rawToolType ?? null);
+      const isInternalToolType =
+        toolType === "commandExecution" ||
+        toolType === "fileChange" ||
+        toolType === "webSearch" ||
+        toolType === "WebSearch" ||
+        toolType === "mcpToolCall";
+      const isInternalToolMethod =
+        method.startsWith("item/commandExecution") ||
+        method.startsWith("item/fileChange") ||
+        method.startsWith("exec_command_") ||
+        method.startsWith("fileChange_") ||
+        method.startsWith("file_change_") ||
+        method.startsWith("web_search_") ||
+        method.startsWith("webSearch") ||
+        method.startsWith("mcpToolCall");
+      if (isInternalToolType || isInternalToolMethod) {
+        console.warn(
+          `${LOG_PREFIX} internal tool disabled; cancelling request ${context.requestId} (${method})`
+        );
+        this.#failContext(
+          context,
+          new TransportError("internal tools disabled", {
+            code: "internal_tools_disabled",
+            retryable: false,
+            details: {
+              method,
+              tool_type: toolType ?? null,
+            },
+          })
+        );
+        return;
+      }
+    }
     switch (method) {
+      case "thread/tokenUsage/updated": {
+        const tokenUsage =
+          payload && typeof payload === "object"
+            ? (payload.tokenUsage ?? payload.token_usage ?? payload)
+            : payload;
+        context.setUsage({ tokenUsage });
+        break;
+      }
       case "agentMessageDelta":
       case "agent_message_delta":
       case "agent_message_content_delta": {
@@ -1156,6 +1248,17 @@ class JsonRpcTransport {
         context.setResult(payload);
         this.#scheduleCompletionCheck(context);
         break;
+      case "turn/completed": {
+        if (payload && typeof payload === "object") {
+          const turnStatus = payload.turn?.status ?? payload.status ?? null;
+          if (turnStatus === "failed") {
+            context.setFinishReason("error");
+          }
+        }
+        context.setResult(payload);
+        this.#scheduleCompletionCheck(context);
+        break;
+      }
       case "item/completed":
       case "item_completed": {
         const item =
@@ -1281,7 +1384,11 @@ class JsonRpcTransport {
     }
     this.contextsByRequest.delete(context.requestId);
     this.activeRequests = Math.max(0, this.activeRequests - 1);
-    context.reject(error instanceof Error ? error : new TransportError(String(error)));
+    const resolvedError = error instanceof Error ? error : new TransportError(String(error));
+    try {
+      context.emitter.emit("error", resolvedError);
+    } catch {}
+    context.reject(resolvedError);
   }
 
   #write(message) {

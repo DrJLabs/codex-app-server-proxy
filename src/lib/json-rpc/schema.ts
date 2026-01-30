@@ -1,7 +1,7 @@
 /**
  * Codex App Server JSON-RPC bindings for chat.
  *
- * Generated with codex-cli/codex-rs/app-server-protocol export tooling (v0.89.0)
+ * Generated with codex-cli/codex-rs/app-server-protocol export tooling (v0.92.0)
  * and then trimmed to the subset needed by the proxy. Regenerate when the
  * upstream protocol changes.
  */
@@ -9,16 +9,18 @@
 /* eslint-disable */
 
 export const JSONRPC_VERSION = "2.0" as const;
-export const CODEX_CLI_VERSION = "0.89.0" as const;
+export const CODEX_CLI_VERSION = "0.92.0" as const;
 
 export type JsonRpcId = number | string;
 
 export type JsonRpcMethod =
   | "initialize"
   | "newConversation"
+  | "thread/start"
   | "addConversationListener"
   | "removeConversationListener"
   | "sendUserTurn"
+  | "turn/start"
   | "sendUserMessage";
 
 export interface JsonRpcBaseEnvelope {
@@ -114,6 +116,12 @@ export type InputItem =
   | { type: "image"; data: { image_url: string } }
   | { type: "localImage"; data: { path: string } };
 
+export type UserInput =
+  | { type: "text"; text: string; text_elements?: Array<{ byteRange: unknown }> }
+  | { type: "image"; url: string }
+  | { type: "localImage"; path: string }
+  | { type: "skill"; name: string; path: string };
+
 export interface NewConversationParams {
   model?: string | null;
   modelProvider?: string | null;
@@ -127,6 +135,36 @@ export interface NewConversationParams {
   developerInstructions?: string | null;
   compactPrompt?: string | null;
   includeApplyPatchTool?: boolean | null;
+  [key: string]: unknown;
+}
+
+export interface ThreadStartParams {
+  model?: string | null;
+  modelProvider?: string | null;
+  profile?: string | null;
+  cwd?: string | null;
+  approvalPolicy?: AskForApproval | null;
+  sandbox?: SandboxMode | null;
+  config?: Record<string, unknown> | null;
+  dynamicTools?: JsonValue[] | null;
+  baseInstructions?: string | null;
+  developerInstructions?: string | null;
+  experimentalRawEvents?: boolean | null;
+  ephemeral?: boolean | null;
+  personality?: string | null;
+  [key: string]: unknown;
+}
+
+export interface TurnStartParams {
+  threadId: string;
+  input: UserInput[];
+  approvalPolicy?: AskForApproval | null;
+  sandboxPolicy?: JsonValue;
+  cwd?: string | null;
+  model?: string | null;
+  effort?: ReasoningEffort | null;
+  summary?: ReasoningSummary | null;
+  outputSchema?: JsonValue;
   [key: string]: unknown;
 }
 
@@ -236,6 +274,12 @@ export interface BuildNewConversationOptions {
   includeApplyPatchTool?: boolean | null;
 }
 
+export interface BuildThreadStartOptions extends BuildNewConversationOptions {
+  experimentalRawEvents?: boolean | null;
+  ephemeral?: boolean | null;
+  personality?: string | null;
+}
+
 export interface BuildSendUserTurnOptions {
   conversationId?: string | null;
   items?: InputItem[] | null;
@@ -252,9 +296,14 @@ export interface BuildSendUserTurnOptions {
   finalOutputJsonSchema?: JsonValue;
 }
 
+export interface BuildTurnStartOptions extends BuildSendUserTurnOptions {
+  threadId?: string | null;
+}
+
 export interface BuildSendUserMessageOptions {
   conversationId?: string | null;
   items?: InputItem[] | null;
+  dynamicTools?: JsonValue[] | null;
   includeUsage?: boolean;
   metadata?: JsonValue;
   stream?: boolean;
@@ -383,6 +432,7 @@ export function buildNewConversationParams(
 
   if (Array.isArray(options.dynamicTools)) {
     params.dynamicTools = options.dynamicTools;
+    params.dynamic_tools = options.dynamicTools;
   }
 
   const baseInstructions = toNullableString(options.baseInstructions);
@@ -396,6 +446,160 @@ export function buildNewConversationParams(
 
   if (typeof options.includeApplyPatchTool === "boolean") {
     params.includeApplyPatchTool = options.includeApplyPatchTool;
+  }
+
+  return params;
+}
+
+const toUserInput = (item: InputItem) => {
+  if (!item || typeof item !== "object") return null;
+  if (item.type === "text" && typeof item.data?.text === "string") {
+    return {
+      type: "text",
+      text: item.data.text,
+      text_elements: [],
+    } satisfies UserInput;
+  }
+  if (item.type === "image" && typeof item.data?.image_url === "string") {
+    return { type: "image", url: item.data.image_url } satisfies UserInput;
+  }
+  if (item.type === "localImage" && typeof item.data?.path === "string") {
+    return { type: "localImage", path: item.data.path } satisfies UserInput;
+  }
+  return null;
+};
+
+export function normalizeUserInputs(items: unknown, fallbackText?: string): UserInput[] {
+  const normalized = normalizeInputItems(items, fallbackText);
+  const result: UserInput[] = [];
+  for (const item of normalized) {
+    const mapped = toUserInput(item);
+    if (mapped) result.push(mapped);
+  }
+  if (result.length === 0 && typeof fallbackText === "string") {
+    result.push({ type: "text", text: fallbackText, text_elements: [] });
+  }
+  return result;
+}
+
+export function buildThreadStartParams(
+  options: BuildThreadStartOptions = {}
+): ThreadStartParams & JsonObject {
+  const params: ThreadStartParams & JsonObject = {};
+
+  const model = toNullableString(options.model);
+  if (typeof model === "string") params.model = model;
+
+  const modelProvider = toNullableString(options.modelProvider);
+  if (typeof modelProvider === "string") params.modelProvider = modelProvider;
+
+  const profile = toNullableString(options.profile);
+  if (profile !== undefined) params.profile = profile;
+
+  const cwd = toNullableString(options.cwd);
+  if (typeof cwd === "string") params.cwd = cwd;
+
+  const approval = normalizeOptionalApprovalPolicy(options.approvalPolicy);
+  if (typeof approval === "string" || approval === null) params.approvalPolicy = approval;
+
+  const sandbox = normalizeSandboxModeOption(options.sandbox);
+  if (typeof sandbox === "string" || sandbox === null) params.sandbox = sandbox;
+
+  if (options.config && typeof options.config === "object") {
+    params.config = options.config ?? null;
+  }
+
+  if (Array.isArray(options.dynamicTools)) {
+    params.dynamicTools = options.dynamicTools;
+  }
+
+  const baseInstructions = toNullableString(options.baseInstructions);
+  if (typeof baseInstructions === "string") params.baseInstructions = baseInstructions;
+
+  const developerInstructions = toNullableString(options.developerInstructions);
+  if (developerInstructions !== undefined) params.developerInstructions = developerInstructions;
+
+  if (options.experimentalRawEvents !== undefined) {
+    params.experimentalRawEvents = !!options.experimentalRawEvents;
+  }
+
+  if (options.ephemeral !== undefined) {
+    params.ephemeral = !!options.ephemeral;
+  }
+
+  const personality = toNullableString(options.personality);
+  if (personality !== undefined) params.personality = personality;
+
+  return params;
+}
+
+const mapSandboxPolicyToV2 = (policy: unknown) => {
+  if (!policy || typeof policy !== "object") return policy;
+  const rawType =
+    typeof (policy as any).type === "string"
+      ? (policy as any).type
+      : typeof (policy as any).mode === "string"
+        ? (policy as any).mode
+        : "";
+  const normalized = String(rawType).trim();
+  const base: Record<string, unknown> = {};
+
+  const networkAccess = (policy as any).networkAccess ?? (policy as any).network_access;
+  const writableRoots = (policy as any).writableRoots ?? (policy as any).writable_roots;
+  const excludeTmpdirEnvVar =
+    (policy as any).excludeTmpdirEnvVar ?? (policy as any).exclude_tmpdir_env_var;
+  const excludeSlashTmp = (policy as any).excludeSlashTmp ?? (policy as any).exclude_slash_tmp;
+
+  if (networkAccess !== undefined) base.networkAccess = networkAccess;
+  if (Array.isArray(writableRoots)) base.writableRoots = writableRoots;
+  if (excludeTmpdirEnvVar !== undefined) base.excludeTmpdirEnvVar = !!excludeTmpdirEnvVar;
+  if (excludeSlashTmp !== undefined) base.excludeSlashTmp = !!excludeSlashTmp;
+
+  if (normalized === "danger-full-access" || normalized === "dangerFullAccess") {
+    return { type: "dangerFullAccess" };
+  }
+  if (normalized === "read-only" || normalized === "readOnly") {
+    return { type: "readOnly" };
+  }
+  if (normalized === "workspace-write" || normalized === "workspaceWrite") {
+    return { type: "workspaceWrite", ...base };
+  }
+  if (normalized === "externalSandbox" || normalized === "external-sandbox") {
+    return { type: "externalSandbox", ...base };
+  }
+  return policy;
+};
+
+export function buildTurnStartParams(options: BuildTurnStartOptions): TurnStartParams & JsonObject {
+  const input = normalizeUserInputs(options.items);
+  const params: TurnStartParams & JsonObject = {
+    threadId: String(options.threadId ?? options.conversationId ?? ""),
+    input,
+  };
+
+  const approval = normalizeOptionalApprovalPolicy(options.approvalPolicy);
+  if (typeof approval === "string" || approval === null) params.approvalPolicy = approval;
+
+  if (options.sandboxPolicy !== undefined) {
+    params.sandboxPolicy = mapSandboxPolicyToV2(options.sandboxPolicy);
+  }
+
+  const cwd = toNullableString(options.cwd);
+  if (typeof cwd === "string") params.cwd = cwd;
+
+  const model = toNullableString(options.model);
+  if (typeof model === "string") params.model = model;
+
+  const effort = normalizeReasoningEffort(options.effort);
+  if (effort !== undefined) params.effort = effort;
+
+  const summary = normalizeReasoningSummary(options.summary);
+  if (summary !== undefined) params.summary = summary;
+
+  const rawOutputSchema =
+    options.outputSchema ?? options.output_schema ?? options.finalOutputJsonSchema;
+  if (rawOutputSchema !== undefined) {
+    params.outputSchema = rawOutputSchema;
   }
 
   return params;
@@ -459,6 +663,11 @@ export function buildSendUserMessageParams(
     conversationId: String(options.conversationId ?? ""),
     items,
   };
+
+  if (Array.isArray(options.dynamicTools)) {
+    params.dynamicTools = options.dynamicTools;
+    params.dynamic_tools = options.dynamicTools;
+  }
 
   if (options.includeUsage !== undefined) {
     const value = !!options.includeUsage;
