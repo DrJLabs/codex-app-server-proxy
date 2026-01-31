@@ -44,6 +44,7 @@ import {
   buildDynamicTools,
   buildToolCallDeltaFromDynamicRequest,
 } from "../../lib/tools/dynamic-tools.js";
+import { RESPONSES_INTERNAL_TOOLS_INSTRUCTION } from "../../lib/prompts/internal-tools-instructions.js";
 
 const DEFAULT_MODEL = CFG.CODEX_MODEL;
 const ACCEPTED_MODEL_IDS = acceptedModelIds(DEFAULT_MODEL);
@@ -387,6 +388,23 @@ export async function postResponsesNonStream(req, res) {
   const dynamicTools = buildDynamicTools(functionTools, normalized.toolChoice);
 
   const developerInstructions = normalized.developerInstructions || "";
+  const baseInstructions = CFG.PROXY_DISABLE_INTERNAL_TOOLS
+    ? RESPONSES_INTERNAL_TOOLS_INSTRUCTION
+    : undefined;
+  const appServerConfig = CFG.PROXY_DISABLE_INTERNAL_TOOLS
+    ? {
+        features: {
+          streamable_shell: false,
+          unified_exec: false,
+          view_image_tool: false,
+          apply_patch_freeform: false,
+        },
+        tools: {
+          web_search: false,
+          view_image: false,
+        },
+      }
+    : undefined;
 
   const turn = {
     model: effectiveModel,
@@ -400,6 +418,12 @@ export async function postResponsesNonStream(req, res) {
   if (dynamicTools !== undefined) turn.dynamicTools = dynamicTools;
   if (developerInstructions) {
     turn.developerInstructions = developerInstructions;
+  }
+  if (appServerConfig) {
+    turn.config = appServerConfig;
+  }
+  if (baseInstructions) {
+    turn.baseInstructions = baseInstructions;
   }
   if (normalized.outputSchema !== undefined) {
     turn.outputSchema = normalized.outputSchema;

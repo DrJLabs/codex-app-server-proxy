@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { RESPONSES_INTERNAL_TOOLS_INSTRUCTION } from "../../../../src/lib/prompts/internal-tools-instructions.js";
 
 const logResponsesIngressRawMock = vi.fn();
 const summarizeResponsesIngressMock = vi.fn(() => ({}));
@@ -228,7 +229,7 @@ describe("responses nonstream handler", () => {
     expect(createJsonRpcChildAdapterMock).not.toHaveBeenCalled();
   });
 
-  it("does not inject internal tool instructions into the turn payload", async () => {
+  it("injects internal tool guidance into baseInstructions when disabled", async () => {
     const { postResponsesNonStream } = await import(
       "../../../../src/handlers/responses/nonstream.js"
     );
@@ -239,8 +240,19 @@ describe("responses nonstream handler", () => {
 
     expect(createJsonRpcChildAdapterMock).toHaveBeenCalled();
     const [{ normalizedRequest }] = createJsonRpcChildAdapterMock.mock.calls[0];
-    expect(normalizedRequest.turn.developerInstructions).toBeUndefined();
-    expect(normalizedRequest.turn.baseInstructions).toBeUndefined();
+    expect(normalizedRequest.turn.baseInstructions).toBe(RESPONSES_INTERNAL_TOOLS_INSTRUCTION);
+    expect(normalizedRequest.turn.config).toMatchObject({
+      features: {
+        streamable_shell: false,
+        unified_exec: false,
+        view_image_tool: false,
+        apply_patch_freeform: false,
+      },
+      tools: {
+        web_search: false,
+        view_image: false,
+      },
+    });
   });
 
   it("logs tool output summaries when provided", async () => {

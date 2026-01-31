@@ -2,6 +2,7 @@
 
 ## Scope and layout
 
+- **Focus:** Responses endpoint work is the primary concern; chat-completions can be deprioritized unless explicitly requested.
 - **This AGENTS.md applies to:** `./` and below.
 - **Key directories:**
   - `src/` core proxy logic (app wiring, routes, handlers, services) used by `server.js`.
