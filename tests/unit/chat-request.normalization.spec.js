@@ -5,9 +5,6 @@ import {
 } from "../../src/handlers/chat/request.js";
 
 const EFFECTIVE_MODEL = "gpt-5.2";
-const INTERNAL_TOOLS_INSTRUCTION =
-  "Never use internal tools (shell/exec_command/apply_patch/update_plan/view_image). Request only dynamic tool calls provided by the client.";
-
 const normalize = (overrides = {}) =>
   normalizeChatJsonRpcRequest({
     effectiveModel: EFFECTIVE_MODEL,
@@ -33,7 +30,7 @@ describe("normalizeChatJsonRpcRequest", () => {
     ];
 
     const normalized = normalize({ body: { messages }, messages });
-    expect(normalized.turn.baseInstructions).toBe(INTERNAL_TOOLS_INSTRUCTION);
+    expect(normalized.turn.baseInstructions).toBeUndefined();
     expect(normalized.turn.items).toHaveLength(1);
     const prompt = normalized.turn.items[0]?.data?.text || "";
     expect(prompt).not.toContain("You are a bot");

@@ -228,6 +228,21 @@ describe("responses nonstream handler", () => {
     expect(createJsonRpcChildAdapterMock).not.toHaveBeenCalled();
   });
 
+  it("does not inject internal tool instructions into the turn payload", async () => {
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    expect(createJsonRpcChildAdapterMock).toHaveBeenCalled();
+    const [{ normalizedRequest }] = createJsonRpcChildAdapterMock.mock.calls[0];
+    expect(normalizedRequest.turn.developerInstructions).toBeUndefined();
+    expect(normalizedRequest.turn.baseInstructions).toBeUndefined();
+  });
+
   it("logs tool output summaries when provided", async () => {
     const transport = { respondToToolCall: vi.fn(() => true) };
     createJsonRpcChildAdapterMock.mockReturnValueOnce({

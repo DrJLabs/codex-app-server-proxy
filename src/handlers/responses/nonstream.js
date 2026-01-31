@@ -386,14 +386,7 @@ export async function postResponsesNonStream(req, res) {
   const maxOutputTokens = normalized.maxOutputTokens ?? (fallbackMax > 0 ? fallbackMax : undefined);
   const dynamicTools = buildDynamicTools(functionTools, normalized.toolChoice);
 
-  const disableInternalTools = CFG.PROXY_DISABLE_INTERNAL_TOOLS;
-  const internalToolsInstruction = disableInternalTools
-    ? "Never use internal tools (web_search, view_image, fileChange, commandExecution, mcpToolCall, shell, exec_command, apply_patch, update_plan). Use client tools like writeToFile/replaceInFile for file operations. Request only dynamic tool calls provided by the client."
-    : "";
-  const developerInstructions = [normalized.developerInstructions, internalToolsInstruction]
-    .filter(Boolean)
-    .join("\n\n");
-  const baseInstructions = internalToolsInstruction || undefined;
+  const developerInstructions = normalized.developerInstructions || "";
 
   const turn = {
     model: effectiveModel,
@@ -407,9 +400,6 @@ export async function postResponsesNonStream(req, res) {
   if (dynamicTools !== undefined) turn.dynamicTools = dynamicTools;
   if (developerInstructions) {
     turn.developerInstructions = developerInstructions;
-  }
-  if (baseInstructions) {
-    turn.baseInstructions = baseInstructions;
   }
   if (normalized.outputSchema !== undefined) {
     turn.outputSchema = normalized.outputSchema;

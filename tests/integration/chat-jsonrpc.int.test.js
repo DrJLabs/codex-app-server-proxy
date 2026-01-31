@@ -5,8 +5,6 @@ import { config as CFG } from "../../src/config/index.js";
 
 const CAPTURE_TIMEOUT_MS = 4000;
 const MAX_ATTEMPTS = 5;
-const INTERNAL_TOOLS_INSTRUCTION =
-  "Never use internal tools (shell/exec_command/apply_patch/update_plan/view_image). Request only dynamic tool calls provided by the client.";
 
 const mapSandboxPolicyType = (mode) => {
   switch (String(mode || "").trim()) {
@@ -178,12 +176,8 @@ describe("chat JSON-RPC normalization", () => {
     expect(threadStartParams.model).toBe(CFG.CODEX_MODEL);
     expect(threadStartParams.cwd).toBe(CFG.PROXY_CODEX_WORKDIR);
     expect(threadStartParams.sandbox).toBe(CFG.PROXY_SANDBOX_MODE);
-    const expectedBaseInstructions = [
-      payload.messages.find((msg) => msg.role === "system")?.content ?? undefined,
-      CFG.PROXY_DISABLE_INTERNAL_TOOLS ? INTERNAL_TOOLS_INSTRUCTION : "",
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+    const expectedBaseInstructions =
+      payload.messages.find((msg) => msg.role === "system")?.content ?? undefined;
     expect(threadStartParams.baseInstructions).toBe(expectedBaseInstructions);
     const expectedApproval = (() => {
       const raw = process.env.PROXY_APPROVAL_POLICY ?? process.env.CODEX_APPROVAL_POLICY ?? "never";
