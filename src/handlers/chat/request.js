@@ -483,8 +483,22 @@ export const normalizeChatJsonRpcRequest = ({
   );
   const disableInternalTools = CFG.PROXY_DISABLE_INTERNAL_TOOLS;
   const internalToolsInstruction = disableInternalTools
-    ? "Never use internal tools (shell/exec_command/apply_patch/update_plan/view_image). Request only dynamic tool calls provided by the client."
+    ? "Never use internal tools (web_search, view_image, fileChange, commandExecution, mcpToolCall, shell, exec_command, apply_patch, update_plan). Use client tools like writeToFile/replaceInFile for file operations. Request only dynamic tool calls provided by the client."
     : "";
+  const appServerConfig = disableInternalTools
+    ? {
+        features: {
+          streamable_shell: false,
+          unified_exec: false,
+          view_image_tool: false,
+          apply_patch_freeform: false,
+        },
+        tools: {
+          web_search: false,
+          view_image: false,
+        },
+      }
+    : undefined;
 
   const turn = {
     model: effectiveModel,
@@ -496,6 +510,10 @@ export const normalizeChatJsonRpcRequest = ({
     summary: "auto",
     stream: !!stream,
   };
+
+  if (appServerConfig) {
+    turn.config = appServerConfig;
+  }
 
   if (Number.isInteger(choiceCount) && choiceCount > 0) {
     turn.choiceCount = choiceCount;
