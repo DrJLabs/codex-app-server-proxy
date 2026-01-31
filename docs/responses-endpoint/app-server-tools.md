@@ -48,6 +48,17 @@ The proxy currently does two distinct things:
 
 Because JSON-RPC does **not** carry tool manifests, tool definitions in the HTTP request cannot reach Codex core. This explains why the client sees “no tools available” even though ingress logs show the tools in the original request.
 
+## Internal tool shim (proxy behavior)
+
+When `PROXY_DISABLE_INTERNAL_TOOLS=true`, the proxy blocks built-in Codex tools. To avoid dead ends in client flows, the proxy shims some internal tool notifications into dynamic tool calls:
+
+- Internal `webSearch` -> dynamic tool `webSearch` (forces `chatHistory: []`).
+- Internal `fileChange` -> dynamic tool `writeToFile` or `replaceInFile` (based on `diff`).
+
+If a follow-up request sends a tool output that does not match a pending tool call, the proxy appends a `[function_call_output ...]` text item to the next turn so the model can continue.
+
+This shim requires those client tool names to be present in the dynamic tool manifest; other internal tool types (e.g., `commandExecution`) still fail when internal tools are disabled.
+
 ## Implication for Obsidian tools
 
 To make Obsidian tools available to Codex via the app-server, they must be exposed **as MCP tools** (or another Codex-native tool source) and configured in `CODEX_HOME/config.toml`. Client-supplied `tools` in `/v1/responses` cannot be used directly by app-server today.

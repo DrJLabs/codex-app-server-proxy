@@ -66,6 +66,17 @@ Follow-up requests should send tool results as `function_call_output` items:
 
 Clients that echo `function_call` items back in `input` are accepted.
 
+## Internal tool shim (dynamic tools)
+
+When `PROXY_DISABLE_INTERNAL_TOOLS=true`, internal app-server tool notifications are blocked. To keep client workflows moving, the proxy will shim some internal tool events into dynamic tool calls:
+
+- Internal `webSearch` events -> dynamic tool `webSearch` (ensures `chatHistory: []`).
+- Internal `fileChange` events -> dynamic tool `writeToFile` or `replaceInFile` (based on presence of `diff`).
+
+If a follow-up request sends a tool output that does not match a pending tool call, the proxy appends a `[function_call_output ...]` text line to the next turn so the model can continue.
+
+This shim requires the client tool names above to exist; other internal tool types (e.g., `commandExecution`) still fail when internal tools are disabled.
+
 ## Streaming (typed SSE)
 
 When `stream:true`, the proxy emits typed SSE events such as:

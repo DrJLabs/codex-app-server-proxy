@@ -86,7 +86,7 @@ For production requirements (Traefik, Codex HOME, auth), see [docs/deployment/pr
 
 Full configuration and defaults: [docs/configuration.md](docs/configuration.md).
 
-By default, internal Codex tools (shell/apply_patch/etc.) are disabled and only dynamic tool calls are allowed. Set `PROXY_DISABLE_INTERNAL_TOOLS=false` to re-enable them.
+By default, internal Codex tools (shell/apply_patch/etc.) are disabled and only dynamic tool calls are allowed. Set `PROXY_DISABLE_INTERNAL_TOOLS=false` to re-enable them. When internal tools are disabled, the proxy shims internal webSearch/fileChange notifications into dynamic tool calls and carries unmatched tool outputs into follow-up turns.
 
 ### Dev-only raw capture
 
