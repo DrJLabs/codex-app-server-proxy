@@ -388,10 +388,10 @@ export async function postResponsesNonStream(req, res) {
   const dynamicTools = buildDynamicTools(functionTools, normalized.toolChoice);
 
   const developerInstructions = normalized.developerInstructions || "";
-  const baseInstructions = CFG.PROXY_DISABLE_INTERNAL_TOOLS
+  const baseInstructions = CFG.PROXY_DISABLE_INTERNAL_TOOLS_PROMPT
     ? RESPONSES_INTERNAL_TOOLS_INSTRUCTION
     : undefined;
-  const appServerConfig = CFG.PROXY_DISABLE_INTERNAL_TOOLS
+  const appServerConfig = CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG
     ? {
         features: {
           streamable_shell: false,

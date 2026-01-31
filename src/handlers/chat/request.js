@@ -481,7 +481,7 @@ export const normalizeChatJsonRpcRequest = ({
     reasoningEffort,
     body.reasoning
   );
-  const disableInternalTools = CFG.PROXY_DISABLE_INTERNAL_TOOLS;
+  const disableInternalTools = CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG;
   const appServerConfig = disableInternalTools
     ? {
         features: {

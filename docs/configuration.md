@@ -41,7 +41,9 @@ Codex CLI reads `config.toml` and `AGENTS.md` from `CODEX_HOME`.
 | --- | --- | --- |
 | `PROXY_SANDBOX_MODE` | `read-only` | Sandbox policy passed to Codex (`read-only`, `workspace-write`, `danger-full-access`) |
 | `PROXY_CODEX_WORKDIR` | `/tmp/codex-work` | Child working directory (ephemeral writes) |
-| `PROXY_DISABLE_INTERNAL_TOOLS` | `true` | Disable Codex internal tools (shell/apply_patch/etc); shim internal webSearch/fileChange notifications into dynamic tool calls when possible |
+| `PROXY_DISABLE_INTERNAL_TOOLS` | `true` | Legacy default for internal tools toggles (sets defaults for the config + prompt flags below) |
+| `PROXY_DISABLE_INTERNAL_TOOLS_CONFIG` | `true` | Disable Codex internal tools (shell/apply_patch/etc) at the app-server level and block internal tool calls; shim internal webSearch/fileChange notifications into dynamic tool calls when possible |
+| `PROXY_DISABLE_INTERNAL_TOOLS_PROMPT` | `true` | Inject responses `baseInstructions` telling the model not to use specific internal tool names |
 
 ## Endpoint toggles and auth gates
 

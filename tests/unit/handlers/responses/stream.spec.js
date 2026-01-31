@@ -2,6 +2,10 @@ import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RESPONSES_INTERNAL_TOOLS_INSTRUCTION } from "../../../../src/lib/prompts/internal-tools-instructions.js";
 
+const ORIGINAL_DISABLE_INTERNAL_TOOLS = process.env.PROXY_DISABLE_INTERNAL_TOOLS;
+const ORIGINAL_DISABLE_INTERNAL_TOOLS_CONFIG = process.env.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG;
+const ORIGINAL_DISABLE_INTERNAL_TOOLS_PROMPT = process.env.PROXY_DISABLE_INTERNAL_TOOLS_PROMPT;
+
 const applyProxyTraceHeadersMock = vi.fn();
 const ensureReqIdMock = vi.fn(() => "req_test");
 const setHttpContextMock = vi.fn();
@@ -177,12 +181,32 @@ const makeRes = () => {
   return res;
 };
 
+const restoreEnv = () => {
+  if (ORIGINAL_DISABLE_INTERNAL_TOOLS === undefined) {
+    delete process.env.PROXY_DISABLE_INTERNAL_TOOLS;
+  } else {
+    process.env.PROXY_DISABLE_INTERNAL_TOOLS = ORIGINAL_DISABLE_INTERNAL_TOOLS;
+  }
+  if (ORIGINAL_DISABLE_INTERNAL_TOOLS_CONFIG === undefined) {
+    delete process.env.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG;
+  } else {
+    process.env.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG = ORIGINAL_DISABLE_INTERNAL_TOOLS_CONFIG;
+  }
+  if (ORIGINAL_DISABLE_INTERNAL_TOOLS_PROMPT === undefined) {
+    delete process.env.PROXY_DISABLE_INTERNAL_TOOLS_PROMPT;
+  } else {
+    process.env.PROXY_DISABLE_INTERNAL_TOOLS_PROMPT = ORIGINAL_DISABLE_INTERNAL_TOOLS_PROMPT;
+  }
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
+  restoreEnv();
 });
 
 afterEach(() => {
   vi.resetModules();
+  restoreEnv();
 });
 
 describe("responses stream handler", () => {
@@ -224,6 +248,49 @@ describe("responses stream handler", () => {
         view_image: false,
       },
     });
+  });
+
+  it("skips baseInstructions when prompt flag is disabled", async () => {
+    process.env.PROXY_DISABLE_INTERNAL_TOOLS = "true";
+    process.env.PROXY_DISABLE_INTERNAL_TOOLS_PROMPT = "false";
+    process.env.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG = "true";
+
+    const { postResponsesStream } = await import("../../../../src/handlers/responses/stream.js");
+    const req = makeReq({ input: "hello", model: "gpt-5.2", stream: true });
+    const res = makeRes();
+
+    await postResponsesStream(req, res);
+
+    const [{ normalizedRequest }] = createJsonRpcChildAdapterMock.mock.calls[0];
+    expect(normalizedRequest.turn.baseInstructions).toBeUndefined();
+    expect(normalizedRequest.turn.config).toMatchObject({
+      features: {
+        streamable_shell: false,
+        unified_exec: false,
+        view_image_tool: false,
+        apply_patch_freeform: false,
+      },
+      tools: {
+        web_search: false,
+        view_image: false,
+      },
+    });
+  });
+
+  it("skips turn.config when config flag is disabled", async () => {
+    process.env.PROXY_DISABLE_INTERNAL_TOOLS = "true";
+    process.env.PROXY_DISABLE_INTERNAL_TOOLS_PROMPT = "true";
+    process.env.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG = "false";
+
+    const { postResponsesStream } = await import("../../../../src/handlers/responses/stream.js");
+    const req = makeReq({ input: "hello", model: "gpt-5.2", stream: true });
+    const res = makeRes();
+
+    await postResponsesStream(req, res);
+
+    const [{ normalizedRequest }] = createJsonRpcChildAdapterMock.mock.calls[0];
+    expect(normalizedRequest.turn.baseInstructions).toBe(RESPONSES_INTERNAL_TOOLS_INSTRUCTION);
+    expect(normalizedRequest.turn.config).toBeUndefined();
   });
 
   it("logs tool output summaries when provided", async () => {

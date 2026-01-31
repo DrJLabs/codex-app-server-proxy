@@ -338,10 +338,10 @@ export async function postResponsesStream(req, res) {
   const includeUsage = Boolean(originalBody?.stream_options?.include_usage);
 
   const developerInstructions = normalized.developerInstructions || "";
-  const baseInstructions = CFG.PROXY_DISABLE_INTERNAL_TOOLS
+  const baseInstructions = CFG.PROXY_DISABLE_INTERNAL_TOOLS_PROMPT
     ? RESPONSES_INTERNAL_TOOLS_INSTRUCTION
     : undefined;
-  const appServerConfig = CFG.PROXY_DISABLE_INTERNAL_TOOLS
+  const appServerConfig = CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG
     ? {
         features: {
           streamable_shell: false,

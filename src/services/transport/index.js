@@ -1191,7 +1191,7 @@ class JsonRpcTransport {
     }
     const method = normalizeNotificationMethod(message.method);
     const payload = params.msg && typeof params.msg === "object" ? params.msg : params;
-    if (CFG.PROXY_DISABLE_INTERNAL_TOOLS) {
+    if (CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG) {
       const rawToolType = payload?.item?.type ?? payload?.type ?? null;
       const toolType = normalizeToolType(rawToolType);
       const isInternalToolType =

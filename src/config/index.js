@@ -34,6 +34,10 @@ const resolveStopAfterToolsGraceMs = () => {
 };
 
 const resolveIgnoreClientSystemPrompt = () => bool("PROXY_IGNORE_CLIENT_SYSTEM_PROMPT", "true");
+const resolveDisableInternalToolsConfig = () =>
+  bool("PROXY_DISABLE_INTERNAL_TOOLS_CONFIG", process.env.PROXY_DISABLE_INTERNAL_TOOLS ?? "true");
+const resolveDisableInternalToolsPrompt = () =>
+  bool("PROXY_DISABLE_INTERNAL_TOOLS_PROMPT", process.env.PROXY_DISABLE_INTERNAL_TOOLS ?? "true");
 
 const resolveTitleGenIntercept = () =>
   /^(1|true|yes)$/i.test(String(process.env.PROXY_TITLE_GEN_INTERCEPT ?? "true"));
@@ -98,6 +102,8 @@ export const config = {
   PROXY_COPILOT_AUTO_DETECT: bool("PROXY_COPILOT_AUTO_DETECT", "false"),
   PROXY_APPROVAL_POLICY: resolveApprovalPolicy(),
   PROXY_DISABLE_INTERNAL_TOOLS: bool("PROXY_DISABLE_INTERNAL_TOOLS", "true"),
+  PROXY_DISABLE_INTERNAL_TOOLS_CONFIG: resolveDisableInternalToolsConfig(),
+  PROXY_DISABLE_INTERNAL_TOOLS_PROMPT: resolveDisableInternalToolsPrompt(),
   PROXY_AUTH_LOGIN_URL: bool("PROXY_AUTH_LOGIN_URL", "false"),
   PROXY_AUTH_LOGIN_URL_MODE: resolveAuthLoginUrlMode(),
   PROXY_IGNORE_CLIENT_SYSTEM_PROMPT: resolveIgnoreClientSystemPrompt(),
