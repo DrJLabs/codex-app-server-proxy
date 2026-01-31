@@ -22,6 +22,7 @@ import {
   logBackendResponse,
   logBackendSubmission,
 } from "../../dev-trace/backend.js";
+import { logStructured } from "../logging/schema.js";
 
 const JSONRPC_VERSION = "2.0";
 const LOG_PREFIX = "[proxy][json-rpc-transport]";
@@ -38,6 +39,73 @@ const normalizeNotificationMethod = (method) => {
   if (!method) return "";
   const value = String(method);
   return value.replace(/^codex\/event\//i, "");
+};
+
+const normalizeToolType = (value) => (typeof value === "string" ? value.trim() : (value ?? null));
+
+const extractShimArgs = (payload) => {
+  const candidates = [
+    payload?.item?.data,
+    payload?.item?.input,
+    payload?.item?.args,
+    payload?.data,
+    payload?.input,
+    payload?.args,
+    payload,
+  ];
+  for (const candidate of candidates) {
+    if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+      return { ...candidate };
+    }
+  }
+  return {};
+};
+
+const resolveShimToolName = ({ toolType, method, args }) => {
+  if (
+    toolType === "webSearch" ||
+    method.startsWith("web_search_") ||
+    method.startsWith("webSearch")
+  ) {
+    return { name: "webSearch", args };
+  }
+  if (
+    toolType === "fileChange" ||
+    method.startsWith("item/fileChange") ||
+    method.startsWith("fileChange_") ||
+    method.startsWith("file_change_")
+  ) {
+    if (Object.prototype.hasOwnProperty.call(args, "diff")) {
+      return { name: "replaceInFile", args };
+    }
+    return { name: "writeToFile", args };
+  }
+  return null;
+};
+
+const resolveShimCallId = (payload) => {
+  const candidate =
+    payload?.item?.id ??
+    payload?.item?.callId ??
+    payload?.item?.call_id ??
+    payload?.callId ??
+    payload?.call_id ??
+    payload?.id ??
+    null;
+  if (candidate) return String(candidate);
+  return `call_${nanoid(12)}`;
+};
+
+const shouldShimInternalTool = ({ toolType, method, payload }) => {
+  if (toolType === "webSearch" || method.startsWith("web_search_")) return true;
+  if (toolType === "fileChange" || method.startsWith("item/fileChange")) return true;
+  if (toolType === "commandExecution" || method.startsWith("item/commandExecution")) return true;
+  if (toolType === "mcpToolCall" || method.startsWith("mcpToolCall")) return true;
+  const status =
+    payload?.item?.status ?? payload?.status ?? payload?.item?.state ?? payload?.state ?? null;
+  const normalized = typeof status === "string" ? status.toLowerCase() : "";
+  if (normalized && (normalized === "started" || normalized === "begin")) return true;
+  return method.includes("begin") || method.includes("started");
 };
 
 const summarizeTurnParamsForLog = (params) => {
@@ -203,6 +271,7 @@ class JsonRpcTransport {
     this.rpcSeq = 1;
     this.pending = new Map();
     this.pendingToolCalls = new Map();
+    this.shimToolCalls = new Map();
     this.contextsByConversation = new Map();
     this.contextsByRequest = new Map();
     this.activeRequests = 0;
@@ -233,6 +302,26 @@ class JsonRpcTransport {
     }
   }
 
+  #logConcurrency(context, phase, delta) {
+    if (!context) return;
+    logStructured(
+      {
+        component: "json_rpc",
+        event: "worker_concurrency",
+        level: "info",
+        req_id: context.requestId ?? null,
+        route: context.trace?.route ?? null,
+        mode: context.trace?.mode ?? null,
+      },
+      {
+        phase,
+        delta,
+        active_requests: this.activeRequests,
+        max_concurrency: Math.max(1, CFG.WORKER_MAX_CONCURRENCY),
+      }
+    );
+  }
+
   #clearRpcTrace(rpcId) {
     if (rpcId === null || rpcId === undefined) return;
     this.rpcTraceById.delete(rpcId);
@@ -261,6 +350,7 @@ class JsonRpcTransport {
     }
     this.pending.clear();
     this.pendingToolCalls.clear();
+    this.shimToolCalls.clear();
     for (const context of this.contextsByRequest.values()) {
       context.reject(new TransportError("transport destroyed", { retryable: true }));
     }
@@ -383,6 +473,20 @@ class JsonRpcTransport {
         retryable: true,
       });
     if (this.activeRequests >= Math.max(1, CFG.WORKER_MAX_CONCURRENCY)) {
+      logStructured(
+        {
+          component: "json_rpc",
+          event: "worker_concurrency_reject",
+          level: "warn",
+          req_id: requestId ?? null,
+          route: trace?.route ?? null,
+          mode: trace?.mode ?? null,
+        },
+        {
+          active_requests: this.activeRequests,
+          max_concurrency: Math.max(1, CFG.WORKER_MAX_CONCURRENCY),
+        }
+      );
       throw new TransportError("worker at capacity", { code: "worker_busy", retryable: true });
     }
 
@@ -405,6 +509,7 @@ class JsonRpcTransport {
     this.contextsByRequest.set(requestId, context);
     this.contextsByConversation.set(context.clientConversationId, context);
     this.activeRequests += 1;
+    this.#logConcurrency(context, "acquired", 1);
 
     if (signal) {
       if (signal.aborted) {
@@ -803,6 +908,7 @@ class JsonRpcTransport {
       );
     }
     this.pendingToolCalls.clear();
+    this.shimToolCalls.clear();
     this.contextsByConversation.clear();
     this.contextsByRequest.clear();
     this.activeRequests = 0;
@@ -922,6 +1028,98 @@ class JsonRpcTransport {
     return true;
   }
 
+  registerShimToolCall(callId, details = {}) {
+    if (!callId) return false;
+    const key = String(callId);
+    this.shimToolCalls.set(key, {
+      ...details,
+      callId: key,
+      createdAt: Date.now(),
+    });
+    return true;
+  }
+
+  consumeShimToolCall(callId) {
+    if (!callId) return null;
+    const key = String(callId);
+    const entry = this.shimToolCalls.get(key);
+    if (!entry) return null;
+    this.shimToolCalls.delete(key);
+    return entry;
+  }
+
+  #maybeShimInternalTool({ context, method, payload, toolType }) {
+    if (!context) return false;
+    const existingCallId =
+      payload?.item?.id ??
+      payload?.item?.callId ??
+      payload?.item?.call_id ??
+      payload?.callId ??
+      payload?.call_id ??
+      payload?.id ??
+      null;
+    if (existingCallId && this.shimToolCalls.has(String(existingCallId))) {
+      return true;
+    }
+    if (!shouldShimInternalTool({ toolType, method, payload })) return false;
+    const lowerMethod = method.toLowerCase();
+    const isTerminalEvent =
+      lowerMethod.includes("finished") ||
+      lowerMethod.includes("end") ||
+      lowerMethod.includes("done");
+    if (isTerminalEvent && !existingCallId) return false;
+    const args = extractShimArgs(payload);
+    const resolved = resolveShimToolName({ toolType, method, args });
+    if (!resolved?.name) return false;
+    const toolArgs = resolved.args ?? {};
+    if (resolved.name === "webSearch") {
+      if (toolArgs.query === undefined || toolArgs.query === null) {
+        const queryCandidate =
+          payload?.query ??
+          payload?.item?.query ??
+          payload?.item?.data?.query ??
+          payload?.data?.query ??
+          null;
+        if (queryCandidate != null) toolArgs.query = String(queryCandidate);
+      }
+      if (!Array.isArray(toolArgs.chatHistory)) toolArgs.chatHistory = [];
+    }
+    const callId = resolveShimCallId(payload);
+    if (this.shimToolCalls.has(callId)) return true;
+    this.registerShimToolCall(callId, {
+      toolName: resolved.name,
+      method,
+      toolType: toolType ?? null,
+      requestId: context.requestId ?? null,
+    });
+    const threadId =
+      payload?.threadId ??
+      payload?.thread_id ??
+      context.conversationId ??
+      context.clientConversationId ??
+      null;
+    const turnId = payload?.turnId ?? payload?.turn_id ?? context.rpc?.turnId ?? null;
+    try {
+      context.emitter.emit("notification", {
+        method: "codex/event/dynamic_tool_call_request",
+        params: {
+          tool: resolved.name,
+          arguments: toolArgs,
+          callId,
+          threadId,
+          turnId,
+        },
+      });
+    } catch (err) {
+      console.warn(`${LOG_PREFIX} failed to emit shim tool request`, err);
+      return false;
+    }
+    console.warn(
+      `${LOG_PREFIX} shimmed internal tool ${toolType ?? "unknown"} -> ${resolved.name} (${method})`
+    );
+    return true;
+  }
+
   #sendServerError(id, code, message) {
     try {
       this.#write({
@@ -995,7 +1193,7 @@ class JsonRpcTransport {
     const payload = params.msg && typeof params.msg === "object" ? params.msg : params;
     if (CFG.PROXY_DISABLE_INTERNAL_TOOLS) {
       const rawToolType = payload?.item?.type ?? payload?.type ?? null;
-      const toolType = typeof rawToolType === "string" ? rawToolType.trim() : (rawToolType ?? null);
+      const toolType = normalizeToolType(rawToolType);
       const isInternalToolType =
         toolType === "commandExecution" ||
         toolType === "fileChange" ||
@@ -1012,6 +1210,9 @@ class JsonRpcTransport {
         method.startsWith("webSearch") ||
         method.startsWith("mcpToolCall");
       if (isInternalToolType || isInternalToolMethod) {
+        if (this.#maybeShimInternalTool({ context, method, payload, toolType })) {
+          return;
+        }
         console.warn(
           `${LOG_PREFIX} internal tool disabled; cancelling request ${context.requestId} (${method})`
         );
@@ -1214,6 +1415,7 @@ class JsonRpcTransport {
     }
     this.contextsByRequest.delete(context.requestId);
     this.activeRequests = Math.max(0, this.activeRequests - 1);
+    this.#logConcurrency(context, "released", -1);
     const payload = {
       requestId: context.requestId,
       conversationId: context.conversationId ?? context.clientConversationId,
@@ -1243,6 +1445,7 @@ class JsonRpcTransport {
     }
     this.contextsByRequest.delete(context.requestId);
     this.activeRequests = Math.max(0, this.activeRequests - 1);
+    this.#logConcurrency(context, "released", -1);
     const resolvedError = error instanceof Error ? error : new TransportError(String(error));
     try {
       context.emitter.emit("error", resolvedError);

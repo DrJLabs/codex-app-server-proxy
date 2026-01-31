@@ -80,9 +80,10 @@ const applyCors = (req, res) => applyCorsUtil(req, res, CORS_ENABLED, CORS_ALLOW
 const countDynamicTools = (dynamicTools) => (Array.isArray(dynamicTools) ? dynamicTools.length : 0);
 
 const respondToToolOutputs = (child, toolOutputs, { reqId, route, mode } = {}) => {
-  if (!child || !Array.isArray(toolOutputs) || toolOutputs.length === 0) return;
+  if (!child || !Array.isArray(toolOutputs) || toolOutputs.length === 0) return [];
   const transport = child.transport;
-  if (!transport || typeof transport.respondToToolCall !== "function") return;
+  if (!transport || typeof transport.respondToToolCall !== "function") return toolOutputs;
+  const unmatched = [];
   toolOutputs.forEach((toolOutput) => {
     const callId = toolOutput?.callId;
     if (!callId) return;
@@ -120,7 +121,47 @@ const respondToToolOutputs = (child, toolOutputs, { reqId, route, mode } = {}) =
         },
         { call_id: callId }
       );
+      unmatched.push(toolOutput);
     }
+  });
+  return unmatched;
+};
+
+const formatShimToolOutputLine = (toolOutput) => {
+  const callId = toolOutput?.callId ?? "";
+  const outputText =
+    typeof toolOutput?.output === "string"
+      ? toolOutput.output
+      : (() => {
+          try {
+            return JSON.stringify(toolOutput?.output ?? "");
+          } catch {
+            return String(toolOutput?.output ?? "");
+          }
+        })();
+  return `[function_call_output call_id=${callId} output=${outputText}]`;
+};
+
+const appendShimToolOutputs = (transport, toolOutputs, turn, message, logMeta) => {
+  if (!transport || typeof transport.consumeShimToolCall !== "function") return;
+  toolOutputs.forEach((toolOutput) => {
+    const shimEntry = transport.consumeShimToolCall(toolOutput?.callId);
+    if (!shimEntry) return;
+    const line = formatShimToolOutputLine(toolOutput);
+    const item = { type: "text", data: { text: line } };
+    turn.items.push(item);
+    message.items.push(item);
+    logStructured(
+      {
+        component: "responses",
+        event: "responses_tool_output_shimmed",
+        level: "info",
+        req_id: logMeta?.reqId,
+        route: logMeta?.route,
+        mode: logMeta?.mode,
+      },
+      { call_id: toolOutput?.callId, tool_name: shimEntry.toolName ?? null }
+    );
   });
 };
 
@@ -297,7 +338,7 @@ export async function postResponsesStream(req, res) {
 
   const disableInternalTools = CFG.PROXY_DISABLE_INTERNAL_TOOLS;
   const internalToolsInstruction = disableInternalTools
-    ? "Never use internal tools (web_search, view_image, shell, exec_command, apply_patch, update_plan). Request only dynamic tool calls provided by the client."
+    ? "Never use internal tools (web_search, view_image, fileChange, commandExecution, mcpToolCall, shell, exec_command, apply_patch, update_plan). Use client tools like writeToFile/replaceInFile for file operations. Request only dynamic tool calls provided by the client."
     : "";
   const developerInstructions = [normalized.developerInstructions, internalToolsInstruction]
     .filter(Boolean)
@@ -370,7 +411,18 @@ export async function postResponsesStream(req, res) {
       copilot_trace_id: locals.copilot_trace_id || null,
     },
   });
-  respondToToolOutputs(child, normalized.toolOutputs, { reqId, route, mode });
+  const unmatchedToolOutputs = respondToToolOutputs(child, normalized.toolOutputs, {
+    reqId,
+    route,
+    mode,
+  });
+  if (unmatchedToolOutputs.length) {
+    appendShimToolOutputs(child.transport, unmatchedToolOutputs, turn, message, {
+      reqId,
+      route,
+      mode,
+    });
+  }
 
   let responded = false;
   let usage = null;
