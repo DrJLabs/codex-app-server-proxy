@@ -38,6 +38,13 @@ const resolveDisableInternalToolsConfig = () =>
   bool("PROXY_DISABLE_INTERNAL_TOOLS_CONFIG", process.env.PROXY_DISABLE_INTERNAL_TOOLS ?? "true");
 const resolveDisableInternalToolsPrompt = () =>
   bool("PROXY_DISABLE_INTERNAL_TOOLS_PROMPT", process.env.PROXY_DISABLE_INTERNAL_TOOLS ?? "true");
+const resolveEnableInternalToolsShim = () => {
+  const enableRaw = process.env.PROXY_ENABLE_INTERNAL_TOOLS_SHIM;
+  if (enableRaw !== undefined && enableRaw !== "") return boolishTrue(enableRaw);
+  const disableRaw = process.env.PROXY_DISABLE_INTERNAL_TOOLS_SHIM;
+  if (disableRaw !== undefined && disableRaw !== "") return !boolishTrue(disableRaw);
+  return false;
+};
 
 const resolveTitleGenIntercept = () =>
   /^(1|true|yes)$/i.test(String(process.env.PROXY_TITLE_GEN_INTERCEPT ?? "true"));
@@ -104,6 +111,7 @@ export const config = {
   PROXY_DISABLE_INTERNAL_TOOLS: bool("PROXY_DISABLE_INTERNAL_TOOLS", "true"),
   PROXY_DISABLE_INTERNAL_TOOLS_CONFIG: resolveDisableInternalToolsConfig(),
   PROXY_DISABLE_INTERNAL_TOOLS_PROMPT: resolveDisableInternalToolsPrompt(),
+  PROXY_ENABLE_INTERNAL_TOOLS_SHIM: resolveEnableInternalToolsShim(),
   PROXY_AUTH_LOGIN_URL: bool("PROXY_AUTH_LOGIN_URL", "false"),
   PROXY_AUTH_LOGIN_URL_MODE: resolveAuthLoginUrlMode(),
   PROXY_IGNORE_CLIENT_SYSTEM_PROMPT: resolveIgnoreClientSystemPrompt(),

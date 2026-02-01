@@ -1210,7 +1210,10 @@ class JsonRpcTransport {
         method.startsWith("webSearch") ||
         method.startsWith("mcpToolCall");
       if (isInternalToolType || isInternalToolMethod) {
-        if (this.#maybeShimInternalTool({ context, method, payload, toolType })) {
+        if (
+          CFG.PROXY_ENABLE_INTERNAL_TOOLS_SHIM &&
+          this.#maybeShimInternalTool({ context, method, payload, toolType })
+        ) {
           return;
         }
         console.warn(

@@ -932,6 +932,94 @@ describe("JsonRpcTransport request lifecycle", () => {
     await context.promise.catch(() => {});
   });
 
+  it("fails internal tool notifications when shim is not enabled", async () => {
+    const child = createMockChild();
+    const responses = {
+      initialize: { result: {} },
+      "thread/start": { result: { threadId: "server-conv" } },
+      "turn/start": { result: { threadId: "server-conv" } },
+    };
+    wireJsonResponder(child, (message) => {
+      if (Object.prototype.hasOwnProperty.call(responses, message.method)) {
+        writeRpcResult(child, message.id, responses[message.method]);
+      }
+    });
+    __setChild(child);
+
+    const originalDisable = CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG;
+    const originalShim = CFG.PROXY_ENABLE_INTERNAL_TOOLS_SHIM;
+    CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG = true;
+    CFG.PROXY_ENABLE_INTERNAL_TOOLS_SHIM = false;
+
+    const transport = getJsonRpcTransport();
+    const context = await transport.createChatRequest({ requestId: "req-shim-disabled" });
+    context.promise.catch(() => {});
+    const errors = [];
+    const notifications = [];
+    context.emitter.on("error", (payload) => errors.push(payload));
+    context.emitter.on("notification", (payload) => notifications.push(payload));
+
+    writeRpcNotification(child, "codex/event/web_search_started", {
+      threadId: "server-conv",
+      msg: { query: "status" },
+    });
+    await flushAsync();
+
+    expect(errors.some((err) => err?.code === "internal_tools_disabled")).toBe(true);
+    expect(
+      notifications.some((payload) => payload?.method === "codex/event/dynamic_tool_call_request")
+    ).toBe(false);
+
+    CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG = originalDisable;
+    CFG.PROXY_ENABLE_INTERNAL_TOOLS_SHIM = originalShim;
+    transport.cancelContext(context);
+    await context.promise.catch(() => {});
+  });
+
+  it("shims internal tool notifications when shim is enabled", async () => {
+    const child = createMockChild();
+    const responses = {
+      initialize: { result: {} },
+      "thread/start": { result: { threadId: "server-conv" } },
+      "turn/start": { result: { threadId: "server-conv" } },
+    };
+    wireJsonResponder(child, (message) => {
+      if (Object.prototype.hasOwnProperty.call(responses, message.method)) {
+        writeRpcResult(child, message.id, responses[message.method]);
+      }
+    });
+    __setChild(child);
+
+    const originalDisable = CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG;
+    const originalShim = CFG.PROXY_ENABLE_INTERNAL_TOOLS_SHIM;
+    CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG = true;
+    CFG.PROXY_ENABLE_INTERNAL_TOOLS_SHIM = true;
+
+    const transport = getJsonRpcTransport();
+    const context = await transport.createChatRequest({ requestId: "req-shim-enabled" });
+    context.promise.catch(() => {});
+    const errors = [];
+    const notifications = [];
+    context.emitter.on("error", (payload) => errors.push(payload));
+    context.emitter.on("notification", (payload) => notifications.push(payload));
+
+    writeRpcNotification(child, "codex/event/web_search_started", {
+      threadId: "server-conv",
+      msg: { query: "status" },
+    });
+    await flushAsync();
+
+    expect(errors.some((err) => err?.code === "internal_tools_disabled")).toBe(false);
+    expect(
+      notifications.some((payload) => payload?.method === "codex/event/dynamic_tool_call_request")
+    ).toBe(true);
+
+    CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG = originalDisable;
+    CFG.PROXY_ENABLE_INTERNAL_TOOLS_SHIM = originalShim;
+    transport.cancelContext(context);
+    await context.promise.catch(() => {});
+  });
+
   it("routes v2 tool lifecycle notifications as deltas", async () => {
     const child = createMockChild();
     const responses = {
