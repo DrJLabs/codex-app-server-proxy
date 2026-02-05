@@ -66,6 +66,10 @@ Follow-up requests should send tool results as `function_call_output` items:
 
 Clients that echo `function_call` items back in `input` are accepted.
 
+## Tool outputs and thread continuity
+
+When a client submits `function_call_output` items, the proxy resolves the originating app-server thread and reuses its tool manifest and instructions. Tool outputs that do not map to an active tool call are rejected with `tool_outputs_unmatched`.
+
 ## Internal tool shim (dynamic tools)
 
 When `PROXY_DISABLE_INTERNAL_TOOLS=true`, internal app-server tool notifications are blocked. To keep client workflows moving, the proxy will shim some internal tool events into dynamic tool calls:

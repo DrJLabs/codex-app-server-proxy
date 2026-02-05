@@ -184,6 +184,9 @@ Then the client executes the tool and sends a follow-up input item:
 - The client executes the tool and sends a follow-up request that includes `function_call_output` items.
 - Proxy flattens tool outputs into app-server transcript items.
 
+> **[FIX] Thread continuity for tool outputs**  
+> The proxy must resolve the originating app-server thread from pending tool calls and reuse its tool manifest and instructions. If the tool outputs do not map to an active call, return a `tool_outputs_unmatched` error rather than starting a new thread.
+
 > **[FIX] Accept that clients often include prior response items.**  
 > Many Responses clients append `response.output` items (including the `function_call` item itself) into the next request’s `input`. Your proxy should tolerate/accept `function_call` items echoed back, not only `function_call_output`.
 
