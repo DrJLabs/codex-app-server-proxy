@@ -625,6 +625,74 @@ describe("JsonRpcTransport request lifecycle", () => {
     await pending;
   });
 
+  it("rewrites reserved dynamic tool names and maps tool calls back to client names", async () => {
+    const child = createMockChild();
+    let threadStartParams = null;
+    wireJsonResponder(child, (message) => {
+      if (message.method === "initialize") {
+        writeRpcResult(child, message.id, { result: {} });
+      }
+      if (message.method === "thread/start") {
+        threadStartParams = message.params;
+        writeRpcResult(child, message.id, { result: { threadId: "server-conv" } });
+      }
+      if (message.method === "turn/start") {
+        writeRpcResult(child, message.id, { result: { threadId: "server-conv" } });
+      }
+    });
+    __setChild(child);
+
+    const transport = getJsonRpcTransport();
+    const context = await transport.createChatRequest({
+      requestId: "req-rewrite-tool",
+      turnParams: {
+        items: [{ type: "text", data: { text: "hello" } }],
+        dynamicTools: [{ name: "webSearch", description: "", inputSchema: { type: "object" } }],
+      },
+    });
+    context.emitter.on("error", () => {});
+    const pending = context.promise.catch(() => {});
+
+    expect(threadStartParams?.dynamicTools?.[0]?.name).toBe("client_webSearch");
+    expect(
+      transport.threadToolSets.get("server-conv")?.toolNameMap?.toClient?.get?.("client_webSearch")
+    ).toBe("webSearch");
+
+    const toolCallNotification = new Promise((resolve) => {
+      context.emitter.on("notification", (message) => {
+        if (message?.method === "codex/event/dynamic_tool_call_request") resolve(message);
+      });
+    });
+
+    child.stdout.write(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 50,
+        method: "item/tool/call",
+        params: {
+          callId: "call-1",
+          threadId: "server-conv",
+          tool: "client_webSearch",
+          arguments: { query: "x" },
+        },
+      }) + "\n"
+    );
+
+    await expect(toolCallNotification).resolves.toMatchObject({
+      params: {
+        tool: "webSearch",
+        callId: "call-1",
+        threadId: "server-conv",
+      },
+    });
+
+    transport.cancelContext(
+      context,
+      new TransportError("request aborted", { code: "request_aborted", retryable: false })
+    );
+    await pending;
+  });
+
   it("clears listener state when no subscription exists", async () => {
     const child = createMockChild();
     const methods = [];
@@ -1139,7 +1207,7 @@ describe("JsonRpcTransport request lifecycle", () => {
 
     const result = await context.promise;
 
-    expect(result.finalMessage).toMatchObject({ message: "from item" });
+    expect(result.finalMessage).toMatchObject({ content: "from item" });
     expect(result.finishReason).toBe("stop");
     expect(result.result).toMatchObject({ item: expect.any(Object) });
   });
@@ -1222,6 +1290,22 @@ describe("JsonRpcTransport request lifecycle", () => {
     const replacementPending = replacement.promise.catch((err) => err);
     transport.cancelContext(replacement);
     await expect(replacementPending).resolves.toMatchObject({ code: "request_aborted" });
+  });
+});
+
+describe("JsonRpcTransport tool output resolution", () => {
+  it("resolves thread id from tool outputs using pending tool calls", () => {
+    const transport = getJsonRpcTransport();
+    transport.pendingToolCalls.set("call_1", {
+      callId: "call_1",
+      threadId: "thread-123",
+    });
+
+    const result = transport.resolveThreadForToolOutputs([
+      { callId: "call_1", output: "ok", success: true },
+    ]);
+
+    expect(result).toEqual({ threadId: "thread-123", toolset: null });
   });
 });
 

@@ -75,6 +75,10 @@ const extractTextParts = (value) => {
   if (!value || typeof value !== "object") return [];
   if (typeof value.text === "string") return [value.text];
   if (typeof value.content === "string") return [value.content];
+  if (typeof value.message === "string") return [value.message];
+  if (value.message && typeof value.message === "object") {
+    return extractTextParts(value.message);
+  }
   if (Array.isArray(value.content)) {
     return value.content.flatMap((part) => extractTextParts(part));
   }
@@ -114,24 +118,26 @@ const handleDeltaPayload = (delta, choiceIndex, emitEvent, metadataInfo) => {
 };
 
 const handleMessagePayload = (messagePayload, choiceIndex, emitEvent, metadataInfo) => {
-  const message = messagePayload?.message || messagePayload;
-  if (!message || typeof message !== "object") return;
+  const message = messagePayload?.message ?? messagePayload;
+  if (message === undefined || message === null) return;
 
-  const contentParts = extractTextParts(message.content);
+  const contentParts = extractTextParts(message);
   contentParts.forEach((part) => {
     if (typeof part === "string" && part.length) {
       emitEvent({ type: "text", text: part, choiceIndex, metadataInfo });
     }
   });
 
-  const toolCalls = message.tool_calls || message.toolCalls;
-  if (Array.isArray(toolCalls) && toolCalls.length) {
-    emitEvent({ type: "tool_calls", tool_calls: toolCalls, choiceIndex });
-  }
+  if (message && typeof message === "object") {
+    const toolCalls = message.tool_calls || message.toolCalls;
+    if (Array.isArray(toolCalls) && toolCalls.length) {
+      emitEvent({ type: "tool_calls", tool_calls: toolCalls, choiceIndex });
+    }
 
-  const functionCall = message.function_call || message.functionCall;
-  if (functionCall && typeof functionCall === "object") {
-    emitEvent({ type: "function_call", function_call: functionCall, choiceIndex });
+    const functionCall = message.function_call || message.functionCall;
+    if (functionCall && typeof functionCall === "object") {
+      emitEvent({ type: "function_call", function_call: functionCall, choiceIndex });
+    }
   }
 };
 

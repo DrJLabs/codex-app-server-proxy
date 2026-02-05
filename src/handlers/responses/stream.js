@@ -16,7 +16,7 @@ import { normalizeResponsesRequest, ResponsesJsonRpcNormalizationError } from ".
 import { ensureResponsesCapabilities } from "./native/capabilities.js";
 import { runNativeResponses } from "./native/execute.js";
 import { createJsonRpcChildAdapter } from "../../services/transport/child-adapter.js";
-import { mapTransportError } from "../../services/transport/index.js";
+import { getJsonRpcTransport, mapTransportError } from "../../services/transport/index.js";
 import { createResponsesStreamAdapter } from "./stream-adapter.js";
 import { createStreamMetadataSanitizer } from "../chat/stream-metadata-sanitizer.js";
 import { applyGuardHeaders, setupStreamGuard } from "../../services/concurrency-guard.js";
@@ -306,6 +306,41 @@ export async function postResponsesStream(req, res) {
     return;
   }
 
+  const hasToolOutputs = Array.isArray(normalized.toolOutputs) && normalized.toolOutputs.length > 0;
+  let resolvedThread = null;
+  if (hasToolOutputs) {
+    const transport = getJsonRpcTransport();
+    try {
+      resolvedThread = transport.resolveThreadForToolOutputs(normalized.toolOutputs);
+    } catch (err) {
+      const mapped = mapTransportError(err);
+      applyCors(req, res);
+      if (mapped?.body?.error) {
+        res.status(mapped.statusCode || 500).json(mapped.body);
+      } else {
+        res.status(500).json({
+          error: { message: "internal error", type: "server_error", code: "transport_error" },
+        });
+      }
+      restoreOutputMode();
+      return;
+    }
+    if (!resolvedThread) {
+      applyCors(req, res);
+      res
+        .status(400)
+        .json(
+          invalidRequestBody(
+            "input",
+            "tool outputs do not match any active tool call",
+            "tool_outputs_unmatched"
+          )
+        );
+      restoreOutputMode();
+      return;
+    }
+  }
+
   const guardContext = setupStreamGuard({
     res,
     reqId,
@@ -337,13 +372,19 @@ export async function postResponsesStream(req, res) {
   const dynamicTools = buildDynamicTools(functionTools, normalized.toolChoice);
   const includeUsage = Boolean(originalBody?.stream_options?.include_usage);
 
-  const developerInstructions = normalized.developerInstructions || "";
+  const internalToolsInstruction = CFG.PROXY_DISABLE_INTERNAL_TOOLS_PROMPT
+    ? RESPONSES_INTERNAL_TOOLS_INSTRUCTION
+    : "";
+  const developerInstructions = [internalToolsInstruction, normalized.developerInstructions]
+    .filter(Boolean)
+    .join("\n\n");
   const baseInstructions = CFG.PROXY_DISABLE_INTERNAL_TOOLS_PROMPT
     ? RESPONSES_INTERNAL_TOOLS_INSTRUCTION
     : undefined;
   const appServerConfig = CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG
     ? {
         features: {
+          web_search_request: false,
           streamable_shell: false,
           unified_exec: false,
           view_image_tool: false,
@@ -390,6 +431,31 @@ export async function postResponsesStream(req, res) {
     message.outputSchema = normalized.outputSchema;
   }
   if (dynamicTools !== undefined) message.dynamicTools = dynamicTools;
+
+  if (resolvedThread?.threadId) {
+    turn.threadId = resolvedThread.threadId;
+    if (resolvedThread.toolset?.dynamicTools) {
+      turn.dynamicTools = resolvedThread.toolset.dynamicTools;
+      message.dynamicTools = resolvedThread.toolset.dynamicTools;
+    }
+    if (
+      resolvedThread.toolset?.baseInstructions !== null &&
+      resolvedThread.toolset?.baseInstructions !== undefined
+    ) {
+      turn.baseInstructions = resolvedThread.toolset.baseInstructions;
+    }
+    if (
+      resolvedThread.toolset?.developerInstructions !== null &&
+      resolvedThread.toolset?.developerInstructions !== undefined
+    ) {
+      turn.developerInstructions = resolvedThread.toolset.developerInstructions;
+    }
+  }
+
+  const requestTools = resolvedThread?.toolset?.requestTools ?? normalized.tools;
+  if (requestTools !== undefined) {
+    turn.requestTools = requestTools;
+  }
 
   const ingressToolCount = functionTools.length;
   const turnToolCount = countDynamicTools(turn.dynamicTools);
@@ -443,9 +509,10 @@ export async function postResponsesStream(req, res) {
   let idleTimer = null;
   let keepalive = null;
 
+  const effectiveTools = requestTools ?? normalized.tools ?? originalBody.tools;
   const adapterBody = {
     ...originalBody,
-    tools: normalized.tools ?? originalBody.tools,
+    tools: effectiveTools,
     tool_choice: normalized.toolChoice ?? originalBody.tool_choice,
     toolChoice: normalized.toolChoice ?? originalBody.toolChoice,
   };
@@ -533,6 +600,41 @@ export async function postResponsesStream(req, res) {
     getSummaryData: getSanitizerSummaryData,
   } = metadataSanitizer;
 
+  let toolNameMapCache = undefined;
+  const resolveToolNameMap = () => {
+    if (toolNameMapCache !== undefined) return toolNameMapCache;
+    const transport = child?.transport;
+    const threadId = transport?.contextsByRequest?.get?.(reqId)?.conversationId ?? null;
+    const map = threadId
+      ? transport?.threadToolSets?.get?.(String(threadId))?.toolNameMap?.toClient
+      : null;
+    toolNameMapCache = map && typeof map.get === "function" ? map : null;
+    return toolNameMapCache;
+  };
+
+  const mapToolCallsToClient = (toolCalls) => {
+    const map = resolveToolNameMap();
+    if (!map || !Array.isArray(toolCalls) || toolCalls.length === 0) return toolCalls;
+    return toolCalls.map((call) => {
+      const fn = call?.function;
+      const name = typeof fn?.name === "string" ? fn.name : null;
+      if (!name) return call;
+      const mappedName = map.get(name);
+      if (!mappedName || mappedName === name) return call;
+      return { ...call, function: { ...fn, name: mappedName } };
+    });
+  };
+
+  const mapFunctionCallToClient = (functionCall) => {
+    const map = resolveToolNameMap();
+    if (!map || !functionCall || typeof functionCall !== "object") return functionCall;
+    const name = typeof functionCall.name === "string" ? functionCall.name : null;
+    if (!name) return functionCall;
+    const mappedName = map.get(name);
+    if (!mappedName || mappedName === name) return functionCall;
+    return { ...functionCall, name: mappedName };
+  };
+
   const handleEvent = (event) => {
     if (!event || typeof event !== "object") return;
     resetIdle();
@@ -589,6 +691,39 @@ export async function postResponsesStream(req, res) {
     }
     if (event.type === "finish" && SANITIZE_METADATA) {
       flushSanitizedSegments({ stage: "finish", eventType: "finish" });
+    }
+    if (event.type === "dynamic_tool_call") {
+      const mappedToolCalls = mapToolCallsToClient(event.toolCallDelta?.tool_calls);
+      const mappedDelta =
+        mappedToolCalls === event.toolCallDelta?.tool_calls
+          ? event.toolCallDelta
+          : { ...event.toolCallDelta, tool_calls: mappedToolCalls };
+      const payload = event.messagePayload || event.payload?.msg || event.payload;
+      const tool = typeof payload?.tool === "string" ? payload.tool : null;
+      const toolMap = resolveToolNameMap();
+      const mappedTool = tool && toolMap ? (toolMap.get(tool) ?? tool) : tool;
+      const mappedPayload =
+        mappedTool && mappedTool !== tool ? { ...payload, tool: mappedTool } : payload;
+      streamAdapter.handleEvent({
+        ...event,
+        toolCallDelta: mappedDelta,
+        messagePayload: mappedPayload,
+      });
+      return;
+    }
+    if (event.type === "tool_calls_delta" || event.type === "tool_calls") {
+      const mapped = mapToolCallsToClient(event.tool_calls);
+      streamAdapter.handleEvent(
+        mapped === event.tool_calls ? event : { ...event, tool_calls: mapped }
+      );
+      return;
+    }
+    if (event.type === "function_call_delta" || event.type === "function_call") {
+      const mapped = mapFunctionCallToClient(event.function_call);
+      streamAdapter.handleEvent(
+        mapped === event.function_call ? event : { ...event, function_call: mapped }
+      );
+      return;
     }
     streamAdapter.handleEvent(event);
   };

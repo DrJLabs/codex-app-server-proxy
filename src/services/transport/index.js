@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { createInterface } from "node:readline";
 import { config as CFG } from "../../config/index.js";
 import { nanoid } from "nanoid";
+import { rewriteDynamicToolsForAppServer } from "../../lib/tools/tool-name-mapping.js";
 import {
   ensureWorkerSupervisor,
   getWorkerChildProcess,
@@ -271,6 +272,7 @@ class JsonRpcTransport {
     this.rpcSeq = 1;
     this.pending = new Map();
     this.pendingToolCalls = new Map();
+    this.threadToolSets = new Map();
     this.shimToolCalls = new Map();
     this.contextsByConversation = new Map();
     this.contextsByRequest = new Map();
@@ -350,6 +352,7 @@ class JsonRpcTransport {
     }
     this.pending.clear();
     this.pendingToolCalls.clear();
+    this.threadToolSets.clear();
     this.shimToolCalls.clear();
     for (const context of this.contextsByRequest.values()) {
       context.reject(new TransportError("transport destroyed", { retryable: true }));
@@ -565,10 +568,17 @@ class JsonRpcTransport {
     if (explicitThreadId) {
       context.conversationId = String(explicitThreadId);
       this.contextsByConversation.set(context.conversationId, context);
+      this.registerThreadTools(context.conversationId, {
+        dynamicTools: basePayload.dynamicTools ?? null,
+        baseInstructions: basePayload.baseInstructions ?? null,
+        developerInstructions: basePayload.developerInstructions ?? null,
+        requestTools: basePayload.requestTools ?? null,
+      });
       return context.conversationId;
     }
 
-    const dynamicTools = basePayload.dynamicTools ?? undefined;
+    const rawDynamicTools = basePayload.dynamicTools ?? undefined;
+    const { dynamicTools, toolNameMap } = rewriteDynamicToolsForAppServer(rawDynamicTools);
 
     const conversationParams = buildThreadStartParams({
       model: basePayload.model ?? undefined,
@@ -608,7 +618,72 @@ class JsonRpcTransport {
 
     context.listenerAttached = Boolean(context.subscriptionId);
 
+    this.registerThreadTools(context.conversationId, {
+      dynamicTools,
+      baseInstructions: basePayload.baseInstructions ?? null,
+      developerInstructions: basePayload.developerInstructions ?? null,
+      requestTools: basePayload.requestTools ?? null,
+      toolNameMap,
+    });
+
     return context.conversationId;
+  }
+
+  registerThreadTools(
+    threadId,
+    {
+      dynamicTools = null,
+      baseInstructions = null,
+      developerInstructions = null,
+      requestTools = null,
+      toolNameMap = null,
+    } = {}
+  ) {
+    if (!threadId) return false;
+    const key = String(threadId);
+    const existing = this.threadToolSets.get(key) ?? null;
+
+    const nextDynamicTools =
+      existing?.dynamicTools ?? (Array.isArray(dynamicTools) ? dynamicTools : null);
+    const nextRequestTools =
+      existing?.requestTools ?? (Array.isArray(requestTools) ? requestTools : null);
+    const nextBaseInstructions = existing?.baseInstructions ?? baseInstructions ?? null;
+    const nextDeveloperInstructions =
+      existing?.developerInstructions ?? developerInstructions ?? null;
+    const nextToolNameMap =
+      existing?.toolNameMap ??
+      (toolNameMap && typeof toolNameMap === "object" ? toolNameMap : null);
+
+    this.threadToolSets.set(key, {
+      dynamicTools: nextDynamicTools,
+      requestTools: nextRequestTools,
+      baseInstructions: nextBaseInstructions,
+      developerInstructions: nextDeveloperInstructions,
+      toolNameMap: nextToolNameMap,
+    });
+    return true;
+  }
+
+  resolveThreadForToolOutputs(toolOutputs = []) {
+    if (!Array.isArray(toolOutputs) || toolOutputs.length === 0) return null;
+    const threads = new Set();
+    for (const output of toolOutputs) {
+      const callId = output?.callId;
+      if (!callId) continue;
+      const pending = this.pendingToolCalls.get(String(callId));
+      if (pending?.threadId) {
+        threads.add(String(pending.threadId));
+      }
+    }
+    if (threads.size === 0) return null;
+    if (threads.size > 1) {
+      throw new TransportError("tool outputs span multiple threads", {
+        code: "tool_outputs_multi_thread",
+        retryable: false,
+      });
+    }
+    const threadId = Array.from(threads)[0];
+    return { threadId, toolset: this.threadToolSets.get(threadId) ?? null };
   }
 
   async #removeConversationListener(context) {
@@ -908,6 +983,7 @@ class JsonRpcTransport {
       );
     }
     this.pendingToolCalls.clear();
+    this.threadToolSets.clear();
     this.shimToolCalls.clear();
     this.contextsByConversation.clear();
     this.contextsByRequest.clear();
@@ -964,6 +1040,11 @@ class JsonRpcTransport {
       return;
     }
 
+    const threadKey = String(threadId);
+    const toolRaw = String(tool);
+    const mappedTool =
+      this.threadToolSets.get(threadKey)?.toolNameMap?.toClient?.get?.(toolRaw) ?? toolRaw;
+
     const context = this.contextsByConversation.get(threadId) || this.#resolveContext({ threadId });
 
     if (context?.trace) {
@@ -978,7 +1059,7 @@ class JsonRpcTransport {
       callId: key,
       threadId: String(threadId),
       turnId: params.turnId || params.turn_id || null,
-      tool: String(tool),
+      tool: mappedTool,
       receivedAt: Date.now(),
     });
 
@@ -987,7 +1068,7 @@ class JsonRpcTransport {
       context.emitter.emit("notification", {
         method: "codex/event/dynamic_tool_call_request",
         params: {
-          tool: String(tool),
+          tool: mappedTool,
           arguments: argumentsPayload,
           callId: key,
           threadId: String(threadId),
@@ -1343,7 +1424,7 @@ class JsonRpcTransport {
               })
               .join("");
           }
-          if (text) context.setFinalMessage({ message: text });
+          if (text) context.setFinalMessage({ content: text });
         }
 
         if (!context.finishReason) context.setFinishReason("stop");
@@ -1388,14 +1469,19 @@ class JsonRpcTransport {
       params?.request_id,
       params?.requestId,
     ];
+    let hasExplicitIdCandidate = false;
     for (const candidate of idCandidates) {
       if (!candidate) continue;
+      hasExplicitIdCandidate = true;
       const ctx =
         this.contextsByConversation.get(candidate) || this.contextsByRequest.get(candidate);
       if (ctx) return ctx;
     }
-    // Fallback: single active request
-    if (this.contextsByRequest.size === 1) {
+
+    // Fallback only when the worker didn't give us any identifiers.
+    // If a threadId/requestId is present but doesn't map to an active context, it likely belongs to
+    // a different (stale) request and must not be attributed to the only active request.
+    if (!hasExplicitIdCandidate && this.contextsByRequest.size === 1) {
       return this.contextsByRequest.values().next().value;
     }
     return null;
@@ -1579,6 +1665,12 @@ const TRANSPORT_ERROR_DETAILS = {
     statusCode: 499,
     type: "request_cancelled",
     message: "request aborted by client",
+    retryable: false,
+  },
+  tool_outputs_multi_thread: {
+    statusCode: 400,
+    type: "invalid_request_error",
+    message: "tool outputs span multiple threads",
     retryable: false,
   },
 };

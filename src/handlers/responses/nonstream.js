@@ -30,7 +30,7 @@ import { ensureResponsesCapabilities } from "./native/capabilities.js";
 import { buildResponsesEnvelope } from "./native/envelope.js";
 import { runNativeResponses } from "./native/execute.js";
 import { createJsonRpcChildAdapter } from "../../services/transport/child-adapter.js";
-import { mapTransportError } from "../../services/transport/index.js";
+import { getJsonRpcTransport, mapTransportError } from "../../services/transport/index.js";
 import { createToolCallAggregator } from "../../lib/tool-call-aggregator.js";
 import { parseToolCallText } from "./tool-call-parser.js";
 import {
@@ -383,17 +383,58 @@ export async function postResponsesNonStream(req, res) {
     return;
   }
 
+  const hasToolOutputs = Array.isArray(normalized.toolOutputs) && normalized.toolOutputs.length > 0;
+  let resolvedThread = null;
+  if (hasToolOutputs) {
+    const transport = getJsonRpcTransport();
+    try {
+      resolvedThread = transport.resolveThreadForToolOutputs(normalized.toolOutputs);
+    } catch (err) {
+      const mapped = mapTransportError(err);
+      applyCors(req, res);
+      if (mapped?.body?.error) {
+        res.status(mapped.statusCode || 500).json(mapped.body);
+      } else {
+        res.status(500).json({
+          error: { message: "internal error", type: "server_error", code: "transport_error" },
+        });
+      }
+      restoreOutputMode();
+      return;
+    }
+    if (!resolvedThread) {
+      applyCors(req, res);
+      res
+        .status(400)
+        .json(
+          invalidRequestBody(
+            "input",
+            "tool outputs do not match any active tool call",
+            "tool_outputs_unmatched"
+          )
+        );
+      restoreOutputMode();
+      return;
+    }
+  }
+
   const fallbackMax = Number(CFG.PROXY_RESPONSES_DEFAULT_MAX_TOKENS || 0);
   const maxOutputTokens = normalized.maxOutputTokens ?? (fallbackMax > 0 ? fallbackMax : undefined);
   const dynamicTools = buildDynamicTools(functionTools, normalized.toolChoice);
 
-  const developerInstructions = normalized.developerInstructions || "";
+  const internalToolsInstruction = CFG.PROXY_DISABLE_INTERNAL_TOOLS_PROMPT
+    ? RESPONSES_INTERNAL_TOOLS_INSTRUCTION
+    : "";
+  const developerInstructions = [internalToolsInstruction, normalized.developerInstructions]
+    .filter(Boolean)
+    .join("\n\n");
   const baseInstructions = CFG.PROXY_DISABLE_INTERNAL_TOOLS_PROMPT
     ? RESPONSES_INTERNAL_TOOLS_INSTRUCTION
     : undefined;
   const appServerConfig = CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG
     ? {
         features: {
+          web_search_request: false,
           streamable_shell: false,
           unified_exec: false,
           view_image_tool: false,
@@ -439,6 +480,31 @@ export async function postResponsesNonStream(req, res) {
     message.outputSchema = normalized.outputSchema;
   }
   if (dynamicTools !== undefined) message.dynamicTools = dynamicTools;
+
+  if (resolvedThread?.threadId) {
+    turn.threadId = resolvedThread.threadId;
+    if (resolvedThread.toolset?.dynamicTools) {
+      turn.dynamicTools = resolvedThread.toolset.dynamicTools;
+      message.dynamicTools = resolvedThread.toolset.dynamicTools;
+    }
+    if (
+      resolvedThread.toolset?.baseInstructions !== null &&
+      resolvedThread.toolset?.baseInstructions !== undefined
+    ) {
+      turn.baseInstructions = resolvedThread.toolset.baseInstructions;
+    }
+    if (
+      resolvedThread.toolset?.developerInstructions !== null &&
+      resolvedThread.toolset?.developerInstructions !== undefined
+    ) {
+      turn.developerInstructions = resolvedThread.toolset.developerInstructions;
+    }
+  }
+
+  const requestTools = resolvedThread?.toolset?.requestTools ?? normalized.tools;
+  if (requestTools !== undefined) {
+    turn.requestTools = requestTools;
+  }
 
   const ingressToolCount = functionTools.length;
   const turnToolCount = countDynamicTools(turn.dynamicTools);
@@ -497,6 +563,31 @@ export async function postResponsesNonStream(req, res) {
   const sanitizedMetadataSummary = { count: 0, keys: new Set(), sources: new Set() };
   const seenSanitizedRemovalSignatures = new Set();
   const mergedMetadataInfo = { metadata: {}, sources: new Set() };
+  let toolNameMapCache = undefined;
+
+  const resolveToolNameMap = () => {
+    if (toolNameMapCache !== undefined) return toolNameMapCache;
+    const transport = child?.transport;
+    const threadId = transport?.contextsByRequest?.get?.(reqId)?.conversationId ?? null;
+    const map = threadId
+      ? transport?.threadToolSets?.get?.(String(threadId))?.toolNameMap?.toClient
+      : null;
+    toolNameMapCache = map && typeof map.get === "function" ? map : null;
+    return toolNameMapCache;
+  };
+
+  const mapFunctionCallsToClient = (calls) => {
+    const map = resolveToolNameMap();
+    if (!map || !Array.isArray(calls) || calls.length === 0) return calls;
+    return calls.map((call) => {
+      const fn = call?.function;
+      const name = typeof fn?.name === "string" ? fn.name : null;
+      if (!name) return call;
+      const mappedName = map.get(name);
+      if (!mappedName || mappedName === name) return call;
+      return { ...call, function: { ...fn, name: mappedName } };
+    });
+  };
 
   const mergeMetadataInfo = (info) => {
     if (info && typeof info === "object") {
@@ -793,7 +884,7 @@ export async function postResponsesNonStream(req, res) {
     parsedCalls = [];
   }
 
-  const functionCalls = [...aggregatedCalls, ...parsedCalls];
+  const functionCalls = mapFunctionCallsToClient([...aggregatedCalls, ...parsedCalls]);
 
   const envelope = buildResponsesEnvelope({
     responseId: originalBody?.id,

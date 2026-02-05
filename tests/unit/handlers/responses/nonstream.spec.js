@@ -71,6 +71,10 @@ const createToolCallAggregatorMock = vi.fn(() => ({
 const appendUsageMock = vi.fn();
 const logSanitizerToggleMock = vi.fn();
 const logSanitizerSummaryMock = vi.fn();
+const transportMock = {
+  ensureHandshake: (...args) => ensureHandshakeMock(...args),
+  resolveThreadForToolOutputs: vi.fn(),
+};
 
 const ORIGINAL_RESPONSES_DEFAULT_MAX_TOKENS = process.env.PROXY_RESPONSES_DEFAULT_MAX_TOKENS;
 const ORIGINAL_MAX_CHAT_CHOICES = process.env.PROXY_MAX_CHAT_CHOICES;
@@ -127,9 +131,7 @@ vi.mock("../../../../src/services/transport/index.js", async () => {
   const actual = await vi.importActual("../../../../src/services/transport/index.js");
   return {
     ...actual,
-    getJsonRpcTransport: () => ({
-      ensureHandshake: (...args) => ensureHandshakeMock(...args),
-    }),
+    getJsonRpcTransport: () => transportMock,
   };
 });
 
@@ -188,6 +190,7 @@ beforeEach(() => {
   createToolCallAggregatorMock.mockClear();
   buildResponsesEnvelopeMock.mockClear();
   ensureHandshakeMock.mockClear();
+  transportMock.resolveThreadForToolOutputs.mockReset();
   appendUsageMock.mockClear();
   logSanitizerToggleMock.mockClear();
   logSanitizerSummaryMock.mockClear();
@@ -267,6 +270,7 @@ describe("responses nonstream handler", () => {
     expect(normalizedRequest.turn.baseInstructions).toBe(RESPONSES_INTERNAL_TOOLS_INSTRUCTION);
     expect(normalizedRequest.turn.config).toMatchObject({
       features: {
+        web_search_request: false,
         streamable_shell: false,
         unified_exec: false,
         view_image_tool: false,
@@ -296,6 +300,7 @@ describe("responses nonstream handler", () => {
     expect(normalizedRequest.turn.baseInstructions).toBeUndefined();
     expect(normalizedRequest.turn.config).toMatchObject({
       features: {
+        web_search_request: false,
         streamable_shell: false,
         unified_exec: false,
         view_image_tool: false,
@@ -326,7 +331,45 @@ describe("responses nonstream handler", () => {
     expect(normalizedRequest.turn.config).toBeUndefined();
   });
 
+  it("reuses threadId and tool manifest when tool outputs are present", async () => {
+    const toolset = {
+      dynamicTools: [{ name: "webSearch", description: "lookup", inputSchema: {} }],
+      requestTools: [{ type: "function", function: { name: "webSearch", parameters: {} } }],
+    };
+    transportMock.resolveThreadForToolOutputs.mockReturnValueOnce({
+      threadId: "thread-123",
+      toolset,
+    });
+    normalizeResponsesRequestMock.mockReturnValueOnce({
+      instructions: "",
+      inputItems: [{ type: "text", data: { text: "[user] hi" } }],
+      responseFormat: undefined,
+      outputSchema: undefined,
+      tools: [{ type: "function", function: { name: "getFileTree", parameters: {} } }],
+      toolChoice: "auto",
+      parallelToolCalls: undefined,
+      maxOutputTokens: undefined,
+      toolOutputs: [{ callId: "call_1", output: "ok", success: true }],
+    });
+
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    const [{ normalizedRequest }] = createJsonRpcChildAdapterMock.mock.calls[0];
+    expect(normalizedRequest.turn.threadId).toBe("thread-123");
+    expect(normalizedRequest.turn.dynamicTools).toEqual(toolset.dynamicTools);
+  });
+
   it("logs tool output summaries when provided", async () => {
+    transportMock.resolveThreadForToolOutputs.mockReturnValueOnce({
+      threadId: "thread-1",
+      toolset: null,
+    });
     const transport = { respondToToolCall: vi.fn(() => true) };
     createJsonRpcChildAdapterMock.mockReturnValueOnce({
       stdin: { write: vi.fn() },

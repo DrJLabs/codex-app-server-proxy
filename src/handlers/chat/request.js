@@ -485,6 +485,7 @@ export const normalizeChatJsonRpcRequest = ({
   const appServerConfig = disableInternalTools
     ? {
         features: {
+          web_search_request: false,
           streamable_shell: false,
           unified_exec: false,
           view_image_tool: false,

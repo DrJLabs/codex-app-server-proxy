@@ -13,8 +13,11 @@ describe("internal tools instructions", () => {
   });
 
   it("exposes saved responses guidance for potential reuse", () => {
-    expect(RESPONSES_INTERNAL_TOOLS_INSTRUCTION).toMatch(
-      "Never use internal tools (web_search, view_image, fileChange, commandExecution, mcpToolCall, shell, exec_command, apply_patch, update_plan)."
-    );
+    expect(RESPONSES_INTERNAL_TOOLS_INSTRUCTION).toMatch("INTERNAL TOOLS ARE DISABLED.");
+    expect(RESPONSES_INTERNAL_TOOLS_INSTRUCTION).toMatch("webSearch");
+    expect(RESPONSES_INTERNAL_TOOLS_INSTRUCTION).toMatch("web_search");
+    expect(RESPONSES_INTERNAL_TOOLS_INSTRUCTION).toMatch("fileChange");
+    expect(RESPONSES_INTERNAL_TOOLS_INSTRUCTION).toMatch("commandExecution");
+    expect(RESPONSES_INTERNAL_TOOLS_INSTRUCTION).toMatch("mcpToolCall");
   });
 });

@@ -71,6 +71,9 @@ const acceptedModelIdsMock = vi.fn(() => new Set(["gpt-5.2"]));
 const setSSEHeadersMock = vi.fn();
 const computeKeepaliveMsMock = vi.fn(() => 0);
 const startKeepalivesMock = vi.fn(() => ({ stop: vi.fn() }));
+const transportMock = {
+  resolveThreadForToolOutputs: vi.fn(),
+};
 
 vi.mock("../../../../src/lib/request-context.js", () => ({
   applyProxyTraceHeaders: (...args) => applyProxyTraceHeadersMock(...args),
@@ -109,6 +112,7 @@ vi.mock("../../../../src/services/transport/child-adapter.js", () => ({
 }));
 
 vi.mock("../../../../src/services/transport/index.js", () => ({
+  getJsonRpcTransport: () => transportMock,
   mapTransportError: () => null,
 }));
 
@@ -202,6 +206,7 @@ const restoreEnv = () => {
 beforeEach(() => {
   vi.clearAllMocks();
   restoreEnv();
+  transportMock.resolveThreadForToolOutputs.mockReset();
 });
 
 afterEach(() => {
@@ -238,6 +243,7 @@ describe("responses stream handler", () => {
     expect(normalizedRequest.turn.baseInstructions).toBe(RESPONSES_INTERNAL_TOOLS_INSTRUCTION);
     expect(normalizedRequest.turn.config).toMatchObject({
       features: {
+        web_search_request: false,
         streamable_shell: false,
         unified_exec: false,
         view_image_tool: false,
@@ -265,6 +271,7 @@ describe("responses stream handler", () => {
     expect(normalizedRequest.turn.baseInstructions).toBeUndefined();
     expect(normalizedRequest.turn.config).toMatchObject({
       features: {
+        web_search_request: false,
         streamable_shell: false,
         unified_exec: false,
         view_image_tool: false,
@@ -293,7 +300,69 @@ describe("responses stream handler", () => {
     expect(normalizedRequest.turn.config).toBeUndefined();
   });
 
+  it("reuses threadId and tool manifest when tool outputs are present", async () => {
+    const toolset = {
+      dynamicTools: [{ name: "webSearch", description: "lookup", inputSchema: {} }],
+      requestTools: [{ type: "function", function: { name: "webSearch", parameters: {} } }],
+    };
+    transportMock.resolveThreadForToolOutputs.mockReturnValueOnce({
+      threadId: "thread-123",
+      toolset,
+    });
+    normalizeResponsesRequestMock.mockReturnValueOnce({
+      instructions: "",
+      inputItems: [{ type: "text", data: { text: "[user] hi" } }],
+      responseFormat: undefined,
+      outputSchema: undefined,
+      tools: [{ type: "function", function: { name: "getFileTree", parameters: {} } }],
+      toolChoice: "auto",
+      parallelToolCalls: undefined,
+      maxOutputTokens: undefined,
+      toolOutputs: [{ callId: "call_1", output: "ok", success: true }],
+    });
+
+    const { postResponsesStream } = await import("../../../../src/handlers/responses/stream.js");
+    const req = makeReq({ input: "hello", model: "gpt-5.2", stream: true });
+    const res = makeRes();
+
+    await postResponsesStream(req, res);
+
+    const [{ normalizedRequest }] = createJsonRpcChildAdapterMock.mock.calls[0];
+    expect(normalizedRequest.turn.threadId).toBe("thread-123");
+    expect(normalizedRequest.turn.dynamicTools).toEqual(toolset.dynamicTools);
+    const adapterBody = createResponsesStreamAdapterMock.mock.calls[0][1];
+    expect(adapterBody.tools).toEqual(toolset.requestTools);
+  });
+
+  it("returns 400 when tool outputs arrive without a known thread", async () => {
+    transportMock.resolveThreadForToolOutputs.mockReturnValueOnce(null);
+    normalizeResponsesRequestMock.mockReturnValueOnce({
+      instructions: "",
+      inputItems: [{ type: "text", data: { text: "[user] hi" } }],
+      responseFormat: undefined,
+      outputSchema: undefined,
+      tools: null,
+      toolChoice: undefined,
+      parallelToolCalls: undefined,
+      maxOutputTokens: undefined,
+      toolOutputs: [{ callId: "call_1", output: "ok", success: true }],
+    });
+
+    const { postResponsesStream } = await import("../../../../src/handlers/responses/stream.js");
+    const req = makeReq({ input: "hello", model: "gpt-5.2", stream: true });
+    const res = makeRes();
+
+    await postResponsesStream(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(createJsonRpcChildAdapterMock).not.toHaveBeenCalled();
+  });
+
   it("logs tool output summaries when provided", async () => {
+    transportMock.resolveThreadForToolOutputs.mockReturnValueOnce({
+      threadId: "thread-1",
+      toolset: null,
+    });
     const transport = { respondToToolCall: vi.fn(() => true) };
     createJsonRpcChildAdapterMock.mockReturnValueOnce({
       stdin: { write: vi.fn() },
