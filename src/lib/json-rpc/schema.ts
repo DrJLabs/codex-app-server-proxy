@@ -379,9 +379,13 @@ const mapSandboxPolicyToV2 = (policy: unknown) => {
 };
 
 export function buildTurnStartParams(options: BuildTurnStartOptions): TurnStartParams & JsonObject {
+  const threadId = toNullableString(options.threadId);
+  if (typeof threadId !== "string") {
+    throw new Error("buildTurnStartParams: threadId is required");
+  }
   const input = normalizeUserInputs(options.items);
   const params: TurnStartParams & JsonObject = {
-    threadId: String(options.threadId ?? ""),
+    threadId,
     input,
   };
 

@@ -66,6 +66,12 @@ describe("json-rpc schema helper behavior", () => {
     expect(params.sandboxPolicy).toEqual({ type: "unknown" });
   });
 
+  it("throws when threadId is missing", () => {
+    expect(() => buildTurnStartParams({ items: [] })).toThrow(
+      "buildTurnStartParams: threadId is required"
+    );
+  });
+
   it("preserves workspace-write sandbox options", () => {
     const params = buildTurnStartParams({
       items: [],
