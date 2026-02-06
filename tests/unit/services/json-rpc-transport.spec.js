@@ -693,6 +693,69 @@ describe("JsonRpcTransport request lifecycle", () => {
     await pending;
   });
 
+  it("rewrites reserved dynamic tool names when an explicit thread id is provided", async () => {
+    const child = createMockChild();
+    wireJsonResponder(child, (message) => {
+      if (message.method === "initialize") {
+        writeRpcResult(child, message.id, { result: {} });
+      }
+      if (message.method === "turn/start") {
+        writeRpcResult(child, message.id, { result: { threadId: "server-conv" } });
+      }
+    });
+    __setChild(child);
+
+    const transport = getJsonRpcTransport();
+    const context = await transport.createChatRequest({
+      requestId: "req-explicit-rewrite-tool",
+      turnParams: {
+        threadId: "server-conv",
+        items: [{ type: "text", data: { text: "hello" } }],
+        dynamicTools: [{ name: "webSearch", description: "", inputSchema: { type: "object" } }],
+      },
+    });
+    context.emitter.on("error", () => {});
+    const pending = context.promise.catch(() => {});
+
+    expect(
+      transport.threadToolSets.get("server-conv")?.toolNameMap?.toClient?.get?.("client_webSearch")
+    ).toBe("webSearch");
+
+    const toolCallNotification = new Promise((resolve) => {
+      context.emitter.on("notification", (message) => {
+        if (message?.method === "codex/event/dynamic_tool_call_request") resolve(message);
+      });
+    });
+
+    child.stdout.write(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 51,
+        method: "item/tool/call",
+        params: {
+          callId: "call-2",
+          threadId: "server-conv",
+          tool: "client_webSearch",
+          arguments: { query: "x" },
+        },
+      }) + "\n"
+    );
+
+    await expect(toolCallNotification).resolves.toMatchObject({
+      params: {
+        tool: "webSearch",
+        callId: "call-2",
+        threadId: "server-conv",
+      },
+    });
+
+    transport.cancelContext(
+      context,
+      new TransportError("request aborted", { code: "request_aborted", retryable: false })
+    );
+    await pending;
+  });
+
   it("replies with error when a tool call has no active request context", async () => {
     const child = createMockChild();
     const serverResponse = new Promise((resolve) => {

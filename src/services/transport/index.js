@@ -564,13 +564,16 @@ class JsonRpcTransport {
 
     const explicitThreadId = basePayload.threadId || basePayload.thread_id || null;
     if (explicitThreadId) {
+      const rawDynamicTools = basePayload.dynamicTools ?? undefined;
+      const { dynamicTools, toolNameMap } = rewriteDynamicToolsForAppServer(rawDynamicTools);
       context.conversationId = String(explicitThreadId);
       this.contextsByConversation.set(context.conversationId, context);
       this.registerThreadTools(context.conversationId, {
-        dynamicTools: basePayload.dynamicTools ?? null,
+        dynamicTools: dynamicTools ?? null,
         baseInstructions: basePayload.baseInstructions ?? null,
         developerInstructions: basePayload.developerInstructions ?? null,
         requestTools: basePayload.requestTools ?? null,
+        toolNameMap,
       });
       return context.conversationId;
     }
