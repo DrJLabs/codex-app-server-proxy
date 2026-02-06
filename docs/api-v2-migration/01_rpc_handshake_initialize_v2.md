@@ -191,7 +191,7 @@ This is not required for functionality, but makes integration tests simpler.
    - The JSON written to worker stdio preserves both keys in the outbound payload.
 
 3. **Backward compatibility (if implemented)**
-   - If a worker rejects v2 params with a schema/invalid-params style error, the proxy retries with v1 params (clientInfo only) and still completes initialization.
+  - If a worker rejects v2 params with a schema/invalid-params-style error, the proxy retries with v1 params (clientInfo only) and still completes initialization.
 
 4. **Shim compatibility**
    - The deterministic shim continues to work with the new handshake payload (no `-32601` errors due to unexpected post-initialize methods).
