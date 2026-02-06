@@ -22,7 +22,7 @@ This folder is the canonical index for repository documentation. Update this fil
 
 - Internal Codex tools (`shell`, `apply_patch`, etc.) are disabled by default and only client-provided dynamic tool calls are allowed.
 - Tool registries are thread-scoped in Codex; the proxy forwards request `tools[]` at `thread/start` and reuses the thread's canonical toolset/instructions when clients send `function_call_output` items.
-- See `configuration.md` for `PROXY_DISABLE_INTERNAL_TOOLS_CONFIG`, `PROXY_DISABLE_INTERNAL_TOOLS_PROMPT`, and `PROXY_ENABLE_INTERNAL_TOOLS_SHIM`.
+- See `configuration.md` for `PROXY_DISABLE_INTERNAL_TOOLS`, `PROXY_DISABLE_INTERNAL_TOOLS_CONFIG`, `PROXY_DISABLE_INTERNAL_TOOLS_PROMPT`, and `PROXY_ENABLE_INTERNAL_TOOLS_SHIM`.
 
 ## Deployment and ops
 
