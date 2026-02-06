@@ -13,13 +13,15 @@ export const CODEX_CLI_VERSION = "0.92.0" as const;
 
 export type JsonRpcId = number | string;
 
-export type JsonRpcMethod = "initialize" | "thread/start" | "turn/start";
+export type JsonRpcMethod = "initialize" | "initialized" | "thread/start" | "turn/start";
+export type JsonRpcRequestMethod = Exclude<JsonRpcMethod, "initialized">;
 
 export interface JsonRpcBaseEnvelope {
   jsonrpc: typeof JSONRPC_VERSION;
 }
 
-export interface JsonRpcRequest<Method extends JsonRpcMethod, Params> extends JsonRpcBaseEnvelope {
+export interface JsonRpcRequest<Method extends JsonRpcRequestMethod, Params>
+  extends JsonRpcBaseEnvelope {
   id: JsonRpcId;
   method: Method;
   params: Params;
