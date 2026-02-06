@@ -45,6 +45,7 @@ import {
   buildToolCallDeltaFromDynamicRequest,
 } from "../../lib/tools/dynamic-tools.js";
 import { RESPONSES_INTERNAL_TOOLS_INSTRUCTION } from "../../lib/prompts/internal-tools-instructions.js";
+import { TOOL_CHOICE_REQUIRED_INSTRUCTION } from "../../lib/prompts/tool-choice-required-instructions.js";
 
 const DEFAULT_MODEL = CFG.CODEX_MODEL;
 const ACCEPTED_MODEL_IDS = acceptedModelIds(DEFAULT_MODEL);
@@ -101,8 +102,20 @@ const respondToToolOutputs = (child, toolOutputs, { reqId, route, mode } = {}) =
     const callId = toolOutput?.callId;
     if (!callId) return;
     const callIdKey = String(callId);
-    const outputText = toolOutput?.output ?? "";
-    const outputBytes = Buffer.byteLength(String(outputText), "utf8");
+    const outputValue = toolOutput?.output;
+    // toolOutput.output can be non-string (objects, arrays). Keep the raw value for respondToToolCall,
+    // but coerce to a stable string for hashing/logging to avoid sha256 exceptions.
+    let outputText = "";
+    if (typeof outputValue === "string") {
+      outputText = outputValue;
+    } else {
+      try {
+        outputText = JSON.stringify(outputValue);
+      } catch {
+        outputText = String(outputValue ?? "");
+      }
+    }
+    const outputBytes = Buffer.byteLength(outputText, "utf8");
     logStructured(
       {
         component: "responses",
@@ -120,7 +133,7 @@ const respondToToolOutputs = (child, toolOutputs, { reqId, route, mode } = {}) =
       }
     );
     const ok = transport.respondToToolCall(callIdKey, {
-      output: toolOutput.output,
+      output: outputValue,
       success: toolOutput.success,
     });
     if (!ok) {
@@ -261,6 +274,12 @@ const normalizeToolChoiceMode = (toolChoice) => {
   if (typeof toolChoice !== "string") return null;
   return toolChoice.trim().toLowerCase();
 };
+
+const appendInstructions = (...parts) =>
+  parts
+    .filter((part) => typeof part === "string" && part.trim())
+    .map((part) => part.trim())
+    .join("\n\n");
 
 const resolveForcedToolName = (toolChoice) => {
   if (!toolChoice || typeof toolChoice !== "object") return "";
@@ -624,6 +643,27 @@ export async function postResponsesNonStream(req, res) {
   const requestTools = resolvedThread?.toolset?.requestTools ?? normalized.tools;
   if (requestTools !== undefined) {
     turn.requestTools = requestTools;
+  }
+
+  const toolChoiceMode = normalizeToolChoiceMode(normalized.toolChoice);
+  if (toolChoiceMode === "required") {
+    if (!functionTools.length) {
+      res
+        .status(400)
+        .json(
+          invalidRequestBody(
+            "tool_choice",
+            "tool_choice=required requires tools definitions",
+            "tool_choice_requires_tools"
+          )
+        );
+      restoreOutputMode();
+      return;
+    }
+    turn.baseInstructions = appendInstructions(
+      turn.baseInstructions,
+      TOOL_CHOICE_REQUIRED_INSTRUCTION
+    );
   }
 
   const ingressToolCount = functionTools.length;

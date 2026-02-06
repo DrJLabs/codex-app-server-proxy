@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RESPONSES_INTERNAL_TOOLS_INSTRUCTION } from "../../../../src/lib/prompts/internal-tools-instructions.js";
+import { TOOL_CHOICE_REQUIRED_INSTRUCTION } from "../../../../src/lib/prompts/tool-choice-required-instructions.js";
 
 const ORIGINAL_DISABLE_INTERNAL_TOOLS = process.env.PROXY_DISABLE_INTERNAL_TOOLS;
 const ORIGINAL_DISABLE_INTERNAL_TOOLS_CONFIG = process.env.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG;
@@ -141,7 +142,12 @@ vi.mock("../../../../src/lib/tool-call-aggregator.js", () => ({
 
 vi.mock("../../../../src/services/logging/schema.js", () => ({
   logStructured: (...args) => logStructuredMock(...args),
-  sha256: (value) => `hash-${value}`,
+  sha256: (value) => {
+    if (typeof value !== "string") {
+      throw new Error("sha256 expects string");
+    }
+    return `hash-${value}`;
+  },
 }));
 
 vi.mock("../../../../src/lib/observability/transform-summary.js", () => ({
@@ -520,7 +526,7 @@ describe("responses nonstream handler", () => {
       toolChoice: undefined,
       parallelToolCalls: undefined,
       maxOutputTokens: undefined,
-      toolOutputs: [{ callId: "call_1", output: "ok", success: true, toolName: "lookup" }],
+      toolOutputs: [{ callId: "call_1", output: { ok: true }, success: true, toolName: "lookup" }],
     });
 
     const { postResponsesNonStream } = await import(
@@ -531,12 +537,47 @@ describe("responses nonstream handler", () => {
 
     await postResponsesNonStream(req, res);
 
+    expect(transport.respondToToolCall).toHaveBeenCalledWith("call_1", {
+      output: { ok: true },
+      success: true,
+    });
+
     const toolLog = logStructuredMock.mock.calls.find(
       ([entry]) => entry?.event === "tool_call_output"
     );
     expect(toolLog).toBeTruthy();
     expect(toolLog[1].tool_call_id).toBe("call_1");
     expect(toolLog[1].tool_name).toBe("lookup");
+    expect(toolLog[1].tool_output_hash).toBe('hash-{"ok":true}');
+  });
+
+  it("injects tool_choice required guidance into baseInstructions", async () => {
+    transportMock.resolveThreadForToolOutputs.mockReturnValueOnce({
+      threadId: "thread-1",
+      toolset: null,
+    });
+    normalizeResponsesRequestMock.mockReturnValueOnce({
+      instructions: "",
+      inputItems: [{ type: "text", data: { text: "[user] hi" } }],
+      responseFormat: undefined,
+      outputSchema: undefined,
+      tools: [{ type: "function", function: { name: "lookup", parameters: {} } }],
+      toolChoice: "required",
+      parallelToolCalls: undefined,
+      maxOutputTokens: undefined,
+      toolOutputs: [],
+    });
+
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2", tools: [{ type: "function" }] });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    const [{ normalizedRequest }] = createJsonRpcChildAdapterMock.mock.calls[0];
+    expect(normalizedRequest.turn.baseInstructions).toContain(TOOL_CHOICE_REQUIRED_INSTRUCTION);
   });
 
   it("returns 400 when model is missing", async () => {

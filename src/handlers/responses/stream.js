@@ -39,6 +39,7 @@ import { acceptedModelIds } from "../../config/models.js";
 import { setSSEHeaders, computeKeepaliveMs, startKeepalives } from "../../services/sse.js";
 import { buildDynamicTools } from "../../lib/tools/dynamic-tools.js";
 import { RESPONSES_INTERNAL_TOOLS_INSTRUCTION } from "../../lib/prompts/internal-tools-instructions.js";
+import { TOOL_CHOICE_REQUIRED_INSTRUCTION } from "../../lib/prompts/tool-choice-required-instructions.js";
 
 const DEFAULT_MODEL = CFG.CODEX_MODEL;
 const ACCEPTED_MODEL_IDS = acceptedModelIds(DEFAULT_MODEL);
@@ -79,6 +80,17 @@ const normalizeChoiceCount = (raw) => {
 const applyCors = (req, res) => applyCorsUtil(req, res, CORS_ENABLED, CORS_ALLOWED);
 
 const countDynamicTools = (dynamicTools) => (Array.isArray(dynamicTools) ? dynamicTools.length : 0);
+
+const normalizeToolChoiceMode = (toolChoice) => {
+  if (typeof toolChoice !== "string") return null;
+  return toolChoice.trim().toLowerCase();
+};
+
+const appendInstructions = (...parts) =>
+  parts
+    .filter((part) => typeof part === "string" && part.trim())
+    .map((part) => part.trim())
+    .join("\n\n");
 
 const respondToToolOutputs = (child, toolOutputs, { reqId, route, mode } = {}) => {
   const handledCallIds = new Set();
@@ -568,6 +580,28 @@ export async function postResponsesStream(req, res) {
   const requestTools = resolvedThread?.toolset?.requestTools ?? normalized.tools;
   if (requestTools !== undefined) {
     turn.requestTools = requestTools;
+  }
+
+  const toolChoiceMode = normalizeToolChoiceMode(normalized.toolChoice);
+  if (toolChoiceMode === "required") {
+    if (!functionTools.length) {
+      res
+        .status(400)
+        .json(
+          invalidRequestBody(
+            "tool_choice",
+            "tool_choice=required requires tools definitions",
+            "tool_choice_requires_tools"
+          )
+        );
+      restoreOutputMode();
+      releaseGuard("error");
+      return;
+    }
+    turn.baseInstructions = appendInstructions(
+      turn.baseInstructions,
+      TOOL_CHOICE_REQUIRED_INSTRUCTION
+    );
   }
 
   const ingressToolCount = functionTools.length;

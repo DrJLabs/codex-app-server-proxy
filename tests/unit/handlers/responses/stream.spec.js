@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RESPONSES_INTERNAL_TOOLS_INSTRUCTION } from "../../../../src/lib/prompts/internal-tools-instructions.js";
+import { TOOL_CHOICE_REQUIRED_INSTRUCTION } from "../../../../src/lib/prompts/tool-choice-required-instructions.js";
 
 const ORIGINAL_DISABLE_INTERNAL_TOOLS = process.env.PROXY_DISABLE_INTERNAL_TOOLS;
 const ORIGINAL_DISABLE_INTERNAL_TOOLS_CONFIG = process.env.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG;
@@ -257,6 +258,29 @@ describe("responses stream handler", () => {
         view_image: false,
       },
     });
+  });
+
+  it("injects tool_choice required guidance into baseInstructions", async () => {
+    normalizeResponsesRequestMock.mockReturnValueOnce({
+      instructions: "",
+      inputItems: [{ type: "text", data: { text: "[user] hi" } }],
+      responseFormat: undefined,
+      outputSchema: undefined,
+      tools: [{ type: "function", function: { name: "lookup", parameters: {} } }],
+      toolChoice: "required",
+      parallelToolCalls: undefined,
+      maxOutputTokens: undefined,
+      toolOutputs: [],
+    });
+
+    const { postResponsesStream } = await import("../../../../src/handlers/responses/stream.js");
+    const req = makeReq({ input: "hello", model: "gpt-5.2", stream: true });
+    const res = makeRes();
+
+    await postResponsesStream(req, res);
+
+    const [{ normalizedRequest }] = createJsonRpcChildAdapterMock.mock.calls[0];
+    expect(normalizedRequest.turn.baseInstructions).toContain(TOOL_CHOICE_REQUIRED_INSTRUCTION);
   });
 
   it("preserves unmatched tool output lines in turn items", async () => {
