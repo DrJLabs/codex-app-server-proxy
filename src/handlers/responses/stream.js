@@ -81,14 +81,23 @@ const applyCors = (req, res) => applyCorsUtil(req, res, CORS_ENABLED, CORS_ALLOW
 const countDynamicTools = (dynamicTools) => (Array.isArray(dynamicTools) ? dynamicTools.length : 0);
 
 const respondToToolOutputs = (child, toolOutputs, { reqId, route, mode } = {}) => {
-  if (!Array.isArray(toolOutputs) || toolOutputs.length === 0) return [];
-  if (!child) return toolOutputs;
+  const handledCallIds = new Set();
+  if (!Array.isArray(toolOutputs) || toolOutputs.length === 0) {
+    return { unmatched: [], handledCallIds };
+  }
+  if (!child) {
+    return { unmatched: toolOutputs, handledCallIds };
+  }
   const transport = child.transport;
-  if (!transport || typeof transport.respondToToolCall !== "function") return toolOutputs;
+  if (!transport || typeof transport.respondToToolCall !== "function") {
+    return { unmatched: toolOutputs, handledCallIds };
+  }
   const unmatched = [];
   toolOutputs.forEach((toolOutput) => {
     const callId = toolOutput?.callId;
     if (!callId) return;
+    const callIdKey = String(callId);
+    handledCallIds.add(callIdKey);
     const outputText = toolOutput?.output ?? "";
     const outputBytes = Buffer.byteLength(String(outputText), "utf8");
     logStructured(
@@ -101,13 +110,13 @@ const respondToToolOutputs = (child, toolOutputs, { reqId, route, mode } = {}) =
         mode,
       },
       {
-        tool_call_id: callId,
+        tool_call_id: callIdKey,
         tool_name: toolOutput?.toolName ?? null,
         tool_output_bytes: outputBytes,
         tool_output_hash: sha256(outputText),
       }
     );
-    const ok = transport.respondToToolCall(callId, {
+    const ok = transport.respondToToolCall(callIdKey, {
       output: toolOutput.output,
       success: toolOutput.success,
     });
@@ -121,12 +130,75 @@ const respondToToolOutputs = (child, toolOutputs, { reqId, route, mode } = {}) =
           route,
           mode,
         },
-        { call_id: callId }
+        { call_id: callIdKey }
       );
       unmatched.push(toolOutput);
     }
   });
-  return unmatched;
+  return { unmatched, handledCallIds };
+};
+
+const stripToolOutputLines = (items, callIds) => {
+  if (!Array.isArray(items) || !callIds || callIds.size === 0) return;
+
+  const stripQuotes = (raw) => {
+    const value = typeof raw === "string" ? raw.trim() : "";
+    if (!value) return "";
+    if (value.startsWith('"')) {
+      try {
+        const parsed = JSON.parse(value);
+        return typeof parsed === "string" ? parsed : String(parsed ?? "");
+      } catch {}
+    }
+    if (value.startsWith('"') && value.endsWith('"') && value.length >= 2) {
+      return value.slice(1, -1);
+    }
+    return value;
+  };
+
+  const extractCallId = (line) => {
+    if (typeof line !== "string") return "";
+    const match = line.match(/^\[function_call_output\s+call_id=([^\s]+)\s+/);
+    if (!match) return "";
+    return stripQuotes(match[1]);
+  };
+
+  let changed = false;
+  const next = [];
+  items.forEach((item) => {
+    if (!item || typeof item !== "object") {
+      next.push(item);
+      return;
+    }
+    if (item.type !== "text") {
+      next.push(item);
+      return;
+    }
+    const data = item.data && typeof item.data === "object" ? item.data : null;
+    const text = typeof data?.text === "string" ? data.text : "";
+    if (!text) {
+      next.push(item);
+      return;
+    }
+
+    const lines = text.split("\n");
+    const filtered = lines.filter((line) => {
+      const callId = extractCallId(line);
+      if (!callId) return true;
+      return !callIds.has(callId);
+    });
+    if (filtered.length === lines.length) {
+      next.push(item);
+      return;
+    }
+    changed = true;
+    const nextText = filtered.join("\n");
+    if (!nextText) return;
+    next.push({ ...item, data: { ...data, text: nextText } });
+  });
+
+  if (!changed) return;
+  items.splice(0, items.length, ...next);
 };
 
 const formatShimToolOutputLine = (toolOutput) => {
@@ -157,7 +229,7 @@ const appendShimToolOutputs = (transport, toolOutputs, turn, message, logMeta) =
     const line = formatShimToolOutputLine(toolOutput);
     const item = { type: "text", data: { text: line } };
     turn.items.push(item);
-    message.items.push(item);
+    if (message.items !== turn.items) message.items.push(item);
     logStructured(
       {
         component: "responses",
@@ -488,11 +560,17 @@ export async function postResponsesStream(req, res) {
       copilot_trace_id: locals.copilot_trace_id || null,
     },
   });
-  const unmatchedToolOutputs = respondToToolOutputs(child, normalized.toolOutputs, {
-    reqId,
-    route,
-    mode,
-  });
+  const { unmatched: unmatchedToolOutputs, handledCallIds } = respondToToolOutputs(
+    child,
+    normalized.toolOutputs,
+    {
+      reqId,
+      route,
+      mode,
+    }
+  );
+  stripToolOutputLines(turn.items, handledCallIds);
+  stripToolOutputLines(message.items, handledCallIds);
   if (unmatchedToolOutputs.length) {
     appendShimToolOutputs(child.transport, unmatchedToolOutputs, turn, message, {
       reqId,

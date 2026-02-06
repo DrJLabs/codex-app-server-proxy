@@ -643,16 +643,24 @@ class JsonRpcTransport {
     const key = String(threadId);
     const existing = this.threadToolSets.get(key) ?? null;
 
-    const nextDynamicTools =
-      existing?.dynamicTools ?? (Array.isArray(dynamicTools) ? dynamicTools : null);
-    const nextRequestTools =
-      existing?.requestTools ?? (Array.isArray(requestTools) ? requestTools : null);
-    const nextBaseInstructions = existing?.baseInstructions ?? baseInstructions ?? null;
+    const nextDynamicTools = Array.isArray(dynamicTools)
+      ? dynamicTools
+      : (existing?.dynamicTools ?? null);
+    const nextRequestTools = Array.isArray(requestTools)
+      ? requestTools
+      : (existing?.requestTools ?? null);
+    const nextBaseInstructions =
+      typeof baseInstructions === "string"
+        ? baseInstructions
+        : (existing?.baseInstructions ?? null);
     const nextDeveloperInstructions =
-      existing?.developerInstructions ?? developerInstructions ?? null;
+      typeof developerInstructions === "string"
+        ? developerInstructions
+        : (existing?.developerInstructions ?? null);
     const nextToolNameMap =
-      existing?.toolNameMap ??
-      (toolNameMap && typeof toolNameMap === "object" ? toolNameMap : null);
+      toolNameMap && typeof toolNameMap === "object"
+        ? toolNameMap
+        : (existing?.toolNameMap ?? null);
 
     this.threadToolSets.set(key, {
       dynamicTools: nextDynamicTools,
@@ -670,7 +678,13 @@ class JsonRpcTransport {
     const context = this.contextsByRequest.get(key) ?? null;
     const threadId = context?.conversationId ?? null;
     if (!threadId) return null;
-    const toolset = this.threadToolSets.get(String(threadId)) ?? null;
+    return this.getClientToolNameMapForThread(threadId);
+  }
+
+  getClientToolNameMapForThread(threadId) {
+    const key = String(threadId ?? "");
+    if (!key) return null;
+    const toolset = this.threadToolSets.get(key) ?? null;
     const map = toolset?.toolNameMap?.toClient ?? null;
     return map && typeof map.get === "function" ? map : null;
   }
