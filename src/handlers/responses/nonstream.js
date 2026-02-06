@@ -133,17 +133,22 @@ const respondToToolOutputs = (child, toolOutputs, { reqId, route, mode } = {}) =
 };
 
 const formatShimToolOutputLine = (toolOutput) => {
-  const callId = toolOutput?.callId ?? "";
-  const outputText =
-    typeof toolOutput?.output === "string"
-      ? toolOutput.output
-      : (() => {
-          try {
-            return JSON.stringify(toolOutput?.output ?? "");
-          } catch {
-            return String(toolOutput?.output ?? "");
-          }
-        })();
+  const encodeValue = (value) => {
+    const raw =
+      typeof value === "string"
+        ? value
+        : (() => {
+            try {
+              return JSON.stringify(value ?? "");
+            } catch {
+              return String(value ?? "");
+            }
+          })();
+    return JSON.stringify(raw).replaceAll("[", "\\u005b").replaceAll("]", "\\u005d");
+  };
+
+  const callId = encodeValue(toolOutput?.callId ?? "");
+  const outputText = encodeValue(toolOutput?.output ?? "");
   return `[function_call_output call_id=${callId} output=${outputText}]`;
 };
 
@@ -422,12 +427,7 @@ export async function postResponsesNonStream(req, res) {
   const maxOutputTokens = normalized.maxOutputTokens ?? (fallbackMax > 0 ? fallbackMax : undefined);
   const dynamicTools = buildDynamicTools(functionTools, normalized.toolChoice);
 
-  const internalToolsInstruction = CFG.PROXY_DISABLE_INTERNAL_TOOLS_PROMPT
-    ? RESPONSES_INTERNAL_TOOLS_INSTRUCTION
-    : "";
-  const developerInstructions = [internalToolsInstruction, normalized.developerInstructions]
-    .filter(Boolean)
-    .join("\n\n");
+  const developerInstructions = normalized.developerInstructions;
   const baseInstructions = CFG.PROXY_DISABLE_INTERNAL_TOOLS_PROMPT
     ? RESPONSES_INTERNAL_TOOLS_INSTRUCTION
     : undefined;
@@ -887,7 +887,53 @@ export async function postResponsesNonStream(req, res) {
     parsedCalls = [];
   }
 
-  const functionCalls = mapFunctionCallsToClient([...aggregatedCalls, ...parsedCalls]);
+  const signatureForCall = (call) => {
+    const fn = call?.function;
+    const name = typeof fn?.name === "string" ? fn.name : "";
+    const args = typeof fn?.arguments === "string" ? fn.arguments : "";
+
+    const stableNormalize = (value) => {
+      if (!value || typeof value !== "object") return value;
+      if (Array.isArray(value)) return value.map(stableNormalize);
+      const next = {};
+      Object.keys(value)
+        .sort()
+        .forEach((key) => {
+          // eslint-disable-next-line security/detect-object-injection
+          next[key] = stableNormalize(value[key]);
+        });
+      return next;
+    };
+
+    const normalizeArgs = (rawArgs) => {
+      const text = typeof rawArgs === "string" ? rawArgs.trim() : "";
+      if (!text) return "";
+      // Structured tool calls and textual tool-call parsing can differ only by whitespace/order.
+      // Normalize JSON payloads so we can detect duplicates reliably.
+      try {
+        return JSON.stringify(stableNormalize(JSON.parse(text)));
+      } catch {
+        return text;
+      }
+    };
+
+    return `${name}\n${normalizeArgs(args)}`;
+  };
+
+  const mergedFunctionCalls = (() => {
+    if (!parsedCalls.length) return aggregatedCalls;
+    const seen = new Set(aggregatedCalls.map(signatureForCall));
+    const merged = [...aggregatedCalls];
+    parsedCalls.forEach((call) => {
+      const signature = signatureForCall(call);
+      if (!signature || seen.has(signature)) return;
+      seen.add(signature);
+      merged.push(call);
+    });
+    return merged;
+  })();
+
+  const functionCalls = mapFunctionCallsToClient(mergedFunctionCalls);
 
   const envelope = buildResponsesEnvelope({
     responseId: originalBody?.id,

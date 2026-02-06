@@ -129,17 +129,22 @@ const respondToToolOutputs = (child, toolOutputs, { reqId, route, mode } = {}) =
 };
 
 const formatShimToolOutputLine = (toolOutput) => {
-  const callId = toolOutput?.callId ?? "";
-  const outputText =
-    typeof toolOutput?.output === "string"
-      ? toolOutput.output
-      : (() => {
-          try {
-            return JSON.stringify(toolOutput?.output ?? "");
-          } catch {
-            return String(toolOutput?.output ?? "");
-          }
-        })();
+  const encodeValue = (value) => {
+    const raw =
+      typeof value === "string"
+        ? value
+        : (() => {
+            try {
+              return JSON.stringify(value ?? "");
+            } catch {
+              return String(value ?? "");
+            }
+          })();
+    return JSON.stringify(raw).replaceAll("[", "\\u005b").replaceAll("]", "\\u005d");
+  };
+
+  const callId = encodeValue(toolOutput?.callId ?? "");
+  const outputText = encodeValue(toolOutput?.output ?? "");
   return `[function_call_output call_id=${callId} output=${outputText}]`;
 };
 
@@ -372,12 +377,7 @@ export async function postResponsesStream(req, res) {
   const dynamicTools = buildDynamicTools(functionTools, normalized.toolChoice);
   const includeUsage = Boolean(originalBody?.stream_options?.include_usage);
 
-  const internalToolsInstruction = CFG.PROXY_DISABLE_INTERNAL_TOOLS_PROMPT
-    ? RESPONSES_INTERNAL_TOOLS_INSTRUCTION
-    : "";
-  const developerInstructions = [internalToolsInstruction, normalized.developerInstructions]
-    .filter(Boolean)
-    .join("\n\n");
+  const developerInstructions = normalized.developerInstructions;
   const baseInstructions = CFG.PROXY_DISABLE_INTERNAL_TOOLS_PROMPT
     ? RESPONSES_INTERNAL_TOOLS_INSTRUCTION
     : undefined;

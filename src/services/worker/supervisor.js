@@ -61,9 +61,13 @@ function buildSupervisorArgs() {
   if (CFG.PROXY_ENABLE_WEB_SEARCH_REQUEST) {
     pushConfig("features.web_search_request", "true");
     pushConfig("tools.web_search", "false");
-  } else if (CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG) {
-    // Force-disable built-in web search when internal tools are disabled.
-    pushConfig("features.web_search_request", "false");
+  }
+
+  if (CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG) {
+    if (!CFG.PROXY_ENABLE_WEB_SEARCH_REQUEST) {
+      // Force-disable built-in web search request routing when internal tools are disabled.
+      pushConfig("features.web_search_request", "false");
+    }
     // Force-disable shell execution features so Codex does not emit commandExecution events.
     pushConfig("features.shell_tool", "false");
     pushConfig("features.shell_snapshot", "false");

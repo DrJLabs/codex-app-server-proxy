@@ -673,6 +673,11 @@ class JsonRpcTransport {
       const pending = this.pendingToolCalls.get(String(callId));
       if (pending?.threadId) {
         threads.add(String(pending.threadId));
+        continue;
+      }
+      const shim = this.shimToolCalls.get(String(callId));
+      if (shim?.threadId) {
+        threads.add(String(shim.threadId));
       }
     }
     if (threads.size === 0) return null;
@@ -1167,18 +1172,19 @@ class JsonRpcTransport {
     }
     const callId = resolveShimCallId(payload);
     if (this.shimToolCalls.has(callId)) return true;
-    this.registerShimToolCall(callId, {
-      toolName: resolved.name,
-      method,
-      toolType: toolType ?? null,
-      requestId: context.requestId ?? null,
-    });
     const threadId =
       payload?.threadId ??
       payload?.thread_id ??
       context.conversationId ??
       context.clientConversationId ??
       null;
+    this.registerShimToolCall(callId, {
+      toolName: resolved.name,
+      method,
+      toolType: toolType ?? null,
+      requestId: context.requestId ?? null,
+      threadId: threadId ? String(threadId) : null,
+    });
     const turnId = payload?.turnId ?? payload?.turn_id ?? context.rpc?.turnId ?? null;
     try {
       context.emitter.emit("notification", {
