@@ -60,7 +60,7 @@ At the HTTP API boundary, tool calls and tool outputs are mapped back to the ori
 When `PROXY_DISABLE_INTERNAL_TOOLS_CONFIG=true` (default), the proxy disables internal tools at two layers:
 
 - **Per-thread/turn config**: `turn.config.features.*` and `turn.config.tools.*` passed through JSON-RPC.
-- **Worker launch config**: `codex app-server -c features.web_search_request=false -c features.shell_tool=false -c features.shell_snapshot=false -c features.unified_exec=false -c features.exec_policy=false -c features.apply_patch_freeform=false -c tools.web_search=false -c tools.view_image=false ...`.
+- **Worker launch config**: `codex app-server -c features.web_search_request=false -c features.shell_tool=false -c features.shell_snapshot=false -c features.unified_exec=false -c features.exec_policy=false -c features.streamable_shell=false -c features.view_image_tool=false -c features.apply_patch_freeform=false -c tools.web_search=false -c tools.view_image=false ...`.
 
 When `PROXY_DISABLE_INTERNAL_TOOLS_PROMPT=true` (default), `/v1/responses` also injects explicit base instructions naming internal tool variants that must not be called.
 

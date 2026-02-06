@@ -58,7 +58,7 @@ In addition, the worker supervisor launches the Codex app-server with conservati
 
 No disablement config is injected. Codex internal tool calls may execute and will not be blocked by the proxy transport layer.
 
-## Tool calling path (primary vs fallback)
+## Tool calling path (primary)
 
 - **Primary:** Codex app-server dynamic tools (`thread/start.dynamicTools` + JSON-RPC `item/tool/call`).
 

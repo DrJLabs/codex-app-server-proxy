@@ -35,6 +35,7 @@ This trace documents the `/v1/responses` path when running **openai-json output 
 ## Translation to app-server schema
 
 ### Mapping overview
+
 | Client/source | Normalized field | JSON-RPC param | Implementation |
 | --- | --- | --- | --- |
 | `input` (string) | `inputItems` (text item) | `turn/start.input` | `normalizeResponsesRequest()` -> `{ type: "text", data: { text } }` (`src/handlers/responses/native/request.js`) |

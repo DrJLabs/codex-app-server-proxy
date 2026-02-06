@@ -112,16 +112,14 @@ try {
 }
 ```
 
-### 3) Do NOT send `"initialized"` in this repo (unless you add protocol support)
+### 3) Send `"initialized"` after `"initialize"` (implemented)
 
-Your suggested plan included an `"initialized"` notification after `"initialize"`.
+This proxy emits an `initialized` JSON-RPC **notification** (no `id`) immediately after a successful `initialize` response.
 
-**Repo verification:** this proxy’s JSON-RPC method set does **not** include `"initialized"` (see `JsonRpcMethod` union in `src/lib/json-rpc/schema.ts`), and the deterministic shim returns `-32601` for unknown methods.
+- Implementation: `src/services/transport/index.js` (`ensureHandshake()`)
+- Deterministic shim: `scripts/fake-codex-jsonrpc.js` accepts `initialized`
 
-So sending `"initialized"` would break the shim (and potentially older real workers). If upstream later requires `"initialized"`, that change must be done deliberately by:
-- adding it to the schema/types
-- teaching the shim to accept it
-- validating the upstream server actually requires it
+If the upstream worker does not require `initialized`, it should ignore the notification (no response is expected).
 
 ## Shim compatibility and testability
 
