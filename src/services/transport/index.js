@@ -1165,6 +1165,12 @@ class JsonRpcTransport {
     return true;
   }
 
+  hasShimToolCall(callId) {
+    if (!callId) return false;
+    const key = String(callId);
+    return this.shimToolCalls.has(key);
+  }
+
   consumeShimToolCall(callId) {
     if (!callId) return null;
     const key = String(callId);

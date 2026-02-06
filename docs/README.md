@@ -18,6 +18,12 @@ This folder is the canonical index for repository documentation. Update this fil
 - [`api/chat-completions.md`](api/chat-completions.md) — `/v1/chat/completions` usage notes
 - [`troubleshooting.md`](troubleshooting.md) — common errors and fixes
 
+## Defaults (important)
+
+- Internal Codex tools (`shell`, `apply_patch`, etc.) are disabled by default and only client-provided dynamic tool calls are allowed.
+- Tool registries are thread-scoped in Codex; the proxy forwards request `tools[]` at `thread/start` and reuses the thread's canonical toolset/instructions when clients send `function_call_output` items.
+- See `configuration.md` for `PROXY_DISABLE_INTERNAL_TOOLS_CONFIG`, `PROXY_DISABLE_INTERNAL_TOOLS_PROMPT`, and `PROXY_ENABLE_INTERNAL_TOOLS_SHIM`.
+
 ## Deployment and ops
 
 - [`deployment/dev-stack.md`](deployment/dev-stack.md) — dev stack (`infra/compose/compose.dev.stack.yml`)

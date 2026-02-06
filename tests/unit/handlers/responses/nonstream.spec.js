@@ -225,6 +225,93 @@ describe("responses nonstream handler", () => {
     expect(req.headers["x-proxy-output-mode"]).toBeUndefined();
   });
 
+  it("preserves unmatched tool output lines in turn items", async () => {
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    normalizeResponsesRequestMock.mockReturnValueOnce({
+      instructions: "",
+      inputItems: [
+        {
+          type: "text",
+          data: {
+            text: [
+              "[user] hi",
+              '[function_call_output call_id=call_ok output="ok"]',
+              '[function_call_output call_id=call_stale output="stale"]',
+            ].join("\n"),
+          },
+        },
+      ],
+      responseFormat: undefined,
+      outputSchema: undefined,
+      tools: null,
+      toolChoice: undefined,
+      parallelToolCalls: undefined,
+      maxOutputTokens: undefined,
+      toolOutputs: [
+        { callId: "call_ok", output: "ok", success: true, toolName: null },
+        { callId: "call_stale", output: "stale", success: true, toolName: null },
+      ],
+    });
+    transportMock.resolveThreadForToolOutputs.mockReturnValueOnce({
+      threadId: "thread_1",
+      toolset: {},
+      hasUnmatched: true,
+      unmatchedCount: 1,
+    });
+    createJsonRpcChildAdapterMock.mockImplementationOnce(() => ({
+      stdin: { write: vi.fn() },
+      once: vi.fn(),
+      kill: vi.fn(),
+      transport: {
+        respondToToolCall: vi.fn((callId) => callId === "call_ok"),
+        hasShimToolCall: vi.fn(() => false),
+        consumeShimToolCall: vi.fn(() => null),
+      },
+    }));
+
+    await postResponsesNonStream(req, res);
+
+    const [{ normalizedRequest }] = createJsonRpcChildAdapterMock.mock.calls[0];
+    const text = normalizedRequest.turn.items[0].data.text;
+    expect(text).not.toContain("call_ok");
+    expect(text).toContain("call_stale");
+  });
+
+  it("rejects native tools explicitly", async () => {
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    normalizeResponsesRequestMock.mockReturnValueOnce({
+      instructions: "",
+      inputItems: [{ type: "text", data: { text: "[user] hi" } }],
+      responseFormat: undefined,
+      outputSchema: undefined,
+      tools: [{ type: "web_search" }],
+      toolChoice: undefined,
+      parallelToolCalls: undefined,
+      maxOutputTokens: undefined,
+      toolOutputs: [],
+    });
+
+    await postResponsesNonStream(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({ param: "tools", code: "native_tools_disabled" }),
+      })
+    );
+    expect(createJsonRpcChildAdapterMock).not.toHaveBeenCalled();
+  });
+
   it("returns 400 when n is invalid", async () => {
     const { postResponsesNonStream } = await import(
       "../../../../src/handlers/responses/nonstream.js"

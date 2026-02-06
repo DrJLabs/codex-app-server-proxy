@@ -101,7 +101,6 @@ const respondToToolOutputs = (child, toolOutputs, { reqId, route, mode } = {}) =
     const callId = toolOutput?.callId;
     if (!callId) return;
     const callIdKey = String(callId);
-    handledCallIds.add(callIdKey);
     const outputText = toolOutput?.output ?? "";
     const outputBytes = Buffer.byteLength(String(outputText), "utf8");
     logStructured(
@@ -137,7 +136,9 @@ const respondToToolOutputs = (child, toolOutputs, { reqId, route, mode } = {}) =
         { call_id: callIdKey }
       );
       unmatched.push(toolOutput);
+      return;
     }
+    handledCallIds.add(callIdKey);
   });
   return { unmatched, handledCallIds };
 };
@@ -451,8 +452,22 @@ export async function postResponsesNonStream(req, res) {
   );
 
   const { nativeTools, functionTools } = splitResponsesTools(normalized.tools);
+  if (nativeTools.length > 0) {
+    applyCors(req, res);
+    res
+      .status(400)
+      .json(
+        invalidRequestBody(
+          "tools",
+          "native tools are disabled; only function tools are supported",
+          "native_tools_disabled"
+        )
+      );
+    restoreOutputMode();
+    return;
+  }
   const capabilityCheck = await ensureResponsesCapabilities({
-    toolsRequested: nativeTools.length > 0 || functionTools.length > 0,
+    toolsRequested: functionTools.length > 0,
   });
   if (!capabilityCheck.ok) {
     applyCors(req, res);
@@ -654,10 +669,21 @@ export async function postResponsesNonStream(req, res) {
       mode: "responses_nonstream",
     }
   );
-  stripToolOutputLines(turn.items, handledCallIds);
-  stripToolOutputLines(message.items, handledCallIds);
+  const stripCallIds = new Set(handledCallIds);
+  const transport = child?.transport;
+  if (transport?.hasShimToolCall && unmatchedToolOutputs.length) {
+    unmatchedToolOutputs.forEach((toolOutput) => {
+      const callId = toolOutput?.callId;
+      if (!callId) return;
+      if (transport.hasShimToolCall(callId)) {
+        stripCallIds.add(String(callId));
+      }
+    });
+  }
+  stripToolOutputLines(turn.items, stripCallIds);
+  stripToolOutputLines(message.items, stripCallIds);
   if (unmatchedToolOutputs.length) {
-    appendShimToolOutputs(child.transport, unmatchedToolOutputs, turn, message, {
+    appendShimToolOutputs(child?.transport, unmatchedToolOutputs, turn, message, {
       reqId,
       route: "/v1/responses",
       mode: "responses_nonstream",

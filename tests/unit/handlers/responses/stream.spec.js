@@ -259,6 +259,94 @@ describe("responses stream handler", () => {
     });
   });
 
+  it("preserves unmatched tool output lines in turn items", async () => {
+    const { postResponsesStream } = await import("../../../../src/handlers/responses/stream.js");
+    const req = makeReq({ input: "hello", model: "gpt-5.2", stream: true });
+    const res = makeRes();
+
+    normalizeResponsesRequestMock.mockReturnValueOnce({
+      instructions: "",
+      inputItems: [
+        {
+          type: "text",
+          data: {
+            text: [
+              "[user] hi",
+              '[function_call_output call_id=call_ok output="ok"]',
+              '[function_call_output call_id=call_stale output="stale"]',
+            ].join("\n"),
+          },
+        },
+      ],
+      responseFormat: undefined,
+      outputSchema: undefined,
+      tools: null,
+      toolChoice: undefined,
+      parallelToolCalls: undefined,
+      maxOutputTokens: undefined,
+      toolOutputs: [
+        { callId: "call_ok", output: "ok", success: true, toolName: null },
+        { callId: "call_stale", output: "stale", success: true, toolName: null },
+      ],
+    });
+    transportMock.resolveThreadForToolOutputs.mockReturnValueOnce({
+      threadId: "thread_1",
+      toolset: {},
+      hasUnmatched: true,
+      unmatchedCount: 1,
+    });
+    createJsonRpcChildAdapterMock.mockImplementationOnce(() => ({
+      stdin: { write: vi.fn() },
+      once: vi.fn(),
+      kill: vi.fn(),
+      transport: {
+        respondToToolCall: vi.fn((callId) => callId === "call_ok"),
+        hasShimToolCall: vi.fn(() => false),
+        consumeShimToolCall: vi.fn(() => null),
+      },
+    }));
+
+    await postResponsesStream(req, res);
+
+    const [{ normalizedRequest }] = createJsonRpcChildAdapterMock.mock.calls[0];
+    const text = normalizedRequest.turn.items[0].data.text;
+    expect(text).not.toContain("call_ok");
+    expect(text).toContain("call_stale");
+  });
+
+  it("rejects native tools explicitly", async () => {
+    const { postResponsesStream } = await import("../../../../src/handlers/responses/stream.js");
+    const req = makeReq({
+      input: "hello",
+      model: "gpt-5.2",
+      stream: true,
+      tools: [{ type: "web_search" }],
+    });
+    const res = makeRes();
+
+    normalizeResponsesRequestMock.mockReturnValueOnce({
+      instructions: "",
+      inputItems: [{ type: "text", data: { text: "[user] hi" } }],
+      responseFormat: undefined,
+      outputSchema: undefined,
+      tools: [{ type: "web_search" }],
+      toolChoice: undefined,
+      parallelToolCalls: undefined,
+      maxOutputTokens: undefined,
+      toolOutputs: [],
+    });
+
+    await postResponsesStream(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({ param: "tools", code: "native_tools_disabled" }),
+      })
+    );
+    expect(createJsonRpcChildAdapterMock).not.toHaveBeenCalled();
+  });
+
   it("skips baseInstructions when prompt flag is disabled", async () => {
     process.env.PROXY_DISABLE_INTERNAL_TOOLS = "true";
     process.env.PROXY_DISABLE_INTERNAL_TOOLS_PROMPT = "false";

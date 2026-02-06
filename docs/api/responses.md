@@ -79,6 +79,10 @@ Before starting a new app-server thread, the proxy rewrites function-tool names 
 
 Raw app-server traces will show the rewritten names.
 
+## Native tools
+
+This proxy only supports `function` tools on `/v1/responses`. Non-function tool types (for example: `web_search`) are rejected with `native_tools_disabled`.
+
 ## Internal tool shim (optional)
 
 When `PROXY_DISABLE_INTERNAL_TOOLS_CONFIG=true`, internal app-server tool notifications are blocked. If `PROXY_ENABLE_INTERNAL_TOOLS_SHIM=true`, the proxy can translate some internal tool events into dynamic tool calls:
