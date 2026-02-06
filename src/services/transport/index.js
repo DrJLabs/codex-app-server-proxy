@@ -664,21 +664,36 @@ class JsonRpcTransport {
     return true;
   }
 
+  getClientToolNameMap(requestId) {
+    const key = String(requestId ?? "");
+    if (!key) return null;
+    const context = this.contextsByRequest.get(key) ?? null;
+    const threadId = context?.conversationId ?? null;
+    if (!threadId) return null;
+    const toolset = this.threadToolSets.get(String(threadId)) ?? null;
+    const map = toolset?.toolNameMap?.toClient ?? null;
+    return map && typeof map.get === "function" ? map : null;
+  }
+
   resolveThreadForToolOutputs(toolOutputs = []) {
     if (!Array.isArray(toolOutputs) || toolOutputs.length === 0) return null;
     const threads = new Set();
+    const unmatched = new Set();
     for (const output of toolOutputs) {
       const callId = output?.callId;
       if (!callId) continue;
-      const pending = this.pendingToolCalls.get(String(callId));
+      const key = String(callId);
+      const pending = this.pendingToolCalls.get(key);
       if (pending?.threadId) {
         threads.add(String(pending.threadId));
         continue;
       }
-      const shim = this.shimToolCalls.get(String(callId));
+      const shim = this.shimToolCalls.get(key);
       if (shim?.threadId) {
         threads.add(String(shim.threadId));
+        continue;
       }
+      unmatched.add(key);
     }
     if (threads.size === 0) return null;
     if (threads.size > 1) {
@@ -687,6 +702,7 @@ class JsonRpcTransport {
         retryable: false,
       });
     }
+    if (unmatched.size > 0) return null;
     const threadId = Array.from(threads)[0];
     return { threadId, toolset: this.threadToolSets.get(threadId) ?? null };
   }

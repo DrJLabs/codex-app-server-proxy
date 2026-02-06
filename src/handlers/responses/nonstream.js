@@ -391,7 +391,26 @@ export async function postResponsesNonStream(req, res) {
   const hasToolOutputs = Array.isArray(normalized.toolOutputs) && normalized.toolOutputs.length > 0;
   let resolvedThread = null;
   if (hasToolOutputs) {
-    const transport = getJsonRpcTransport();
+    let transport;
+    try {
+      transport = getJsonRpcTransport();
+    } catch (err) {
+      const mapped = mapTransportError(err);
+      applyCors(req, res);
+      if (mapped?.body?.error) {
+        res.status(mapped.statusCode || 500).json(mapped.body);
+      } else {
+        res.status(500).json({
+          error: {
+            message: "transport unavailable",
+            type: "server_error",
+            code: "transport_error",
+          },
+        });
+      }
+      restoreOutputMode();
+      return;
+    }
     try {
       resolvedThread = transport.resolveThreadForToolOutputs(normalized.toolOutputs);
     } catch (err) {
@@ -570,11 +589,7 @@ export async function postResponsesNonStream(req, res) {
 
   const resolveToolNameMap = () => {
     if (toolNameMapCache !== undefined) return toolNameMapCache;
-    const transport = child?.transport;
-    const threadId = transport?.contextsByRequest?.get?.(reqId)?.conversationId ?? null;
-    const map = threadId
-      ? transport?.threadToolSets?.get?.(String(threadId))?.toolNameMap?.toClient
-      : null;
+    const map = child?.transport?.getClientToolNameMap?.(reqId) ?? null;
     toolNameMapCache = map && typeof map.get === "function" ? map : null;
     return toolNameMapCache;
   };

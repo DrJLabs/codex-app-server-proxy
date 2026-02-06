@@ -73,6 +73,8 @@ function buildSupervisorArgs() {
     pushConfig("features.shell_snapshot", "false");
     pushConfig("features.unified_exec", "false");
     pushConfig("features.exec_policy", "false");
+    pushConfig("features.streamable_shell", "false");
+    pushConfig("features.view_image_tool", "false");
     pushConfig("features.apply_patch_freeform", "false");
     pushConfig("tools.web_search", "false");
     pushConfig("tools.view_image", "false");

@@ -81,7 +81,8 @@ const applyCors = (req, res) => applyCorsUtil(req, res, CORS_ENABLED, CORS_ALLOW
 const countDynamicTools = (dynamicTools) => (Array.isArray(dynamicTools) ? dynamicTools.length : 0);
 
 const respondToToolOutputs = (child, toolOutputs, { reqId, route, mode } = {}) => {
-  if (!child || !Array.isArray(toolOutputs) || toolOutputs.length === 0) return [];
+  if (!Array.isArray(toolOutputs) || toolOutputs.length === 0) return [];
+  if (!child) return toolOutputs;
   const transport = child.transport;
   if (!transport || typeof transport.respondToToolCall !== "function") return toolOutputs;
   const unmatched = [];
@@ -314,8 +315,8 @@ export async function postResponsesStream(req, res) {
   const hasToolOutputs = Array.isArray(normalized.toolOutputs) && normalized.toolOutputs.length > 0;
   let resolvedThread = null;
   if (hasToolOutputs) {
-    const transport = getJsonRpcTransport();
     try {
+      const transport = getJsonRpcTransport();
       resolvedThread = transport.resolveThreadForToolOutputs(normalized.toolOutputs);
     } catch (err) {
       const mapped = mapTransportError(err);

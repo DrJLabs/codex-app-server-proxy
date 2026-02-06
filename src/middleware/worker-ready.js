@@ -37,8 +37,13 @@ export async function requireWorkerReady(req, res, next) {
 
   try {
     const transport = getJsonRpcTransport();
-    await transport.ensureHandshake();
-    return next();
+    const handshake = transport.ensureHandshake();
+    // If the handshake is hung or slow, don't block the request on the full handshake timeout.
+    handshake.catch(() => {});
+    await Promise.race([handshake, new Promise((resolve) => setTimeout(resolve, 250))]);
+    if (isWorkerSupervisorReady()) {
+      return next();
+    }
   } catch (err) {
     console.warn(
       "[proxy][worker-supervisor] handshake attempt failed; returning 503 backend_unavailable",
