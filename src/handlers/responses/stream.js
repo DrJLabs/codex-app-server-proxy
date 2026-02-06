@@ -385,6 +385,9 @@ export async function postResponsesStream(req, res) {
     ? {
         features: {
           web_search_request: false,
+          shell_tool: false,
+          shell_snapshot: false,
+          exec_policy: false,
           streamable_shell: false,
           unified_exec: false,
           view_image_tool: false,

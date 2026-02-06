@@ -271,6 +271,9 @@ describe("responses nonstream handler", () => {
     expect(normalizedRequest.turn.config).toMatchObject({
       features: {
         web_search_request: false,
+        shell_tool: false,
+        shell_snapshot: false,
+        exec_policy: false,
         streamable_shell: false,
         unified_exec: false,
         view_image_tool: false,
@@ -301,6 +304,9 @@ describe("responses nonstream handler", () => {
     expect(normalizedRequest.turn.config).toMatchObject({
       features: {
         web_search_request: false,
+        shell_tool: false,
+        shell_snapshot: false,
+        exec_policy: false,
         streamable_shell: false,
         unified_exec: false,
         view_image_tool: false,

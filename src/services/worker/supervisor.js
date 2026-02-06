@@ -64,6 +64,12 @@ function buildSupervisorArgs() {
   } else if (CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG) {
     // Force-disable built-in web search when internal tools are disabled.
     pushConfig("features.web_search_request", "false");
+    // Force-disable shell execution features so Codex does not emit commandExecution events.
+    pushConfig("features.shell_tool", "false");
+    pushConfig("features.shell_snapshot", "false");
+    pushConfig("features.unified_exec", "false");
+    pushConfig("features.exec_policy", "false");
+    pushConfig("features.apply_patch_freeform", "false");
     pushConfig("tools.web_search", "false");
     pushConfig("tools.view_image", "false");
   }
