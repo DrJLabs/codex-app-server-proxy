@@ -15,7 +15,7 @@ Update the proxy’s JSON-RPC client initialization request (sent by the transpo
 
 ### Target payload (what the worker should receive)
 
-> Note: the real proxy uses an incrementing numeric RPC id (see `#nextRpcId()`); the exact number is not important.
+> Note: the real proxy uses an incrementing numeric RPC id (see `#nextRpcId()`); the exact number is not critical.
 
 ```json
 {
