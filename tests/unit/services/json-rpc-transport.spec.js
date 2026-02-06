@@ -997,6 +997,60 @@ describe("JsonRpcTransport request lifecycle", () => {
     await expect(followUpPending).resolves.toMatchObject({ code: "request_aborted" });
   });
 
+  it("completes tool_calls turns without a final assistant message", async () => {
+    CFG.WORKER_MAX_CONCURRENCY = 1;
+    const child = createMockChild();
+    child.stdin.on("data", (chunk) => {
+      const text = chunk.toString().trim();
+      if (!text) return;
+      for (const line of text.split(/\n+/)) {
+        if (!line) continue;
+        const message = JSON.parse(line);
+        if (message.method === "initialize") {
+          child.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} }) + "\n");
+        }
+        if (message.method === "thread/start") {
+          child.stdout.write(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: message.id,
+              result: { threadId: "server-conv" },
+            }) + "\n"
+          );
+        }
+        if (message.method === "turn/start") {
+          child.stdout.write(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: message.id,
+              result: { threadId: "server-conv" },
+            }) + "\n"
+          );
+          child.stdout.write(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              method: "task_complete",
+              params: { output: "need tools", finish_reason: "tool_calls" },
+            }) + "\n"
+          );
+        }
+      }
+    });
+    __setChild(child);
+
+    const transport = getJsonRpcTransport();
+    const context = await transport.createChatRequest({
+      requestId: "req-toolcalls",
+      timeoutMs: 1000,
+    });
+    context.emitter.on("error", () => {});
+
+    const result = await context.promise;
+    expect(result.finishReason).toBe("tool_calls");
+    expect(result.finalMessage).toBeNull();
+    expect(transport.activeRequests).toBe(0);
+  });
+
   it("emits unknown notifications for forward compatibility", async () => {
     const child = createMockChild();
     const responses = {

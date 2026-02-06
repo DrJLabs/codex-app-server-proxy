@@ -403,14 +403,28 @@ export async function postResponsesStream(req, res) {
       restoreOutputMode();
       return;
     }
-    if (!resolvedThread || resolvedThread?.hasUnmatched) {
-      const message = resolvedThread?.hasUnmatched
-        ? "one or more tool outputs do not match an active tool call"
-        : "tool outputs do not match any active tool call";
+    if (!resolvedThread) {
+      const message = "tool outputs do not match any active tool call";
       applyCors(req, res);
       res.status(400).json(invalidRequestBody("input", message, "tool_outputs_unmatched"));
       restoreOutputMode();
       return;
+    }
+    if (resolvedThread?.hasUnmatched) {
+      logStructured(
+        {
+          component: "responses",
+          event: "tool_outputs_unmatched",
+          level: "warn",
+          req_id: reqId,
+          route,
+          mode,
+        },
+        {
+          thread_id: resolvedThread.threadId ?? null,
+          unmatched_count: resolvedThread.unmatchedCount ?? null,
+        }
+      );
     }
   }
 

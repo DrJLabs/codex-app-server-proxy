@@ -1493,7 +1493,12 @@ class JsonRpcTransport {
     }
     const hasResult = context.result !== null && context.result !== undefined;
     const hasFinalMessage = context.finalMessage !== null && context.finalMessage !== undefined;
-    if (hasResult && hasFinalMessage) {
+    const finishReason = typeof context.finishReason === "string" ? context.finishReason : "";
+    const normalizedFinishReason = finishReason.trim().toLowerCase();
+    // OpenAI-style tool calling ends the turn without an assistant message payload.
+    // We must release concurrency for these turns, otherwise they pin a slot until timeout.
+    const completesWithoutFinalMessage = normalizedFinishReason === "tool_calls";
+    if (hasResult && (hasFinalMessage || completesWithoutFinalMessage)) {
       this.#completeContext(context);
       return;
     }

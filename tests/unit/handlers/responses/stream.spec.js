@@ -340,6 +340,45 @@ describe("responses stream handler", () => {
     expect(adapterBody.tools).toEqual(toolset.requestTools);
   });
 
+  it("does not fail when tool outputs include extra (unmatched) callIds", async () => {
+    const toolset = {
+      dynamicTools: [{ name: "webSearch", description: "lookup", inputSchema: {} }],
+      requestTools: [{ type: "function", function: { name: "webSearch", parameters: {} } }],
+    };
+    transportMock.resolveThreadForToolOutputs.mockReturnValueOnce({
+      threadId: "thread-123",
+      toolset,
+      hasUnmatched: true,
+      unmatchedCount: 1,
+    });
+    normalizeResponsesRequestMock.mockReturnValueOnce({
+      instructions: "",
+      inputItems: [{ type: "text", data: { text: "[user] hi" } }],
+      responseFormat: undefined,
+      outputSchema: undefined,
+      tools: null,
+      toolChoice: undefined,
+      parallelToolCalls: undefined,
+      maxOutputTokens: undefined,
+      toolOutputs: [{ callId: "call_1", output: "ok", success: true }],
+    });
+
+    const { postResponsesStream } = await import("../../../../src/handlers/responses/stream.js");
+    const req = makeReq({ input: "hello", model: "gpt-5.2", stream: true });
+    const res = makeRes();
+
+    await postResponsesStream(req, res);
+
+    expect(res.status).not.toHaveBeenCalledWith(400);
+    expect(createJsonRpcChildAdapterMock).toHaveBeenCalled();
+
+    const warning = logStructuredMock.mock.calls.find(
+      ([entry]) => entry?.event === "tool_outputs_unmatched"
+    );
+    expect(warning).toBeTruthy();
+    expect(warning[1]).toMatchObject({ thread_id: "thread-123", unmatched_count: 1 });
+  });
+
   it("returns 400 when tool outputs arrive without a known thread", async () => {
     transportMock.resolveThreadForToolOutputs.mockReturnValueOnce(null);
     normalizeResponsesRequestMock.mockReturnValueOnce({

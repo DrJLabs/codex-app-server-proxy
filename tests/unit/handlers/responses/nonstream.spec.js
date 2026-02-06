@@ -371,6 +371,47 @@ describe("responses nonstream handler", () => {
     expect(normalizedRequest.turn.dynamicTools).toEqual(toolset.dynamicTools);
   });
 
+  it("does not fail when tool outputs include extra (unmatched) callIds", async () => {
+    const toolset = {
+      dynamicTools: [{ name: "webSearch", description: "lookup", inputSchema: {} }],
+      requestTools: [{ type: "function", function: { name: "webSearch", parameters: {} } }],
+    };
+    transportMock.resolveThreadForToolOutputs.mockReturnValueOnce({
+      threadId: "thread-123",
+      toolset,
+      hasUnmatched: true,
+      unmatchedCount: 1,
+    });
+    normalizeResponsesRequestMock.mockReturnValueOnce({
+      instructions: "",
+      inputItems: [{ type: "text", data: { text: "[user] hi" } }],
+      responseFormat: undefined,
+      outputSchema: undefined,
+      tools: null,
+      toolChoice: undefined,
+      parallelToolCalls: undefined,
+      maxOutputTokens: undefined,
+      toolOutputs: [{ callId: "call_1", output: "ok", success: true }],
+    });
+
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    expect(res.status).not.toHaveBeenCalledWith(400);
+    expect(createJsonRpcChildAdapterMock).toHaveBeenCalled();
+
+    const warning = logStructuredMock.mock.calls.find(
+      ([entry]) => entry?.event === "tool_outputs_unmatched"
+    );
+    expect(warning).toBeTruthy();
+    expect(warning[1]).toMatchObject({ thread_id: "thread-123", unmatched_count: 1 });
+  });
+
   it("logs tool output summaries when provided", async () => {
     transportMock.resolveThreadForToolOutputs.mockReturnValueOnce({
       threadId: "thread-1",
