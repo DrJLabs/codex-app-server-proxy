@@ -39,9 +39,15 @@ export async function requireWorkerReady(req, res, next) {
     const transport = getJsonRpcTransport();
     const handshake = transport.ensureHandshake();
     // If the handshake is hung or slow, don't block the request on the full handshake timeout.
-    handshake.catch(() => {});
+    let handshakeOk = false;
+    handshake
+      .then(() => {
+        handshakeOk = true;
+        return null;
+      })
+      .catch(() => {});
     await Promise.race([handshake, new Promise((resolve) => setTimeout(resolve, 250))]);
-    if (isWorkerSupervisorReady()) {
+    if (handshakeOk || isWorkerSupervisorReady()) {
       return next();
     }
   } catch (err) {
