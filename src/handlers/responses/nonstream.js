@@ -509,11 +509,9 @@ export async function postResponsesNonStream(req, res) {
       turn.dynamicTools = resolvedThread.toolset.dynamicTools;
       message.dynamicTools = resolvedThread.toolset.dynamicTools;
     }
-    if (
-      resolvedThread.toolset?.baseInstructions !== null &&
-      resolvedThread.toolset?.baseInstructions !== undefined
-    ) {
-      turn.baseInstructions = resolvedThread.toolset.baseInstructions;
+    const persistedBaseInstructions = resolvedThread.toolset?.baseInstructions;
+    if (typeof persistedBaseInstructions === "string" && persistedBaseInstructions.trim()) {
+      turn.baseInstructions = persistedBaseInstructions;
     }
     if (
       resolvedThread.toolset?.developerInstructions !== null &&

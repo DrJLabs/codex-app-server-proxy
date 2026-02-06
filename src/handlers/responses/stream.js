@@ -442,11 +442,9 @@ export async function postResponsesStream(req, res) {
       turn.dynamicTools = resolvedThread.toolset.dynamicTools;
       message.dynamicTools = resolvedThread.toolset.dynamicTools;
     }
-    if (
-      resolvedThread.toolset?.baseInstructions !== null &&
-      resolvedThread.toolset?.baseInstructions !== undefined
-    ) {
-      turn.baseInstructions = resolvedThread.toolset.baseInstructions;
+    const persistedBaseInstructions = resolvedThread.toolset?.baseInstructions;
+    if (typeof persistedBaseInstructions === "string" && persistedBaseInstructions.trim()) {
+      turn.baseInstructions = persistedBaseInstructions;
     }
     if (
       resolvedThread.toolset?.developerInstructions !== null &&
@@ -607,11 +605,7 @@ export async function postResponsesStream(req, res) {
   let toolNameMapCache = undefined;
   const resolveToolNameMap = () => {
     if (toolNameMapCache !== undefined) return toolNameMapCache;
-    const transport = child?.transport;
-    const threadId = transport?.contextsByRequest?.get?.(reqId)?.conversationId ?? null;
-    const map = threadId
-      ? transport?.threadToolSets?.get?.(String(threadId))?.toolNameMap?.toClient
-      : null;
+    const map = child?.transport?.getClientToolNameMap?.(reqId) ?? null;
     toolNameMapCache = map && typeof map.get === "function" ? map : null;
     return toolNameMapCache;
   };
@@ -758,6 +752,9 @@ export async function postResponsesStream(req, res) {
         message: error?.message,
       }
     );
+    clearTimeout(requestTimeout);
+    respondStreamFailure({ message: "failed to submit prompt", code: "submit_failed" });
+    return;
   }
 
   try {
