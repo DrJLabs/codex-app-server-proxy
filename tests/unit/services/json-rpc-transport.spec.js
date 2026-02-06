@@ -693,6 +693,43 @@ describe("JsonRpcTransport request lifecycle", () => {
     await pending;
   });
 
+  it("replies with error when a tool call has no active request context", async () => {
+    const child = createMockChild();
+    const serverResponse = new Promise((resolve) => {
+      wireJsonResponder(child, (message) => {
+        if (message?.id === 99) resolve(message);
+      });
+    });
+    __setChild(child);
+
+    const transport = getJsonRpcTransport();
+
+    child.stdout.write(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 99,
+        method: "item/tool/call",
+        params: {
+          callId: "call-missing-context",
+          threadId: "missing-thread",
+          tool: "webSearch",
+          arguments: { query: "x" },
+        },
+      }) + "\n"
+    );
+
+    await expect(serverResponse).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 99,
+      error: expect.objectContaining({
+        code: -32000,
+        message: "no active context for tool call",
+      }),
+    });
+
+    expect(transport.pendingToolCalls.has("call-missing-context")).toBe(false);
+  });
+
   it("clears listener state when no subscription exists", async () => {
     const child = createMockChild();
     const methods = [];
@@ -1306,6 +1343,26 @@ describe("JsonRpcTransport tool output resolution", () => {
     ]);
 
     expect(result).toEqual({ threadId: "thread-123", toolset: null });
+  });
+
+  it("marks tool outputs as unmatched when any call id is unknown", () => {
+    const transport = getJsonRpcTransport();
+    transport.pendingToolCalls.set("call_1", {
+      callId: "call_1",
+      threadId: "thread-123",
+    });
+
+    const result = transport.resolveThreadForToolOutputs([
+      { callId: "call_1", output: "ok", success: true },
+      { callId: "call_2", output: "nope", success: false },
+    ]);
+
+    expect(result).toEqual({
+      threadId: "thread-123",
+      toolset: null,
+      hasUnmatched: true,
+      unmatchedCount: 1,
+    });
   });
 });
 

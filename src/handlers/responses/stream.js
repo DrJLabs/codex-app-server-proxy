@@ -331,17 +331,12 @@ export async function postResponsesStream(req, res) {
       restoreOutputMode();
       return;
     }
-    if (!resolvedThread) {
+    if (!resolvedThread || resolvedThread?.hasUnmatched) {
+      const message = resolvedThread?.hasUnmatched
+        ? "one or more tool outputs do not match an active tool call"
+        : "tool outputs do not match any active tool call";
       applyCors(req, res);
-      res
-        .status(400)
-        .json(
-          invalidRequestBody(
-            "input",
-            "tool outputs do not match any active tool call",
-            "tool_outputs_unmatched"
-          )
-        );
+      res.status(400).json(invalidRequestBody("input", message, "tool_outputs_unmatched"));
       restoreOutputMode();
       return;
     }

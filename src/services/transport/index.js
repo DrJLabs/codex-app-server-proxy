@@ -702,9 +702,17 @@ class JsonRpcTransport {
         retryable: false,
       });
     }
-    if (unmatched.size > 0) return null;
     const threadId = Array.from(threads)[0];
-    return { threadId, toolset: this.threadToolSets.get(threadId) ?? null };
+    const toolset = this.threadToolSets.get(threadId) ?? null;
+    if (unmatched.size > 0) {
+      return {
+        threadId,
+        toolset,
+        hasUnmatched: true,
+        unmatchedCount: unmatched.size,
+      };
+    }
+    return { threadId, toolset };
   }
 
   async #removeConversationListener(context) {
@@ -1074,6 +1082,11 @@ class JsonRpcTransport {
       } catch {}
     }
 
+    if (!context) {
+      this.#sendServerError(message.id, -32000, "no active context for tool call");
+      return;
+    }
+
     const key = String(callId);
     this.pendingToolCalls.set(key, {
       rpcId: message.id,
@@ -1084,7 +1097,6 @@ class JsonRpcTransport {
       receivedAt: Date.now(),
     });
 
-    if (!context) return;
     try {
       context.emitter.emit("notification", {
         method: "codex/event/dynamic_tool_call_request",
