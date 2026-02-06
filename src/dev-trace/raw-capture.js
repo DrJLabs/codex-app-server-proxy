@@ -6,6 +6,11 @@ const APP_SERVER_FILENAME = "app-server-raw.ndjson";
 const THINKING_FILENAME = "responses-thinking-raw.ndjson";
 const TRUNCATION_SUFFIX = "…<truncated>";
 const appendQueues = new Map();
+const REDACTED = "<redacted>";
+const INLINE_AUTH_PATTERN = /\b(auth_url|login_url|login_id)=([^\s|]+)/gi;
+const SECRET_HEADER_PATTERN =
+  /\b(x-api-key|x-proxy-api-key|x-codex-key|cookie|set-cookie)\s*:\s*([^\s\r\n]+)/gi;
+const BEARER_PATTERN = /\b((?:proxy-)?authorization\s*:\s*bearer\s+)([^\s\r\n]+)/gi;
 
 const isDev = () => String(CFG.PROXY_ENV || "").toLowerCase() === "dev";
 
@@ -22,6 +27,29 @@ const safeStringify = (value) => {
   } catch {
     return String(value ?? "");
   }
+};
+
+const redactSensitiveString = (value) => {
+  if (typeof value !== "string" || !value) return value;
+  return value
+    .replace(INLINE_AUTH_PATTERN, (_match, key) => `${key}=${REDACTED}`)
+    .replace(BEARER_PATTERN, (_match, prefix) => `${prefix}${REDACTED}`)
+    .replace(SECRET_HEADER_PATTERN, (_match, key) => `${key}: ${REDACTED}`);
+};
+
+const sanitizeThinkingValue = (value, depth = 0) => {
+  if (depth > 8) return value;
+  if (value === null || value === undefined) return value;
+  if (typeof value === "string") return redactSensitiveString(value);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) return value.map((entry) => sanitizeThinkingValue(entry, depth + 1));
+  if (typeof value !== "object") return value;
+  const next = {};
+  for (const [key, entryValue] of Object.entries(value)) {
+    // eslint-disable-next-line security/detect-object-injection -- sanitize captured dev-only payloads
+    next[key] = sanitizeThinkingValue(entryValue, depth + 1);
+  }
+  return next;
 };
 
 const truncateValue = (value, maxBytes) => {
@@ -98,9 +126,14 @@ export const appendAppServerRawCapture = (entry = {}) => {
 export const appendThinkingRawCapture = (entry = {}) => {
   if (!isDev() || !CFG.PROXY_CAPTURE_THINKING_RAW) return;
   const maxBytes = Number(CFG.PROXY_CAPTURE_THINKING_RAW_MAX_BYTES || 0);
-  const { value: delta, truncated, bytes } = truncateValue(entry.delta, maxBytes);
-  const record = {
+  const sanitizedEntry = {
     ...entry,
+    delta: sanitizeThinkingValue(entry.delta),
+    metadata_info: sanitizeThinkingValue(entry.metadata_info),
+  };
+  const { value: delta, truncated, bytes } = truncateValue(sanitizedEntry.delta, maxBytes);
+  const record = {
+    ...sanitizedEntry,
     ts: Date.now(),
     delta,
     delta_truncated: truncated || false,

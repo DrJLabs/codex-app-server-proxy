@@ -70,7 +70,8 @@ describe("dev-trace raw capture", () => {
       trace_id: "trace-2",
       copilot_trace_id: "copilot-2",
       event_type: "text_delta",
-      delta: "hello",
+      delta:
+        "hello auth_url=https://example.com/login login_id=abc Authorization: Bearer secret x-api-key: key123",
     });
 
     const filePath = resolveThinkingRawPath();
@@ -78,6 +79,11 @@ describe("dev-trace raw capture", () => {
     const lines = await readLines(filePath);
     expect(lines.length).toBe(1);
     expect(lines[0].req_id).toBe("req-2");
-    expect(lines[0].delta).toBe("hello");
+    expect(lines[0].delta).toContain("auth_url=<redacted>");
+    expect(lines[0].delta).toContain("login_id=<redacted>");
+    expect(lines[0].delta).toContain("Authorization: Bearer <redacted>");
+    expect(lines[0].delta).toContain("x-api-key: <redacted>");
+    expect(lines[0].delta).not.toContain("https://example.com/login");
+    expect(lines[0].delta).not.toContain("key123");
   });
 });
