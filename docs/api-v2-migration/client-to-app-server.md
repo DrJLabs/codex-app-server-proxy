@@ -36,6 +36,7 @@ This trace documents the `/v1/responses` path when running **openai-json output 
 
 ### Mapping overview
 
+
 | Client/source | Normalized field | JSON-RPC param | Implementation |
 | --- | --- | --- | --- |
 | `input` (string) | `inputItems` (text item) | `turn/start.input` | `normalizeResponsesRequest()` -> `{ type: "text", data: { text } }` (`src/handlers/responses/native/request.js`) |
@@ -43,6 +44,7 @@ This trace documents the `/v1/responses` path when running **openai-json output 
 | `instructions` and system/developer messages inside `input` | `developerInstructions` | `thread/start.developerInstructions` (via turn payload) | `developerInstructionsParts` -> `turn.developerInstructions` (`src/handlers/responses/native/request.js`, `src/handlers/responses/stream.js`, `src/handlers/responses/nonstream.js`) |
 | `tools[]` (type=function only) + `tool_choice` | `dynamicTools` | `thread/start.dynamicTools` | `splitResponsesTools()` + `buildDynamicTools()` -> `turn.dynamicTools` (`src/handlers/responses/shared.js`, `src/lib/tools/dynamic-tools.js`, `src/handlers/responses/stream.js`) |
 | `text.format` / `response_format` inputs | `outputSchema` | `turn/start.outputSchema` | `normalizeResponseFormat()` -> `turn.outputSchema` (`src/handlers/responses/native/request.js`, `src/lib/json-rpc/schema.ts`) |
+
 
 ### Schema anchors (app-server v2)
 Use `docs/reference/app-server-protocol.schema.json` to validate the JSON-RPC fields referenced above:
