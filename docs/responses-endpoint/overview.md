@@ -25,9 +25,11 @@ The route is gated by `PROXY_ENABLE_RESPONSES` (default: `true`).
   - Echoed `function_call` items are accepted and flattened back into the transcript
 - System/developer role messages (and top-level `instructions`) are moved into
   `developerInstructions` for the app-server conversation.
-- When function tools are provided, the proxy injects a developer instructions block describing
-  `<tool_call>` formatting rules, tool schemas, and `tool_choice` constraints (also via
-  `developerInstructions`). See `docs/responses-endpoint/prompt-injection.md` for the full flow.
+- Function tools in `tools[]` are forwarded to the app-server as `thread/start.dynamicTools` when a
+  new thread is created. Tool manifests are thread-scoped; follow-up turns reuse the thread's
+  canonical toolset and instructions.
+- When internal tools are disabled, `/v1/responses` may inject an explicit base instruction block
+  telling the model not to call internal tool names/variants. See `docs/responses-endpoint/prompt-injection.md`.
 - `input_image` is mapped to JSON-RPC `image` items, with role markers emitted only when needed for deterministic attribution.
 - `previous_response_id` is accepted for compatibility but **never** echoed in responses.
 

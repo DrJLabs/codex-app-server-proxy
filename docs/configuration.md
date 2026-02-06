@@ -26,7 +26,7 @@ This proxy is configured via environment variables. Defaults live in [`../src/co
 | `CODEX_HOME` | `$PROJECT/.codex-api` | Codex home/config directory |
 | `CODEX_MODEL` | `gpt-5.2` | Default effective model (proxy also accepts `codex-5*` / `codev-5*`) |
 | `CODEX_FORCE_PROVIDER` | *(empty)* | Force Codex provider (e.g., `chatgpt`) |
-| `PROXY_ENABLE_WEB_SEARCH_REQUEST` | `false` | Force app-server `web_search_request=true` and disable legacy `tools.web_search` |
+| `PROXY_ENABLE_WEB_SEARCH_REQUEST` | `false` | Enable Codex built-in web search request routing (`features.web_search_request=true`) while keeping the legacy `tools.web_search` flag off. Not recommended when running client-executed tools only. |
 
 ### `CODEX_HOME` and `AGENTS.md`
 
@@ -42,8 +42,8 @@ Codex CLI reads `config.toml` and `AGENTS.md` from `CODEX_HOME`.
 | `PROXY_SANDBOX_MODE` | `read-only` | Sandbox policy passed to Codex (`read-only`, `workspace-write`, `danger-full-access`) |
 | `PROXY_CODEX_WORKDIR` | `/tmp/codex-work` | Child working directory (ephemeral writes) |
 | `PROXY_DISABLE_INTERNAL_TOOLS` | `true` | Legacy default for internal tools toggles (sets defaults for the config + prompt flags below) |
-| `PROXY_DISABLE_INTERNAL_TOOLS_CONFIG` | `true` | Disable Codex internal tools (shell/apply_patch/etc) at the app-server level and block internal tool calls; shim internal webSearch/fileChange notifications into dynamic tool calls when possible |
-| `PROXY_DISABLE_INTERNAL_TOOLS_PROMPT` | `true` | Inject responses `baseInstructions` telling the model not to use specific internal tool names |
+| `PROXY_DISABLE_INTERNAL_TOOLS_CONFIG` | `true` | Disable Codex internal tools (WebSearch/fileChange/exec/etc) at the app-server level and block internal tool calls. Optional shim behavior requires `PROXY_ENABLE_INTERNAL_TOOLS_SHIM=true`. |
+| `PROXY_DISABLE_INTERNAL_TOOLS_PROMPT` | `true` | Inject Responses `baseInstructions` explicitly telling the model not to call internal tool names/variants (and to request only dynamic function tools). |
 | `PROXY_ENABLE_INTERNAL_TOOLS_SHIM` | `false` | Enable the internal tool shim that converts webSearch/fileChange notifications into dynamic tool calls (legacy inverse: `PROXY_DISABLE_INTERNAL_TOOLS_SHIM=false`) |
 
 ## Endpoint toggles and auth gates

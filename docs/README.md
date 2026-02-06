@@ -34,8 +34,10 @@ This folder is the canonical index for repository documentation. Update this fil
 - [`openai-endpoint-golden-parity.md`](openai-endpoint-golden-parity.md) — golden transcript contract for `/v1/chat/completions` and `/v1/responses`
 - [`responses-endpoint/overview.md`](responses-endpoint/overview.md) — `/v1/responses` implementation notes
 - [`responses-endpoint/app-server-tools.md`](responses-endpoint/app-server-tools.md) — tool manifest limitations and MCP integration notes
-- [`responses-endpoint/obsidian-tool-call-simulation.md`](responses-endpoint/obsidian-tool-call-simulation.md) — OpenAI-parity tool-call simulation plan
 - [`responses-endpoint/prompt-injection.md`](responses-endpoint/prompt-injection.md) — `/v1/responses` tool-call prompt injection matrix
+- [`reference/obsidian-tool-manifest.md`](reference/obsidian-tool-manifest.md) — Obsidian Copilot tool manifest capture
+- [`reference/obsidian-developer-prompt-5-tools.md`](reference/obsidian-developer-prompt-5-tools.md) — Obsidian Copilot developer prompt capture (short tools)
+- [`reference/obsidian-developer-prompt-13-tools.md`](reference/obsidian-developer-prompt-13-tools.md) — Obsidian Copilot developer prompt capture (full tools)
 - [`reference/app-server-protocol.schema.json`](reference/app-server-protocol.schema.json) — JSON-RPC schema bundle (Codex app-server)
 - [`reference/app-server-schema-0.89-tools.md`](reference/app-server-schema-0.89-tools.md) — schema extract for tool support (Codex 0.89.0)
 

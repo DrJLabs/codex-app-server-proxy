@@ -86,7 +86,7 @@ For production requirements (Traefik, Codex HOME, auth), see [docs/deployment/pr
 
 Full configuration and defaults: [docs/configuration.md](configuration.md).
 
-By default, internal Codex tools (shell/apply_patch/etc.) are disabled and only dynamic tool calls are allowed. Use `PROXY_DISABLE_INTERNAL_TOOLS_CONFIG=false` to keep internal tools enabled at the app-server level, and `PROXY_DISABLE_INTERNAL_TOOLS_PROMPT=false` to stop injecting the explicit "do not use internal tools" baseInstructions. The legacy `PROXY_DISABLE_INTERNAL_TOOLS` flag still sets the defaults for both. When internal tools are disabled via config, the proxy does not shim internal webSearch/fileChange notifications unless you opt in with `PROXY_ENABLE_INTERNAL_TOOLS_SHIM=true` (legacy inverse flag `PROXY_DISABLE_INTERNAL_TOOLS_SHIM=false`) and carries unmatched tool outputs into follow-up turns.
+By default, internal Codex tools (shell/apply_patch/etc.) are disabled and only dynamic tool calls are allowed. Function tool registries are thread-scoped in Codex; the proxy forwards request `tools[]` at `thread/start` and reuses the thread's canonical toolset/instructions when clients send `function_call_output` items. Use `PROXY_DISABLE_INTERNAL_TOOLS_CONFIG=false` to keep internal tools enabled at the app-server level, and `PROXY_DISABLE_INTERNAL_TOOLS_PROMPT=false` to stop injecting the explicit "do not use internal tools" baseInstructions. The legacy `PROXY_DISABLE_INTERNAL_TOOLS` flag still sets the defaults for both. To avoid collisions with Codex internal tool namespaces (notably client `webSearch`), the proxy rewrites reserved tool names (for example: `webSearch` -> `client_webSearch` inside app-server) and maps back at the HTTP boundary. When internal tools are disabled via config, the proxy does not shim internal webSearch/fileChange notifications unless you opt in with `PROXY_ENABLE_INTERNAL_TOOLS_SHIM=true` (legacy inverse flag `PROXY_DISABLE_INTERNAL_TOOLS_SHIM=false`) and carries unmatched tool outputs into follow-up turns.
 
 ### Dev-only raw capture
 
@@ -121,7 +121,6 @@ See [external/README.md](../external/README.md) for details.
 - [docs/openai-endpoint-golden-parity.md](openai-endpoint-golden-parity.md) - parity contract
 - [docs/responses-endpoint/overview.md](responses-endpoint/overview.md) - `/v1/responses` implementation notes
 - [docs/responses-endpoint/app-server-tools.md](responses-endpoint/app-server-tools.md) - tool manifest limitations
-- [docs/responses-endpoint/obsidian-tool-call-simulation.md](responses-endpoint/obsidian-tool-call-simulation.md) - OpenAI-parity tool-call simulation
 - [docs/responses-endpoint/prompt-injection.md](responses-endpoint/prompt-injection.md) - responses tool-call prompt injection matrix
 - [docs/reference/app-server-protocol.schema.json](reference/app-server-protocol.schema.json) - JSON-RPC schema bundle
 - [docs/reference/app-server-schema-0.89-tools.md](reference/app-server-schema-0.89-tools.md) - app-server tools schema
