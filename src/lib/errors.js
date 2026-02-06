@@ -133,10 +133,10 @@ const extractCodexErrorFields = (input) => {
 
   let retryAfterSeconds;
   if (additionalDetails && typeof additionalDetails === "object") {
-    if (Number.isFinite(additionalDetails.retryAfterSeconds)) {
-      retryAfterSeconds = Number(additionalDetails.retryAfterSeconds);
-    } else if (Number.isFinite(additionalDetails.retry_after_seconds)) {
-      retryAfterSeconds = Number(additionalDetails.retry_after_seconds);
+    const rawRetry = additionalDetails.retryAfterSeconds ?? additionalDetails.retry_after_seconds;
+    const parsed = rawRetry != null ? Number(rawRetry) : NaN;
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      retryAfterSeconds = parsed;
     }
   }
 
@@ -245,6 +245,26 @@ export function normalizeCodexError(input) {
 
   if (Number.isFinite(extracted.httpStatusCode)) {
     const status = Number(extracted.httpStatusCode);
+    if (status === 401) {
+      return {
+        statusCode: 401,
+        body: toOpenAIError({
+          message: extracted.message ?? "Authentication required.",
+          type: "authentication_error",
+          code: "unauthorized",
+        }),
+      };
+    }
+    if (status === 403) {
+      return {
+        statusCode: 403,
+        body: toOpenAIError({
+          message: extracted.message ?? "Permission denied.",
+          type: "permission_error",
+          code: "permission_denied",
+        }),
+      };
+    }
     const type =
       status === 429
         ? "rate_limit_error"
@@ -260,6 +280,9 @@ export function normalizeCodexError(input) {
         type,
         code,
       }),
+      ...(status === 429 && Number.isFinite(extracted.retryAfterSeconds)
+        ? { retryAfterSeconds: extracted.retryAfterSeconds }
+        : {}),
     };
   }
 

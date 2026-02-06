@@ -133,6 +133,16 @@ describe("error helpers", () => {
       },
     });
 
+    expect(
+      normalizeCodexError({
+        codexErrorInfo: "UsageLimitExceeded",
+        additionalDetails: { retryAfterSeconds: "30" },
+      })
+    ).toMatchObject({
+      statusCode: 429,
+      retryAfterSeconds: 30,
+    });
+
     expect(normalizeCodexError({ codexErrorInfo: "ContextWindowExceeded" })).toMatchObject({
       statusCode: 400,
       body: {
@@ -156,6 +166,26 @@ describe("error helpers", () => {
       body: {
         error: { type: "server_error", code: "upstream_error" },
       },
+    });
+
+    expect(
+      normalizeCodexError({
+        httpStatusCode: 429,
+        additionalDetails: { retryAfterSeconds: 12 },
+      })
+    ).toMatchObject({
+      statusCode: 429,
+      retryAfterSeconds: 12,
+    });
+
+    expect(normalizeCodexError({ httpStatusCode: 401 })).toMatchObject({
+      statusCode: 401,
+      body: { error: { type: "authentication_error", code: "unauthorized" } },
+    });
+
+    expect(normalizeCodexError({ httpStatusCode: 403 })).toMatchObject({
+      statusCode: 403,
+      body: { error: { type: "permission_error", code: "permission_denied" } },
     });
   });
 });
