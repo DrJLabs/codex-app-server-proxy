@@ -128,9 +128,14 @@ See [external/README.md](../external/README.md) for details.
 - [docs/responses-endpoint/overview.md](responses-endpoint/overview.md) - `/v1/responses` implementation notes
 - [docs/responses-endpoint/app-server-tools.md](responses-endpoint/app-server-tools.md) - tool manifest limitations
 - [docs/responses-endpoint/prompt-injection.md](responses-endpoint/prompt-injection.md) - responses tool-call prompt injection matrix
+- [docs/reference/obsidian-tool-manifest.md](reference/obsidian-tool-manifest.md) - Obsidian Copilot tool manifest capture
+- [docs/reference/obsidian-developer-prompt-5-tools.md](reference/obsidian-developer-prompt-5-tools.md) - Obsidian Copilot developer prompt capture (short tools)
+- [docs/reference/obsidian-developer-prompt-13-tools.md](reference/obsidian-developer-prompt-13-tools.md) - Obsidian Copilot developer prompt capture (full tools)
 - [docs/reference/app-server-protocol.schema.json](reference/app-server-protocol.schema.json) - JSON-RPC schema bundle
 - [docs/reference/app-server-schema-0.89-tools.md](reference/app-server-schema-0.89-tools.md) - app-server tools schema
 - [docs/logging-gaps/README.md](logging-gaps/README.md) - observability gap tracker
+- [docs/api-v2-migration/client-to-app-server.md](api-v2-migration/client-to-app-server.md) - `/v1/responses` openai-json ingress -> JSON-RPC handoff trace
+- [docs/api-v2-migration/app-server-to-client.md](api-v2-migration/app-server-to-client.md) - app-server tool request/output -> client response reverse trace
 - [plans/2026-01-25-obsidian-tool-call-simulation-v2.md](plans/2026-01-25-obsidian-tool-call-simulation-v2.md) - tool-call simulation v2 plan
 - [plans/2026-01-29-logging-gaps-full-tracing-design.md](plans/2026-01-29-logging-gaps-full-tracing-design.md) - dev-only raw capture design for responses
 - [plans/2026-01-29-logging-gaps-full-tracing-plan.md](plans/2026-01-29-logging-gaps-full-tracing-plan.md) - full tracing implementation plan
