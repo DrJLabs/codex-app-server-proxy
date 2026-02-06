@@ -62,7 +62,7 @@ describe("stream runtime", () => {
     );
   });
 
-  it("routes usage, finish, and errors to output", () => {
+  it("routes usage and finish to output", () => {
     const output = createOutputStub();
     const toolNormalizer = createToolNormalizerStub();
     const runtime = createStreamRuntime({
@@ -73,10 +73,40 @@ describe("stream runtime", () => {
 
     runtime.handleUsage({ choiceIndex: 0, usage: { total_tokens: 12 } });
     runtime.handleResult({ choiceIndex: 0, finishReason: "stop" });
-    runtime.handleError({ choiceIndex: 0, error: new Error("boom") });
 
     expect(output.emitUsage).toHaveBeenCalledWith(0, { total_tokens: 12 }, expect.any(Object));
     expect(output.emitFinish).toHaveBeenCalledWith(0, "stop", expect.any(Object));
+  });
+
+  it("routes errors to output when first terminal event", () => {
+    const output = createOutputStub();
+    const toolNormalizer = createToolNormalizerStub();
+    const runtime = createStreamRuntime({
+      output,
+      toolNormalizer,
+      finishTracker: { onDelta: vi.fn(), onMessage: vi.fn(), finalize: vi.fn() },
+    });
+
+    runtime.handleError({ choiceIndex: 0, error: new Error("boom") });
+
     expect(output.emitError).toHaveBeenCalledWith(0, expect.any(Error), expect.any(Object));
+  });
+
+  it("terminates once and ignores subsequent terminal events", () => {
+    const output = createOutputStub();
+    const toolNormalizer = createToolNormalizerStub();
+    const runtime = createStreamRuntime({
+      output,
+      toolNormalizer,
+      finishTracker: { onDelta: vi.fn(), onMessage: vi.fn(), finalize: vi.fn() },
+    });
+
+    runtime.handleError({ choiceIndex: 0, error: new Error("boom") });
+    runtime.handleResult({ choiceIndex: 0, finishReason: "stop" });
+    runtime.handleDelta({ choiceIndex: 0, delta: { content: "ignored" } });
+
+    expect(output.emitError).toHaveBeenCalledTimes(1);
+    expect(output.emitFinish).not.toHaveBeenCalled();
+    expect(output.emitDelta).not.toHaveBeenCalled();
   });
 });

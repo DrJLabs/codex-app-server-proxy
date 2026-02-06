@@ -278,6 +278,59 @@ afterAll(() => {
 });
 
 describe("JsonRpcTransport handshake", () => {
+  it("sends v2 initialize params", async () => {
+    const child = createMockChild();
+    let initializeParams;
+    child.stdin.on("data", (chunk) => {
+      const text = chunk.toString().trim();
+      if (!text) return;
+      const message = JSON.parse(text);
+      if (message.method === "initialize") {
+        initializeParams = message.params;
+        child.stdout.write(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { advertised_models: ["codex-5"] },
+          }) + "\n"
+        );
+      }
+    });
+    __setChild(child);
+
+    const transport = getJsonRpcTransport();
+    await transport.ensureHandshake();
+
+    expect(initializeParams?.protocolVersion).toBe("v2");
+    expect(initializeParams?.capabilities).toEqual({});
+  });
+
+  it("sends initialized notification after initialize", async () => {
+    const child = createMockChild();
+    const methods = [];
+    child.stdin.on("data", (chunk) => {
+      const text = chunk.toString().trim();
+      if (!text) return;
+      const message = JSON.parse(text);
+      methods.push(message.method);
+      if (message.method === "initialize") {
+        child.stdout.write(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { advertised_models: ["codex-5"] },
+          }) + "\n"
+        );
+      }
+    });
+    __setChild(child);
+
+    const transport = getJsonRpcTransport();
+    await transport.ensureHandshake();
+
+    expect(methods).toContain("initialized");
+  });
+
   it("resolves handshake and captures advertised models", async () => {
     const child = createMockChild();
     child.stdin.on("data", (chunk) => {
@@ -412,30 +465,21 @@ describe("JsonRpcTransport request lifecycle", () => {
         if (message.method === "initialize") {
           child.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} }) + "\n");
         }
-        if (message.method === "newConversation") {
+        if (message.method === "thread/start") {
           child.stdout.write(
             JSON.stringify({
               jsonrpc: "2.0",
               id: message.id,
-              result: { conversation_id: "server-conv" },
+              result: { threadId: "server-conv" },
             }) + "\n"
           );
         }
-        if (message.method === "addConversationListener") {
+        if (message.method === "turn/start") {
           child.stdout.write(
             JSON.stringify({
               jsonrpc: "2.0",
               id: message.id,
-              result: { subscription_id: "sub-1" },
-            }) + "\n"
-          );
-        }
-        if (message.method === "sendUserTurn") {
-          child.stdout.write(
-            JSON.stringify({
-              jsonrpc: "2.0",
-              id: message.id,
-              result: { conversation_id: "server-conv" },
+              result: { threadId: "server-conv" },
             }) + "\n"
           );
         }
@@ -468,7 +512,7 @@ describe("JsonRpcTransport request lifecycle", () => {
     await expect(nextPending).resolves.toMatchObject({ code: "request_aborted" });
   });
 
-  it("skips newConversation when an explicit conversation id is provided", async () => {
+  it("skips thread/start when an explicit thread id is provided", async () => {
     const child = createMockChild();
     const methods = [];
     wireJsonResponder(child, (message) => {
@@ -476,8 +520,8 @@ describe("JsonRpcTransport request lifecycle", () => {
       if (message.method === "initialize") {
         writeRpcResult(child, message.id, { result: {} });
       }
-      if (message.method === "sendUserTurn") {
-        writeRpcResult(child, message.id, { result: { conversation_id: "explicit" } });
+      if (message.method === "turn/start") {
+        writeRpcResult(child, message.id, { result: { threadId: "explicit" } });
       }
     });
     __setChild(child);
@@ -485,13 +529,17 @@ describe("JsonRpcTransport request lifecycle", () => {
     const transport = getJsonRpcTransport();
     const context = await transport.createChatRequest({
       requestId: "req-explicit",
-      turnParams: { conversation_id: "explicit" },
+      turnParams: { threadId: "explicit" },
     });
     context.emitter.on("error", () => {});
     const pending = context.promise.catch(() => {});
 
-    expect(methods).toContain("sendUserTurn");
-    expect(methods).not.toContain("newConversation");
+    await flushAsync();
+    await new Promise((resolve) => setImmediate(resolve));
+    await flushAsync();
+
+    expect(methods).toContain("turn/start");
+    expect(methods).not.toContain("thread/start");
     expect(methods).not.toContain("addConversationListener");
 
     transport.cancelContext(
@@ -501,20 +549,263 @@ describe("JsonRpcTransport request lifecycle", () => {
     await pending;
   });
 
-  it("continues when addConversationListener returns no subscription id", async () => {
+  it("does not call addConversationListener after thread/start", async () => {
+    const child = createMockChild();
+    const methods = [];
+    wireJsonResponder(child, (message) => {
+      methods.push(message.method);
+      if (message.method === "initialize") {
+        writeRpcResult(child, message.id, { result: {} });
+      }
+      if (message.method === "thread/start") {
+        writeRpcResult(child, message.id, { result: { threadId: "thr-1" } });
+      }
+      if (message.method === "turn/start") {
+        writeRpcResult(child, message.id, { result: {} });
+      }
+    });
+    __setChild(child);
+
+    const transport = getJsonRpcTransport();
+    const context = await transport.createChatRequest({ requestId: "req-1" });
+    context.emitter.on("error", () => {});
+    const pending = context.promise.catch(() => {});
+
+    await flushAsync();
+    await new Promise((resolve) => setImmediate(resolve));
+    await flushAsync();
+
+    expect(methods).toContain("thread/start");
+    expect(methods).toContain("turn/start");
+    expect(methods).not.toContain("addConversationListener");
+
+    transport.cancelContext(
+      context,
+      new TransportError("request aborted", { code: "request_aborted", retryable: false })
+    );
+    await pending;
+  });
+
+  it("passes dynamicTools to thread/start when provided on the turn", async () => {
+    const child = createMockChild();
+    let threadStartParams = null;
+    wireJsonResponder(child, (message) => {
+      if (message.method === "initialize") {
+        writeRpcResult(child, message.id, { result: {} });
+      }
+      if (message.method === "thread/start") {
+        threadStartParams = message.params;
+        writeRpcResult(child, message.id, { result: { threadId: "server-conv" } });
+      }
+      if (message.method === "turn/start") {
+        writeRpcResult(child, message.id, { result: { threadId: "server-conv" } });
+      }
+    });
+    __setChild(child);
+
+    const transport = getJsonRpcTransport();
+    const context = await transport.createChatRequest({
+      requestId: "req-dynamic-tools",
+      turnParams: {
+        items: [{ type: "text", data: { text: "hello" } }],
+        dynamicTools: [{ name: "lookup", description: "", inputSchema: { type: "object" } }],
+      },
+    });
+    context.emitter.on("error", () => {});
+    const pending = context.promise.catch(() => {});
+
+    expect(threadStartParams?.dynamicTools).toEqual([
+      { name: "lookup", description: "", inputSchema: { type: "object" } },
+    ]);
+
+    transport.cancelContext(
+      context,
+      new TransportError("request aborted", { code: "request_aborted", retryable: false })
+    );
+    await pending;
+  });
+
+  it("rewrites reserved dynamic tool names and maps tool calls back to client names", async () => {
+    const child = createMockChild();
+    let threadStartParams = null;
+    wireJsonResponder(child, (message) => {
+      if (message.method === "initialize") {
+        writeRpcResult(child, message.id, { result: {} });
+      }
+      if (message.method === "thread/start") {
+        threadStartParams = message.params;
+        writeRpcResult(child, message.id, { result: { threadId: "server-conv" } });
+      }
+      if (message.method === "turn/start") {
+        writeRpcResult(child, message.id, { result: { threadId: "server-conv" } });
+      }
+    });
+    __setChild(child);
+
+    const transport = getJsonRpcTransport();
+    const context = await transport.createChatRequest({
+      requestId: "req-rewrite-tool",
+      turnParams: {
+        items: [{ type: "text", data: { text: "hello" } }],
+        dynamicTools: [{ name: "webSearch", description: "", inputSchema: { type: "object" } }],
+      },
+    });
+    context.emitter.on("error", () => {});
+    const pending = context.promise.catch(() => {});
+
+    expect(threadStartParams?.dynamicTools?.[0]?.name).toBe("client_webSearch");
+    expect(
+      transport.threadToolSets.get("server-conv")?.toolNameMap?.toClient?.get?.("client_webSearch")
+    ).toBe("webSearch");
+
+    const toolCallNotification = new Promise((resolve) => {
+      context.emitter.on("notification", (message) => {
+        if (message?.method === "codex/event/dynamic_tool_call_request") resolve(message);
+      });
+    });
+
+    child.stdout.write(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 50,
+        method: "item/tool/call",
+        params: {
+          callId: "call-1",
+          threadId: "server-conv",
+          tool: "client_webSearch",
+          arguments: { query: "x" },
+        },
+      }) + "\n"
+    );
+
+    await expect(toolCallNotification).resolves.toMatchObject({
+      params: {
+        tool: "webSearch",
+        callId: "call-1",
+        threadId: "server-conv",
+      },
+    });
+
+    transport.cancelContext(
+      context,
+      new TransportError("request aborted", { code: "request_aborted", retryable: false })
+    );
+    await pending;
+  });
+
+  it("rewrites reserved dynamic tool names when an explicit thread id is provided", async () => {
     const child = createMockChild();
     wireJsonResponder(child, (message) => {
       if (message.method === "initialize") {
         writeRpcResult(child, message.id, { result: {} });
       }
-      if (message.method === "newConversation") {
-        writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
+      if (message.method === "turn/start") {
+        writeRpcResult(child, message.id, { result: { threadId: "server-conv" } });
       }
-      if (message.method === "addConversationListener") {
+    });
+    __setChild(child);
+
+    const transport = getJsonRpcTransport();
+    const context = await transport.createChatRequest({
+      requestId: "req-explicit-rewrite-tool",
+      turnParams: {
+        threadId: "server-conv",
+        items: [{ type: "text", data: { text: "hello" } }],
+        dynamicTools: [{ name: "webSearch", description: "", inputSchema: { type: "object" } }],
+      },
+    });
+    context.emitter.on("error", () => {});
+    const pending = context.promise.catch(() => {});
+
+    expect(
+      transport.threadToolSets.get("server-conv")?.toolNameMap?.toClient?.get?.("client_webSearch")
+    ).toBe("webSearch");
+
+    const toolCallNotification = new Promise((resolve) => {
+      context.emitter.on("notification", (message) => {
+        if (message?.method === "codex/event/dynamic_tool_call_request") resolve(message);
+      });
+    });
+
+    child.stdout.write(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 51,
+        method: "item/tool/call",
+        params: {
+          callId: "call-2",
+          threadId: "server-conv",
+          tool: "client_webSearch",
+          arguments: { query: "x" },
+        },
+      }) + "\n"
+    );
+
+    await expect(toolCallNotification).resolves.toMatchObject({
+      params: {
+        tool: "webSearch",
+        callId: "call-2",
+        threadId: "server-conv",
+      },
+    });
+
+    transport.cancelContext(
+      context,
+      new TransportError("request aborted", { code: "request_aborted", retryable: false })
+    );
+    await pending;
+  });
+
+  it("replies with error when a tool call has no active request context", async () => {
+    const child = createMockChild();
+    const serverResponse = new Promise((resolve) => {
+      wireJsonResponder(child, (message) => {
+        if (message?.id === 99) resolve(message);
+      });
+    });
+    __setChild(child);
+
+    const transport = getJsonRpcTransport();
+
+    child.stdout.write(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 99,
+        method: "item/tool/call",
+        params: {
+          callId: "call-missing-context",
+          threadId: "missing-thread",
+          tool: "webSearch",
+          arguments: { query: "x" },
+        },
+      }) + "\n"
+    );
+
+    await expect(serverResponse).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 99,
+      error: expect.objectContaining({
+        code: -32000,
+        message: "no active context for tool call",
+      }),
+    });
+
+    expect(transport.pendingToolCalls.has("call-missing-context")).toBe(false);
+  });
+
+  it("clears listener state when no subscription exists", async () => {
+    const child = createMockChild();
+    const methods = [];
+    wireJsonResponder(child, (message) => {
+      methods.push(message.method);
+      if (message.method === "initialize") {
         writeRpcResult(child, message.id, { result: {} });
       }
-      if (message.method === "sendUserTurn") {
-        writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
+      if (message.method === "thread/start") {
+        writeRpcResult(child, message.id, { result: { threadId: "server-conv" } });
+      }
+      if (message.method === "turn/start") {
+        writeRpcResult(child, message.id, { result: { threadId: "server-conv" } });
       }
     });
     __setChild(child);
@@ -522,25 +813,30 @@ describe("JsonRpcTransport request lifecycle", () => {
     const transport = getJsonRpcTransport();
     const context = await transport.createChatRequest({ requestId: "req-no-sub" });
     context.emitter.on("error", () => {});
-    context.promise.catch(() => {});
+    const pending = context.promise.catch(() => {});
 
-    expect(context.listenerAttached).toBe(true);
-    expect(context.subscriptionId).toBeNull();
+    await flushAsync();
+    await new Promise((resolve) => setImmediate(resolve));
+    await flushAsync();
 
     transport.cancelContext(
       context,
       new TransportError("request aborted", { code: "request_aborted", retryable: false })
     );
-    await context.promise.catch(() => {});
+    await pending;
+
+    expect(context.subscriptionId).toBeNull();
+    expect(context.listenerAttached).toBe(false);
+    expect(methods).not.toContain("removeConversationListener");
   });
 
-  it("throws when newConversation returns no conversation id", async () => {
+  it("throws when thread/start returns no conversation id", async () => {
     const child = createMockChild();
     wireJsonResponder(child, (message) => {
       if (message.method === "initialize") {
         writeRpcResult(child, message.id, { result: {} });
       }
-      if (message.method === "newConversation") {
+      if (message.method === "thread/start") {
         writeRpcResult(child, message.id, { result: {} });
       }
     });
@@ -589,22 +885,19 @@ describe("JsonRpcTransport request lifecycle", () => {
     contexts.set = originalSet;
   });
 
-  it("normalizes sendUserTurn items when no fallback text is provided", async () => {
+  it("normalizes turn/start input when no fallback text is provided", async () => {
     const child = createMockChild();
-    let sendUserTurnParams = null;
+    let turnStartParams = null;
     wireJsonResponder(child, (message) => {
       if (message.method === "initialize") {
         writeRpcResult(child, message.id, { result: {} });
       }
-      if (message.method === "newConversation") {
-        writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
+      if (message.method === "thread/start") {
+        writeRpcResult(child, message.id, { result: { threadId: "server-conv" } });
       }
-      if (message.method === "addConversationListener") {
-        writeRpcResult(child, message.id, { result: { subscription_id: "sub-1" } });
-      }
-      if (message.method === "sendUserTurn") {
-        sendUserTurnParams = message.params;
-        writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
+      if (message.method === "turn/start") {
+        turnStartParams = message.params;
+        writeRpcResult(child, message.id, { result: { threadId: "server-conv" } });
       }
     });
     __setChild(child);
@@ -616,8 +909,9 @@ describe("JsonRpcTransport request lifecycle", () => {
     });
     context.emitter.on("error", () => {});
     context.promise.catch(() => {});
+    await flushAsync();
 
-    expect(sendUserTurnParams?.items).toEqual([]);
+    expect(turnStartParams?.input).toEqual([]);
 
     transport.cancelContext(
       context,
@@ -626,38 +920,33 @@ describe("JsonRpcTransport request lifecycle", () => {
     await context.promise.catch(() => {});
   });
 
-  it("normalizes sendUserMessage text into items and strips text", async () => {
+  it("normalizes turn/start text into user inputs", async () => {
     const child = createMockChild();
-    let sendUserMessageParams = null;
+    let turnStartParams = null;
     wireJsonResponder(child, (message) => {
       if (message.method === "initialize") {
         writeRpcResult(child, message.id, { result: {} });
       }
-      if (message.method === "newConversation") {
-        writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
+      if (message.method === "thread/start") {
+        writeRpcResult(child, message.id, { result: { threadId: "server-conv" } });
       }
-      if (message.method === "addConversationListener") {
-        writeRpcResult(child, message.id, { result: { subscription_id: "sub-1" } });
-      }
-      if (message.method === "sendUserTurn") {
-        writeRpcResult(child, message.id, { result: { conversation_id: "server-conv" } });
-      }
-      if (message.method === "sendUserMessage") {
-        sendUserMessageParams = message.params;
+      if (message.method === "turn/start") {
+        turnStartParams = message.params;
+        writeRpcResult(child, message.id, { result: { threadId: "server-conv" } });
       }
     });
     __setChild(child);
 
     const transport = getJsonRpcTransport();
-    const context = await transport.createChatRequest({ requestId: "req-message-items" });
+    const context = await transport.createChatRequest({
+      requestId: "req-message-items",
+      turnParams: { text: "Hello" },
+    });
     context.emitter.on("error", () => {});
     context.promise.catch(() => {});
-
-    transport.sendUserMessage(context, { text: "Hello" });
     await flushAsync();
 
-    expect(sendUserMessageParams?.text).toBeUndefined();
-    expect(sendUserMessageParams?.items).toEqual([{ type: "text", data: { text: "Hello" } }]);
+    expect(turnStartParams?.input).toEqual([{ type: "text", text: "Hello", text_elements: [] }]);
 
     transport.cancelContext(
       context,
@@ -678,46 +967,35 @@ describe("JsonRpcTransport request lifecycle", () => {
         if (message.method === "initialize") {
           child.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} }) + "\n");
         }
-        if (message.method === "newConversation") {
+        if (message.method === "thread/start") {
           child.stdout.write(
             JSON.stringify({
               jsonrpc: "2.0",
               id: message.id,
-              result: { conversation_id: "server-conv" },
+              result: { threadId: "server-conv" },
             }) + "\n"
           );
         }
-        if (message.method === "addConversationListener") {
+        if (message.method === "turn/start") {
           child.stdout.write(
             JSON.stringify({
               jsonrpc: "2.0",
               id: message.id,
-              result: { subscription_id: "sub-1" },
+              result: { threadId: "server-conv" },
             }) + "\n"
           );
-        }
-        if (message.method === "sendUserTurn") {
-          child.stdout.write(
-            JSON.stringify({
-              jsonrpc: "2.0",
-              id: message.id,
-              result: { conversation_id: "server-conv" },
-            }) + "\n"
-          );
-        }
-        if (message.method === "sendUserMessage") {
           child.stdout.write(
             JSON.stringify({
               jsonrpc: "2.0",
               method: "agentMessageDelta",
-              params: { conversation_id: "server-conv", delta: "Hi" },
+              params: { threadId: "server-conv", delta: "Hi" },
             }) + "\n"
           );
           child.stdout.write(
             JSON.stringify({
               jsonrpc: "2.0",
               method: "agentMessage",
-              params: { conversation_id: "server-conv", text: "Hello world!" },
+              params: { threadId: "server-conv", text: "Hello world!" },
             }) + "\n"
           );
           child.stdout.write(
@@ -725,7 +1003,7 @@ describe("JsonRpcTransport request lifecycle", () => {
               jsonrpc: "2.0",
               method: "tokenCount",
               params: {
-                conversation_id: "server-conv",
+                threadId: "server-conv",
                 prompt_tokens: 5,
                 completion_tokens: 7,
                 finish_reason: "stop",
@@ -735,8 +1013,8 @@ describe("JsonRpcTransport request lifecycle", () => {
           child.stdout.write(
             JSON.stringify({
               jsonrpc: "2.0",
-              id: message.id,
-              result: { status: "complete", finish_reason: "stop" },
+              method: "task_complete",
+              params: { output: "done", finish_reason: "stop" },
             }) + "\n"
           );
         }
@@ -754,11 +1032,10 @@ describe("JsonRpcTransport request lifecycle", () => {
     context.emitter.on("message", (payload) => messages.push(payload));
     context.emitter.on("usage", (payload) => usageEvents.push(payload));
 
-    transport.sendUserMessage(context, { text: "Hello" });
     const result = await context.promise;
 
-    expect(deltas).toEqual([{ conversation_id: "server-conv", delta: "Hi" }]);
-    expect(messages).toEqual([{ conversation_id: "server-conv", text: "Hello world!" }]);
+    expect(deltas).toEqual([{ threadId: "server-conv", delta: "Hi" }]);
+    expect(messages).toEqual([{ threadId: "server-conv", text: "Hello world!" }]);
     expect(usageEvents.at(-1)).toMatchObject({
       prompt_tokens: 5,
       completion_tokens: 7,
@@ -767,10 +1044,10 @@ describe("JsonRpcTransport request lifecycle", () => {
     expect(result).toMatchObject({
       conversationId: "server-conv",
       finishReason: "stop",
-      finalMessage: { conversation_id: "server-conv", text: "Hello world!" },
+      finalMessage: { threadId: "server-conv", text: "Hello world!" },
       usage: { prompt_tokens: 5, completion_tokens: 7 },
-      deltas: [{ conversation_id: "server-conv", delta: "Hi" }],
-      result: { status: "complete", finish_reason: "stop" },
+      deltas: [{ threadId: "server-conv", delta: "Hi" }],
+      result: { output: "done", finish_reason: "stop" },
     });
 
     const followUp = await transport.createChatRequest({ requestId: "req-11" });
@@ -783,13 +1060,66 @@ describe("JsonRpcTransport request lifecycle", () => {
     await expect(followUpPending).resolves.toMatchObject({ code: "request_aborted" });
   });
 
+  it("completes tool_calls turns without a final assistant message", async () => {
+    CFG.WORKER_MAX_CONCURRENCY = 1;
+    const child = createMockChild();
+    child.stdin.on("data", (chunk) => {
+      const text = chunk.toString().trim();
+      if (!text) return;
+      for (const line of text.split(/\n+/)) {
+        if (!line) continue;
+        const message = JSON.parse(line);
+        if (message.method === "initialize") {
+          child.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} }) + "\n");
+        }
+        if (message.method === "thread/start") {
+          child.stdout.write(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: message.id,
+              result: { threadId: "server-conv" },
+            }) + "\n"
+          );
+        }
+        if (message.method === "turn/start") {
+          child.stdout.write(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: message.id,
+              result: { threadId: "server-conv" },
+            }) + "\n"
+          );
+          child.stdout.write(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              method: "task_complete",
+              params: { output: "need tools", finish_reason: "tool_calls" },
+            }) + "\n"
+          );
+        }
+      }
+    });
+    __setChild(child);
+
+    const transport = getJsonRpcTransport();
+    const context = await transport.createChatRequest({
+      requestId: "req-toolcalls",
+      timeoutMs: 1000,
+    });
+    context.emitter.on("error", () => {});
+
+    const result = await context.promise;
+    expect(result.finishReason).toBe("tool_calls");
+    expect(result.finalMessage).toBeNull();
+    expect(transport.activeRequests).toBe(0);
+  });
+
   it("emits unknown notifications for forward compatibility", async () => {
     const child = createMockChild();
     const responses = {
       initialize: { result: {} },
-      newConversation: { result: { conversation_id: "server-conv" } },
-      addConversationListener: { result: { subscription_id: "sub-1" } },
-      sendUserTurn: { result: { conversation_id: "server-conv" } },
+      "thread/start": { result: { threadId: "server-conv" } },
+      "turn/start": { result: { threadId: "server-conv" } },
     };
     wireJsonResponder(child, (message) => {
       if (Object.prototype.hasOwnProperty.call(responses, message.method)) {
@@ -806,7 +1136,7 @@ describe("JsonRpcTransport request lifecycle", () => {
     context.emitter.on("error", () => {});
 
     writeRpcNotification(child, "codex/event/app_server_v2_deprecation_notice", {
-      conversation_id: "server-conv",
+      threadId: "server-conv",
       msg: { notice: "deprecation" },
     });
     await flushAsync();
@@ -815,9 +1145,140 @@ describe("JsonRpcTransport request lifecycle", () => {
     expect(notifications[0]).toMatchObject({
       method: "codex/event/app_server_v2_deprecation_notice",
       params: {
-        conversation_id: "server-conv",
+        threadId: "server-conv",
         msg: { notice: "deprecation" },
       },
+    });
+
+    transport.cancelContext(context);
+    await context.promise.catch(() => {});
+  });
+
+  it("fails internal tool notifications when shim is not enabled", async () => {
+    const child = createMockChild();
+    const responses = {
+      initialize: { result: {} },
+      "thread/start": { result: { threadId: "server-conv" } },
+      "turn/start": { result: { threadId: "server-conv" } },
+    };
+    wireJsonResponder(child, (message) => {
+      if (Object.prototype.hasOwnProperty.call(responses, message.method)) {
+        writeRpcResult(child, message.id, responses[message.method]);
+      }
+    });
+    __setChild(child);
+
+    const originalDisable = CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG;
+    const originalShim = CFG.PROXY_ENABLE_INTERNAL_TOOLS_SHIM;
+    CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG = true;
+    CFG.PROXY_ENABLE_INTERNAL_TOOLS_SHIM = false;
+
+    const transport = getJsonRpcTransport();
+    const context = await transport.createChatRequest({ requestId: "req-shim-disabled" });
+    context.promise.catch(() => {});
+    const errors = [];
+    const notifications = [];
+    context.emitter.on("error", (payload) => errors.push(payload));
+    context.emitter.on("notification", (payload) => notifications.push(payload));
+
+    writeRpcNotification(child, "codex/event/web_search_started", {
+      threadId: "server-conv",
+      msg: { query: "status" },
+    });
+    await flushAsync();
+
+    expect(errors.some((err) => err?.code === "internal_tools_disabled")).toBe(true);
+    expect(
+      notifications.some((payload) => payload?.method === "codex/event/web_search_started")
+    ).toBe(false);
+    expect(
+      notifications.some((payload) => payload?.method === "codex/event/dynamic_tool_call_request")
+    ).toBe(false);
+
+    CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG = originalDisable;
+    CFG.PROXY_ENABLE_INTERNAL_TOOLS_SHIM = originalShim;
+    transport.cancelContext(context);
+    await context.promise.catch(() => {});
+  });
+
+  it("shims internal tool notifications when shim is enabled", async () => {
+    const child = createMockChild();
+    const responses = {
+      initialize: { result: {} },
+      "thread/start": { result: { threadId: "server-conv" } },
+      "turn/start": { result: { threadId: "server-conv" } },
+    };
+    wireJsonResponder(child, (message) => {
+      if (Object.prototype.hasOwnProperty.call(responses, message.method)) {
+        writeRpcResult(child, message.id, responses[message.method]);
+      }
+    });
+    __setChild(child);
+
+    const originalDisable = CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG;
+    const originalShim = CFG.PROXY_ENABLE_INTERNAL_TOOLS_SHIM;
+    CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG = true;
+    CFG.PROXY_ENABLE_INTERNAL_TOOLS_SHIM = true;
+
+    const transport = getJsonRpcTransport();
+    const context = await transport.createChatRequest({ requestId: "req-shim-enabled" });
+    context.promise.catch(() => {});
+    const errors = [];
+    const notifications = [];
+    context.emitter.on("error", (payload) => errors.push(payload));
+    context.emitter.on("notification", (payload) => notifications.push(payload));
+
+    writeRpcNotification(child, "codex/event/web_search_started", {
+      threadId: "server-conv",
+      msg: { query: "status" },
+    });
+    await flushAsync();
+
+    expect(errors.some((err) => err?.code === "internal_tools_disabled")).toBe(false);
+    expect(
+      notifications.some((payload) => payload?.method === "codex/event/web_search_started")
+    ).toBe(false);
+    expect(
+      notifications.some((payload) => payload?.method === "codex/event/dynamic_tool_call_request")
+    ).toBe(true);
+
+    CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG = originalDisable;
+    CFG.PROXY_ENABLE_INTERNAL_TOOLS_SHIM = originalShim;
+    transport.cancelContext(context);
+    await context.promise.catch(() => {});
+  });
+
+  it("routes v2 tool lifecycle notifications as deltas", async () => {
+    const child = createMockChild();
+    const responses = {
+      initialize: { result: {} },
+      "thread/start": { result: { threadId: "server-conv" } },
+      "turn/start": { result: { threadId: "server-conv" } },
+    };
+    wireJsonResponder(child, (message) => {
+      if (Object.prototype.hasOwnProperty.call(responses, message.method)) {
+        writeRpcResult(child, message.id, responses[message.method]);
+      }
+    });
+    __setChild(child);
+
+    const transport = getJsonRpcTransport();
+    const context = await transport.createChatRequest({ requestId: "req-v2-delta" });
+    context.promise.catch(() => {});
+    const deltas = [];
+    context.emitter.on("delta", (payload) => deltas.push(payload));
+    context.emitter.on("error", () => {});
+
+    writeRpcNotification(child, "codex/event/response.function_call_arguments.delta", {
+      threadId: "server-conv",
+      msg: { delta: '{"x":' },
+    });
+    await flushAsync();
+
+    expect(deltas).toHaveLength(1);
+    expect(deltas[0]).toMatchObject({
+      type: "response.function_call_arguments.delta",
+      delta: '{"x":',
     });
 
     transport.cancelContext(context);
@@ -828,9 +1289,8 @@ describe("JsonRpcTransport request lifecycle", () => {
     const child = createMockChild();
     const responses = {
       initialize: { result: {} },
-      newConversation: { result: { conversation_id: "server-conv" } },
-      addConversationListener: { result: { subscription_id: "sub-1" } },
-      sendUserTurn: { result: { conversation_id: "server-conv" } },
+      "thread/start": { result: { threadId: "server-conv" } },
+      "turn/start": { result: { threadId: "server-conv" } },
     };
     wireJsonResponder(child, (message) => {
       if (Object.prototype.hasOwnProperty.call(responses, message.method)) {
@@ -844,27 +1304,27 @@ describe("JsonRpcTransport request lifecycle", () => {
     context.emitter.on("error", () => {});
 
     writeRpcNotification(child, "codex/event/agent_message_content_delta", {
-      conversation_id: "server-conv",
+      threadId: "server-conv",
       msg: { content: [{ text: "hi" }] },
     });
     writeRpcNotification(child, "codex/event/agent_message_delta", {
-      conversation_id: "server-conv",
+      threadId: "server-conv",
       msg: { delta: { text: "structured" } },
     });
     writeRpcNotification(child, "codex/event/agent_message_delta", {
-      conversation_id: "server-conv",
+      threadId: "server-conv",
       msg: { delta: "skip" },
     });
     writeRpcNotification(child, "codex/event/token_count", {
-      conversation_id: "server-conv",
+      threadId: "server-conv",
       msg: { token_count: { prompt_tokens: 2, completion_tokens: 3 } },
     });
     writeRpcNotification(child, "codex/event/agent_message", {
-      conversation_id: "server-conv",
+      threadId: "server-conv",
       msg: { message: "final", finish_reason: "stop" },
     });
     writeRpcNotification(child, "codex/event/task_complete", {
-      conversation_id: "server-conv",
+      threadId: "server-conv",
       msg: { output: "done", finish_reason: "stop" },
     });
 
@@ -881,9 +1341,8 @@ describe("JsonRpcTransport request lifecycle", () => {
     const child = createMockChild();
     const responses = {
       initialize: { result: {} },
-      newConversation: { result: { conversation_id: "server-conv" } },
-      addConversationListener: { result: { subscription_id: "sub-1" } },
-      sendUserTurn: { result: { conversation_id: "server-conv" } },
+      "thread/start": { result: { threadId: "server-conv" } },
+      "turn/start": { result: { threadId: "server-conv" } },
     };
     wireJsonResponder(child, (message) => {
       if (Object.prototype.hasOwnProperty.call(responses, message.method)) {
@@ -897,7 +1356,7 @@ describe("JsonRpcTransport request lifecycle", () => {
     context.emitter.on("error", () => {});
 
     writeRpcNotification(child, "codex/event/item_completed", {
-      conversation_id: "server-conv",
+      threadId: "server-conv",
       msg: {
         item: {
           type: "agent_message",
@@ -908,7 +1367,7 @@ describe("JsonRpcTransport request lifecycle", () => {
 
     const result = await context.promise;
 
-    expect(result.finalMessage).toMatchObject({ message: "from item" });
+    expect(result.finalMessage).toMatchObject({ content: "from item" });
     expect(result.finishReason).toBe("stop");
     expect(result.result).toMatchObject({ item: expect.any(Object) });
   });
@@ -917,9 +1376,8 @@ describe("JsonRpcTransport request lifecycle", () => {
     const child = createMockChild();
     const responses = {
       initialize: { result: {} },
-      newConversation: { result: { conversation_id: "server-conv" } },
-      addConversationListener: { result: { subscription_id: "sub-1" } },
-      sendUserTurn: { result: { conversation_id: "server-conv" } },
+      "thread/start": { result: { threadId: "server-conv" } },
+      "turn/start": { result: { threadId: "server-conv" } },
     };
     wireJsonResponder(child, (message) => {
       if (Object.prototype.hasOwnProperty.call(responses, message.method)) {
@@ -934,7 +1392,7 @@ describe("JsonRpcTransport request lifecycle", () => {
     const pending = context.promise.catch((err) => err);
 
     writeRpcNotification(child, "codex/event/requestTimeout", {
-      conversation_id: "server-conv",
+      threadId: "server-conv",
       msg: { reason: "timeout" },
     });
 
@@ -953,30 +1411,21 @@ describe("JsonRpcTransport request lifecycle", () => {
         if (message.method === "initialize") {
           child.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} }) + "\n");
         }
-        if (message.method === "newConversation") {
+        if (message.method === "thread/start") {
           child.stdout.write(
             JSON.stringify({
               jsonrpc: "2.0",
               id: message.id,
-              result: { conversation_id: "server-conv" },
+              result: { threadId: "server-conv" },
             }) + "\n"
           );
         }
-        if (message.method === "addConversationListener") {
+        if (message.method === "turn/start") {
           child.stdout.write(
             JSON.stringify({
               jsonrpc: "2.0",
               id: message.id,
-              result: { subscription_id: "sub-1" },
-            }) + "\n"
-          );
-        }
-        if (message.method === "sendUserTurn") {
-          child.stdout.write(
-            JSON.stringify({
-              jsonrpc: "2.0",
-              id: message.id,
-              result: { conversation_id: "server-conv" },
+              result: { threadId: "server-conv" },
             }) + "\n"
           );
         }
@@ -1004,6 +1453,42 @@ describe("JsonRpcTransport request lifecycle", () => {
   });
 });
 
+describe("JsonRpcTransport tool output resolution", () => {
+  it("resolves thread id from tool outputs using pending tool calls", () => {
+    const transport = getJsonRpcTransport();
+    transport.pendingToolCalls.set("call_1", {
+      callId: "call_1",
+      threadId: "thread-123",
+    });
+
+    const result = transport.resolveThreadForToolOutputs([
+      { callId: "call_1", output: "ok", success: true },
+    ]);
+
+    expect(result).toEqual({ threadId: "thread-123", toolset: null });
+  });
+
+  it("marks tool outputs as unmatched when any call id is unknown", () => {
+    const transport = getJsonRpcTransport();
+    transport.pendingToolCalls.set("call_1", {
+      callId: "call_1",
+      threadId: "thread-123",
+    });
+
+    const result = transport.resolveThreadForToolOutputs([
+      { callId: "call_1", output: "ok", success: true },
+      { callId: "call_2", output: "nope", success: false },
+    ]);
+
+    expect(result).toEqual({
+      threadId: "thread-123",
+      toolset: null,
+      hasUnmatched: true,
+      unmatchedCount: 1,
+    });
+  });
+});
+
 describe("trace logging instrumentation", () => {
   it("logs backend submissions, responses, and notifications with sanitized payloads", async () => {
     const child = createMockChild();
@@ -1015,18 +1500,15 @@ describe("trace logging instrumentation", () => {
         case "initialize":
           writeRpcResult(child, message.id, { result: { advertised_models: ["codex-5"] } });
           break;
-        case "newConversation":
-          writeRpcResult(child, message.id, { result: { conversation_id: conversationId } });
+        case "thread/start":
+          writeRpcResult(child, message.id, { result: { threadId: conversationId } });
           break;
-        case "addConversationListener":
-          writeRpcResult(child, message.id, { result: { subscription_id: "sub-trace" } });
-          break;
-        case "sendUserTurn":
-          writeRpcResult(child, message.id, { result: { conversation_id: conversationId } });
+        case "turn/start":
+          writeRpcResult(child, message.id, { result: { threadId: conversationId } });
           setTimeout(() => {
             const heavy = "x".repeat(256);
             writeRpcNotification(child, "codex/event/agent_message", {
-              conversation_id: conversationId,
+              threadId: conversationId,
               request_id: "ctx-trace",
               msg: {
                 metadata: { chunk: heavy },
@@ -1039,7 +1521,7 @@ describe("trace logging instrumentation", () => {
               },
             });
             writeRpcNotification(child, "codex/event/task_complete", {
-              conversation_id: conversationId,
+              threadId: conversationId,
               msg: { finish_reason: "stop" },
             });
           }, 0);
@@ -1062,13 +1544,13 @@ describe("trace logging instrumentation", () => {
 
     const events = appendProtoEvent.mock.calls.map(([payload]) => payload);
     const rpcRequest = events.find(
-      (event) => event.kind === "rpc_request" && event.method === "sendUserTurn"
+      (event) => event.kind === "rpc_request" && event.method === "turn/start"
     );
     expect(rpcRequest).toBeTruthy();
     expect(rpcRequest.req_id).toBe(trace.reqId);
 
     const rpcResponse = events.find(
-      (event) => event.kind === "rpc_response" && event.method === "sendUserTurn"
+      (event) => event.kind === "rpc_response" && event.method === "turn/start"
     );
     expect(rpcResponse).toBeTruthy();
     expect(rpcResponse.rpc_id).toBe(rpcRequest.rpc_id);
@@ -1101,13 +1583,10 @@ describe("trace logging instrumentation", () => {
         case "initialize":
           writeRpcResult(child, message.id, { result: { advertised_models: ["codex-5"] } });
           break;
-        case "newConversation":
-          writeRpcResult(child, message.id, { result: { conversation_id: "conv-error" } });
+        case "thread/start":
+          writeRpcResult(child, message.id, { result: { threadId: "conv-error" } });
           break;
-        case "addConversationListener":
-          writeRpcResult(child, message.id, { result: { subscription_id: "sub-error" } });
-          break;
-        case "sendUserTurn":
+        case "turn/start":
           writeRpcResult(child, message.id, {
             error: {
               code: 500,
@@ -1136,7 +1615,7 @@ describe("trace logging instrumentation", () => {
     const events = appendProtoEvent.mock.calls.map(([payload]) => payload);
     const rpcRequest = [...events]
       .reverse()
-      .find((event) => event.kind === "rpc_request" && event.method === "sendUserTurn");
+      .find((event) => event.kind === "rpc_request" && event.method === "turn/start");
     expect(rpcRequest).toBeTruthy();
 
     const rpcError = events.find((event) => event.kind === "rpc_error");

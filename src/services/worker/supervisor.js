@@ -55,7 +55,29 @@ function buildSupervisorArgs() {
   if (provider) pushConfig("model_provider", quote(provider));
 
   if (CFG.PROXY_ENABLE_PARALLEL_TOOL_CALLS) {
-    pushConfig("parallel_tool_calls", quote("true"));
+    pushConfig("parallel_tool_calls", "true");
+  }
+
+  if (CFG.PROXY_ENABLE_WEB_SEARCH_REQUEST) {
+    pushConfig("features.web_search_request", "true");
+    pushConfig("tools.web_search", "false");
+  }
+
+  if (CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG) {
+    if (!CFG.PROXY_ENABLE_WEB_SEARCH_REQUEST) {
+      // Force-disable built-in web search request routing when internal tools are disabled.
+      pushConfig("features.web_search_request", "false");
+    }
+    // Force-disable shell execution features so Codex does not emit commandExecution events.
+    pushConfig("features.shell_tool", "false");
+    pushConfig("features.shell_snapshot", "false");
+    pushConfig("features.unified_exec", "false");
+    pushConfig("features.exec_policy", "false");
+    pushConfig("features.streamable_shell", "false");
+    pushConfig("features.view_image_tool", "false");
+    pushConfig("features.apply_patch_freeform", "false");
+    pushConfig("tools.web_search", "false");
+    pushConfig("tools.view_image", "false");
   }
 
   return args;

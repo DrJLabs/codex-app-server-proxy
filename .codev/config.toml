@@ -1,11 +1,16 @@
 model = "gpt-5.2"
+
+# WARNING: `danger-full-access` grants full filesystem/network access. Use only in trusted local dev.
+# Prefer `read-only` by default and opt in only when you need tool-driven writes.
 sandbox_mode = "read-only"
+# sandbox_mode = "danger-full-access"
+
 approval_policy = "never"
 preferred_auth_method = "chatgpt"
 project_doc_max_bytes = 65536
 
 [features]
-web_search_request = false
+web_search_request = true
 streamable_shell = false
 unified_exec = false
 apply_patch_freeform = false

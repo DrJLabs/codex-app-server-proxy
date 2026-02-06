@@ -30,7 +30,6 @@ RUN install -d -m 0775 /app/.codex-api && \
 COPY server.js ./
 COPY README.md ./
 COPY src ./src
-COPY config ./config
 
 # Run as non-root
 USER node

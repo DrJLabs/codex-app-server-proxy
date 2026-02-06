@@ -1,9 +1,12 @@
 import { appendProtoEvent } from "../dev-logging.js";
+import { appendAppServerRawCapture } from "./raw-capture.js";
 import { sanitizeRpcPayload } from "./sanitize.js";
 import { ensureReqId } from "../lib/request-context.js";
 
 const base = (trace = {}) => ({
   req_id: trace.reqId || trace.req_id || null,
+  trace_id: trace.trace_id || trace.traceId || null,
+  copilot_trace_id: trace.copilot_trace_id || trace.copilotTraceId || null,
   route: trace.route || null,
   mode: trace.mode || null,
 });
@@ -77,6 +80,17 @@ const summarizeToolsForLog = (tools, { maxTypes = 10, maxNames = 20 } = {}) => {
 
 export function logBackendSubmission(trace, { rpcId, method, params }) {
   if (!hasTrace(trace)) return;
+  if (trace.route === "/v1/responses") {
+    appendAppServerRawCapture({
+      req_id: trace.reqId || trace.req_id || null,
+      trace_id: trace.trace_id || trace.traceId || null,
+      copilot_trace_id: trace.copilot_trace_id || trace.copilotTraceId || null,
+      rpc_id: rpcId,
+      direction: "outbound",
+      method,
+      payload: params,
+    });
+  }
   const toolsSummary = summarizeToolsForLog(params?.tools);
   appendProtoEvent({
     ts: Date.now(),
@@ -93,6 +107,17 @@ export function logBackendSubmission(trace, { rpcId, method, params }) {
 
 export function logBackendResponse(trace, { rpcId, method, result, error }) {
   if (!hasTrace(trace)) return;
+  if (trace.route === "/v1/responses") {
+    appendAppServerRawCapture({
+      req_id: trace.reqId || trace.req_id || null,
+      trace_id: trace.trace_id || trace.traceId || null,
+      copilot_trace_id: trace.copilot_trace_id || trace.copilotTraceId || null,
+      rpc_id: rpcId,
+      direction: "inbound",
+      method,
+      payload: error || result,
+    });
+  }
   appendProtoEvent({
     ts: Date.now(),
     phase: "backend_io",
@@ -107,6 +132,16 @@ export function logBackendResponse(trace, { rpcId, method, result, error }) {
 
 export function logBackendNotification(trace, { method, params }) {
   if (!hasTrace(trace)) return;
+  if (trace.route === "/v1/responses") {
+    appendAppServerRawCapture({
+      req_id: trace.reqId || trace.req_id || null,
+      trace_id: trace.trace_id || trace.traceId || null,
+      copilot_trace_id: trace.copilot_trace_id || trace.copilotTraceId || null,
+      direction: "inbound",
+      notification_method: method,
+      payload: params,
+    });
+  }
   const payload = sanitizeRpcPayload(params);
   appendProtoEvent({
     ts: Date.now(),
@@ -158,5 +193,7 @@ export function traceFromResponse(res) {
     reqId,
     route: res.locals?.httpRoute || null,
     mode: res.locals?.mode || null,
+    trace_id: res.locals?.trace_id || null,
+    copilot_trace_id: res.locals?.copilot_trace_id || null,
   };
 }

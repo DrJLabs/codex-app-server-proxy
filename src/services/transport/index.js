@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { createInterface } from "node:readline";
 import { config as CFG } from "../../config/index.js";
 import { nanoid } from "nanoid";
+import { rewriteDynamicToolsForAppServer } from "../../lib/tools/tool-name-mapping.js";
 import {
   ensureWorkerSupervisor,
   getWorkerChildProcess,
@@ -11,20 +12,18 @@ import {
 import { isAppServerMode } from "../backend-mode.js";
 import {
   buildInitializeParams,
-  buildNewConversationParams,
-  buildAddConversationListenerParams,
-  buildRemoveConversationListenerParams,
+  buildThreadStartParams,
   createUserMessageItem,
   normalizeInputItems,
-  buildSendUserMessageParams,
-  buildSendUserTurnParams,
+  buildTurnStartParams,
 } from "../../lib/json-rpc/schema.ts";
-import { authErrorBody } from "../../lib/errors.js";
+import { authErrorBody, normalizeCodexError } from "../../lib/errors.js";
 import {
   logBackendNotification,
   logBackendResponse,
   logBackendSubmission,
 } from "../../dev-trace/backend.js";
+import { logStructured } from "../logging/schema.js";
 
 const JSONRPC_VERSION = "2.0";
 const LOG_PREFIX = "[proxy][json-rpc-transport]";
@@ -41,6 +40,71 @@ const normalizeNotificationMethod = (method) => {
   if (!method) return "";
   const value = String(method);
   return value.replace(/^codex\/event\//i, "");
+};
+
+const normalizeToolType = (value) => (typeof value === "string" ? value.trim() : (value ?? null));
+
+const extractShimArgs = (payload) => {
+  const candidates = [
+    payload?.item?.data,
+    payload?.item?.input,
+    payload?.item?.args,
+    payload?.data,
+    payload?.input,
+    payload?.args,
+    payload,
+  ];
+  for (const candidate of candidates) {
+    if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+      return { ...candidate };
+    }
+  }
+  return {};
+};
+
+const resolveShimToolName = ({ toolType, method, args }) => {
+  const m = typeof method === "string" ? method : "";
+  if (toolType === "webSearch" || m.startsWith("web_search_") || m.startsWith("webSearch")) {
+    return { name: "webSearch", args };
+  }
+  if (
+    toolType === "fileChange" ||
+    m.startsWith("item/fileChange") ||
+    m.startsWith("fileChange_") ||
+    m.startsWith("file_change_")
+  ) {
+    if (Object.prototype.hasOwnProperty.call(args, "diff")) {
+      return { name: "replaceInFile", args };
+    }
+    return { name: "writeToFile", args };
+  }
+  return null;
+};
+
+const resolveShimCallId = (payload) => {
+  const candidate =
+    payload?.item?.id ??
+    payload?.item?.callId ??
+    payload?.item?.call_id ??
+    payload?.callId ??
+    payload?.call_id ??
+    payload?.id ??
+    null;
+  if (candidate) return String(candidate);
+  return `call_${nanoid(12)}`;
+};
+
+const shouldShimInternalTool = ({ toolType, method, payload }) => {
+  const m = typeof method === "string" ? method : "";
+  if (toolType === "webSearch" || m.startsWith("web_search_")) return true;
+  if (toolType === "fileChange" || m.startsWith("item/fileChange")) return true;
+  if (toolType === "commandExecution" || m.startsWith("item/commandExecution")) return true;
+  if (toolType === "mcpToolCall" || m.startsWith("mcpToolCall")) return true;
+  const status =
+    payload?.item?.status ?? payload?.status ?? payload?.item?.state ?? payload?.state ?? null;
+  const normalized = typeof status === "string" ? status.toLowerCase() : "";
+  if (normalized && (normalized === "started" || normalized === "begin")) return true;
+  return m.includes("begin") || m.includes("started");
 };
 
 const summarizeTurnParamsForLog = (params) => {
@@ -108,7 +172,7 @@ class RequestContext {
     this.listenerAttached = false;
     this.emitter = new EventEmitter();
     this.usage = { prompt_tokens: 0, completion_tokens: 0 };
-    this.rpc = { turnId: null, messageId: null };
+    this.rpc = { turnId: null };
     this.result = null;
     this.finalMessage = null;
     this.finishReason = null;
@@ -154,6 +218,15 @@ class RequestContext {
       if (Number.isFinite(payload.completion_tokens)) {
         this.usage.completion_tokens = Number(payload.completion_tokens);
       }
+      const lastUsage = payload?.tokenUsage?.last || payload?.tokenUsage?.last_token_usage || null;
+      if (lastUsage && typeof lastUsage === "object") {
+        if (Number.isFinite(lastUsage.inputTokens)) {
+          this.usage.prompt_tokens = Number(lastUsage.inputTokens);
+        }
+        if (Number.isFinite(lastUsage.outputTokens)) {
+          this.usage.completion_tokens = Number(lastUsage.outputTokens);
+        }
+      }
       if (payload.finish_reason && typeof payload.finish_reason === "string") {
         this.finishReason = payload.finish_reason;
       }
@@ -196,6 +269,9 @@ class JsonRpcTransport {
     this.handshakePromise = null;
     this.rpcSeq = 1;
     this.pending = new Map();
+    this.pendingToolCalls = new Map();
+    this.threadToolSets = new Map();
+    this.shimToolCalls = new Map();
     this.contextsByConversation = new Map();
     this.contextsByRequest = new Map();
     this.activeRequests = 0;
@@ -226,6 +302,26 @@ class JsonRpcTransport {
     }
   }
 
+  #logConcurrency(context, phase, delta) {
+    if (!context) return;
+    logStructured(
+      {
+        component: "json_rpc",
+        event: "worker_concurrency",
+        level: "info",
+        req_id: context.requestId ?? null,
+        route: context.trace?.route ?? null,
+        mode: context.trace?.mode ?? null,
+      },
+      {
+        phase,
+        delta,
+        active_requests: this.activeRequests,
+        max_concurrency: Math.max(1, CFG.WORKER_MAX_CONCURRENCY),
+      }
+    );
+  }
+
   #clearRpcTrace(rpcId) {
     if (rpcId === null || rpcId === undefined) return;
     this.rpcTraceById.delete(rpcId);
@@ -253,6 +349,9 @@ class JsonRpcTransport {
       } catch {}
     }
     this.pending.clear();
+    this.pendingToolCalls.clear();
+    this.threadToolSets.clear();
+    this.shimToolCalls.clear();
     for (const context of this.contextsByRequest.values()) {
       context.reject(new TransportError("transport destroyed", { retryable: true }));
     }
@@ -313,6 +412,15 @@ class JsonRpcTransport {
               console.warn(`${LOG_PREFIX} failed to record handshake success`, err);
             }
           }
+          try {
+            this.#write({
+              jsonrpc: JSONRPC_VERSION,
+              method: "initialized",
+              params: {},
+            });
+          } catch (err) {
+            console.warn(`${LOG_PREFIX} failed to send initialized notification`, err);
+          }
           resolve(this.handshakeData);
         },
         reject: (err) => {
@@ -327,7 +435,11 @@ class JsonRpcTransport {
       });
 
       try {
-        const initParams = buildInitializeParams({ clientInfo: DEFAULT_CLIENT_INFO });
+        const initParams = buildInitializeParams({
+          clientInfo: DEFAULT_CLIENT_INFO,
+          protocolVersion: "v2",
+          capabilities: {},
+        });
         const recorder = this.supervisor?.recordHandshakePending;
         if (typeof recorder === "function") {
           try {
@@ -362,6 +474,20 @@ class JsonRpcTransport {
         retryable: true,
       });
     if (this.activeRequests >= Math.max(1, CFG.WORKER_MAX_CONCURRENCY)) {
+      logStructured(
+        {
+          component: "json_rpc",
+          event: "worker_concurrency_reject",
+          level: "warn",
+          req_id: requestId ?? null,
+          route: trace?.route ?? null,
+          mode: trace?.mode ?? null,
+        },
+        {
+          active_requests: this.activeRequests,
+          max_concurrency: Math.max(1, CFG.WORKER_MAX_CONCURRENCY),
+        }
+      );
       throw new TransportError("worker at capacity", { code: "worker_busy", retryable: true });
     }
 
@@ -384,6 +510,7 @@ class JsonRpcTransport {
     this.contextsByRequest.set(requestId, context);
     this.contextsByConversation.set(context.clientConversationId, context);
     this.activeRequests += 1;
+    this.#logConcurrency(context, "acquired", 1);
 
     if (signal) {
       if (signal.aborted) {
@@ -418,7 +545,9 @@ class JsonRpcTransport {
       throw err;
     }
 
-    this.#sendUserTurn(context, turnParams);
+    setImmediate(() => {
+      if (!context.completed) this.#sendUserTurn(context, turnParams);
+    });
     return context;
   }
 
@@ -433,67 +562,176 @@ class JsonRpcTransport {
 
     const basePayload = payload && typeof payload === "object" ? { ...(payload || {}) } : {};
 
-    const explicitConversationId =
-      basePayload.conversationId || basePayload.conversation_id || null;
-    if (explicitConversationId) {
-      context.conversationId = String(explicitConversationId);
+    const explicitThreadId = basePayload.threadId || basePayload.thread_id || null;
+    if (explicitThreadId) {
+      const rawDynamicTools = basePayload.dynamicTools ?? undefined;
+      const { dynamicTools, toolNameMap } = rewriteDynamicToolsForAppServer(rawDynamicTools);
+      context.conversationId = String(explicitThreadId);
       this.contextsByConversation.set(context.conversationId, context);
+      this.registerThreadTools(context.conversationId, {
+        dynamicTools: dynamicTools ?? null,
+        baseInstructions: basePayload.baseInstructions ?? null,
+        developerInstructions: basePayload.developerInstructions ?? null,
+        // OpenAI `tools` manifest: used by the proxy (stream adapter) on tool-output follow-ups,
+        // and intentionally not forwarded to the app-server JSON-RPC params.
+        requestTools: basePayload.tools ?? null,
+        toolNameMap,
+      });
       return context.conversationId;
     }
 
-    const conversationParams = buildNewConversationParams({
+    const rawDynamicTools = basePayload.dynamicTools ?? undefined;
+    const { dynamicTools, toolNameMap } = rewriteDynamicToolsForAppServer(rawDynamicTools);
+
+    const conversationParams = buildThreadStartParams({
       model: basePayload.model ?? undefined,
-      modelProvider: basePayload.modelProvider ?? basePayload.model_provider ?? undefined,
+      modelProvider: basePayload.modelProvider ?? undefined,
       profile: basePayload.profile ?? undefined,
       cwd: basePayload.cwd ?? undefined,
-      approvalPolicy: basePayload.approvalPolicy ?? basePayload.approval_policy ?? undefined,
+      approvalPolicy: basePayload.approvalPolicy ?? undefined,
       sandbox: basePayload.sandboxPolicy ?? basePayload.sandbox ?? undefined,
+      config: basePayload.config ?? undefined,
       baseInstructions: basePayload.baseInstructions ?? undefined,
       developerInstructions: basePayload.developerInstructions ?? undefined,
-      includeApplyPatchTool:
-        basePayload.includeApplyPatchTool ?? basePayload.include_apply_patch_tool ?? undefined,
+      dynamicTools,
+      experimentalRawEvents: false,
     });
 
     const conversationResult = await this.#callWorkerRpc({
       context,
-      method: "newConversation",
+      method: "thread/start",
       params: conversationParams,
-      type: "newConversation",
+      type: "thread/start",
     });
 
-    const conversationId =
-      conversationResult?.conversation_id ||
-      conversationResult?.conversationId ||
-      conversationResult?.conversation?.id;
+    const threadId =
+      conversationResult?.threadId ||
+      conversationResult?.thread_id ||
+      conversationResult?.thread?.id;
 
-    if (!conversationId) {
-      throw new TransportError("newConversation did not return a conversation id", {
+    if (!threadId) {
+      throw new TransportError("thread/start did not return a thread id", {
         code: "worker_invalid_response",
         retryable: true,
       });
     }
 
-    context.conversationId = String(conversationId);
+    context.conversationId = String(threadId);
     this.contextsByConversation.set(context.conversationId, context);
 
-    const listenerResult = await this.#callWorkerRpc({
-      context,
-      method: "addConversationListener",
-      params: buildAddConversationListenerParams({
-        conversationId: context.conversationId,
-        experimentalRawEvents: false,
-      }),
-      type: "addConversationListener",
+    context.listenerAttached = Boolean(context.subscriptionId);
+
+    this.registerThreadTools(context.conversationId, {
+      dynamicTools,
+      baseInstructions: basePayload.baseInstructions ?? null,
+      developerInstructions: basePayload.developerInstructions ?? null,
+      // OpenAI `tools` manifest: used by the proxy (stream adapter) on tool-output follow-ups,
+      // and intentionally not forwarded to the app-server JSON-RPC params.
+      requestTools: basePayload.tools ?? null,
+      toolNameMap,
     });
 
-    const subscriptionId =
-      listenerResult?.subscription_id || listenerResult?.subscriptionId || null;
-    if (subscriptionId) {
-      context.subscriptionId = String(subscriptionId);
-    }
-    context.listenerAttached = true;
-
     return context.conversationId;
+  }
+
+  registerThreadTools(
+    threadId,
+    {
+      dynamicTools = null,
+      baseInstructions = null,
+      developerInstructions = null,
+      requestTools = null,
+      toolNameMap = null,
+    } = {}
+  ) {
+    if (!threadId) return false;
+    const key = String(threadId);
+    const existing = this.threadToolSets.get(key) ?? null;
+
+    const nextDynamicTools = Array.isArray(dynamicTools)
+      ? dynamicTools
+      : (existing?.dynamicTools ?? null);
+    const nextRequestTools = Array.isArray(requestTools)
+      ? requestTools
+      : (existing?.requestTools ?? null);
+    const nextBaseInstructions =
+      typeof baseInstructions === "string"
+        ? baseInstructions
+        : (existing?.baseInstructions ?? null);
+    const nextDeveloperInstructions =
+      typeof developerInstructions === "string"
+        ? developerInstructions
+        : (existing?.developerInstructions ?? null);
+    const nextToolNameMap =
+      toolNameMap && typeof toolNameMap === "object"
+        ? toolNameMap
+        : (existing?.toolNameMap ?? null);
+
+    this.threadToolSets.set(key, {
+      dynamicTools: nextDynamicTools,
+      requestTools: nextRequestTools,
+      baseInstructions: nextBaseInstructions,
+      developerInstructions: nextDeveloperInstructions,
+      toolNameMap: nextToolNameMap,
+    });
+    return true;
+  }
+
+  getClientToolNameMap(requestId) {
+    const key = String(requestId ?? "");
+    if (!key) return null;
+    const context = this.contextsByRequest.get(key) ?? null;
+    const threadId = context?.conversationId ?? null;
+    if (!threadId) return null;
+    return this.getClientToolNameMapForThread(threadId);
+  }
+
+  getClientToolNameMapForThread(threadId) {
+    const key = String(threadId ?? "");
+    if (!key) return null;
+    const toolset = this.threadToolSets.get(key) ?? null;
+    const map = toolset?.toolNameMap?.toClient ?? null;
+    return map && typeof map.get === "function" ? map : null;
+  }
+
+  resolveThreadForToolOutputs(toolOutputs = []) {
+    if (!Array.isArray(toolOutputs) || toolOutputs.length === 0) return null;
+    const threads = new Set();
+    const unmatched = new Set();
+    for (const output of toolOutputs) {
+      const callId = output?.callId;
+      if (!callId) continue;
+      const key = String(callId);
+      const pending = this.pendingToolCalls.get(key);
+      if (pending?.threadId) {
+        threads.add(String(pending.threadId));
+        continue;
+      }
+      const shim = this.shimToolCalls.get(key);
+      if (shim?.threadId) {
+        threads.add(String(shim.threadId));
+        continue;
+      }
+      unmatched.add(key);
+    }
+    if (threads.size === 0) return null;
+    if (threads.size > 1) {
+      throw new TransportError("tool outputs span multiple threads", {
+        code: "tool_outputs_multi_thread",
+        retryable: false,
+      });
+    }
+    const threadId = Array.from(threads)[0];
+    const toolset = this.threadToolSets.get(threadId) ?? null;
+    if (unmatched.size > 0) {
+      return {
+        threadId,
+        toolset,
+        hasUnmatched: true,
+        unmatchedCount: unmatched.size,
+      };
+    }
+    return { threadId, toolset };
   }
 
   async #removeConversationListener(context) {
@@ -502,9 +740,9 @@ class JsonRpcTransport {
       await this.#callWorkerRpc({
         context,
         method: "removeConversationListener",
-        params: buildRemoveConversationListenerParams({
+        params: {
           subscriptionId: context.subscriptionId,
-        }),
+        },
         type: "removeConversationListener",
         timeoutMs: Math.min(CFG.WORKER_REQUEST_TIMEOUT_MS, 2000),
       });
@@ -603,92 +841,6 @@ class JsonRpcTransport {
     return requestPromise;
   }
 
-  sendUserMessage(context, payload) {
-    if (!context) throw new TransportError("invalid context");
-    if (!this.child) {
-      this.#failContext(
-        context,
-        new TransportError("worker unavailable", { code: "worker_unavailable", retryable: true })
-      );
-      return;
-    }
-    const messageRpcId = this.#nextRpcId();
-    context.rpc.messageId = messageRpcId;
-    const timeout = setTimeout(() => {
-      this.pending.delete(messageRpcId);
-      this.#clearRpcTrace(messageRpcId);
-      this.#failContext(
-        context,
-        new TransportError("sendUserMessage timeout", {
-          code: "worker_request_timeout",
-          retryable: true,
-        })
-      );
-    }, CFG.WORKER_REQUEST_TIMEOUT_MS);
-    this.pending.set(messageRpcId, {
-      type: "sendUserMessage",
-      context,
-      timeout,
-      resolve: (result) => {
-        clearTimeout(timeout);
-        this.pending.delete(messageRpcId);
-        this.#clearRpcTrace(messageRpcId);
-        context.setResult(result);
-        const finishReason = result?.finish_reason || result?.status;
-        context.setFinishReason(finishReason);
-        this.#scheduleCompletionCheck(context);
-      },
-      reject: (err) => {
-        clearTimeout(timeout);
-        this.pending.delete(messageRpcId);
-        this.#clearRpcTrace(messageRpcId);
-        this.#failContext(
-          context,
-          err instanceof Error ? err : new TransportError(String(err), { retryable: true })
-        );
-      },
-    });
-
-    const basePayload = payload && typeof payload === "object" ? { ...(payload || {}) } : {};
-    const fallbackText = typeof basePayload.text === "string" ? basePayload.text : undefined;
-    basePayload.items = normalizeInputItems(basePayload.items, fallbackText);
-    if (!Array.isArray(basePayload.items) || basePayload.items.length === 0) {
-      basePayload.items = [createUserMessageItem(fallbackText ?? "")];
-    }
-    if (basePayload.text !== undefined) {
-      delete basePayload.text;
-    }
-    const params = buildSendUserMessageParams({
-      ...basePayload,
-      conversationId: context.conversationId ?? context.clientConversationId,
-      requestId: context.clientConversationId,
-    });
-    if (context.trace) {
-      this.rpcTraceById.set(messageRpcId, context.trace);
-      logBackendSubmission(context.trace, {
-        rpcId: messageRpcId,
-        method: "sendUserMessage",
-        params,
-      });
-    }
-    try {
-      this.#write({
-        jsonrpc: JSONRPC_VERSION,
-        id: messageRpcId,
-        method: "sendUserMessage",
-        params,
-      });
-    } catch (err) {
-      clearTimeout(timeout);
-      this.pending.delete(messageRpcId);
-      this.#clearRpcTrace(messageRpcId);
-      this.#failContext(
-        context,
-        err instanceof Error ? err : new TransportError(String(err), { retryable: true })
-      );
-    }
-  }
-
   cancelContext(context, error = null) {
     if (!context) return;
     const reason =
@@ -729,14 +881,14 @@ class JsonRpcTransport {
       this.#clearRpcTrace(turnRpcId);
       this.#failContext(
         context,
-        new TransportError("sendUserTurn timeout", {
+        new TransportError("turn/start timeout", {
           code: "worker_request_timeout",
           retryable: true,
         })
       );
     }, CFG.WORKER_REQUEST_TIMEOUT_MS);
     this.pending.set(turnRpcId, {
-      type: "sendUserTurn",
+      type: "turn/start",
       context,
       timeout,
       requestSummary: null,
@@ -744,10 +896,10 @@ class JsonRpcTransport {
         clearTimeout(timeout);
         this.pending.delete(turnRpcId);
         this.#clearRpcTrace(turnRpcId);
-        const serverConversationId = result?.conversation_id || result?.conversationId || null;
-        if (serverConversationId) {
-          context.conversationId = String(serverConversationId);
-          if (serverConversationId !== context.clientConversationId) {
+        const serverThreadId = result?.threadId || result?.thread_id || null;
+        if (serverThreadId) {
+          context.conversationId = String(serverThreadId);
+          if (serverThreadId !== context.clientConversationId) {
             this.contextsByConversation.set(context.conversationId, context);
           }
         }
@@ -774,10 +926,9 @@ class JsonRpcTransport {
       if (basePayload.text !== undefined) {
         delete basePayload.text;
       }
-      const params = buildSendUserTurnParams({
+      const params = buildTurnStartParams({
         ...basePayload,
-        conversationId: context.conversationId ?? context.clientConversationId,
-        requestId: context.clientConversationId,
+        threadId: context.conversationId ?? context.clientConversationId,
       });
       const pending = this.pending.get(turnRpcId);
       if (pending) {
@@ -787,14 +938,14 @@ class JsonRpcTransport {
         this.rpcTraceById.set(turnRpcId, context.trace);
         logBackendSubmission(context.trace, {
           rpcId: turnRpcId,
-          method: "sendUserTurn",
+          method: "turn/start",
           params,
         });
       }
       this.#write({
         jsonrpc: JSONRPC_VERSION,
         id: turnRpcId,
-        method: "sendUserTurn",
+        method: "turn/start",
         params,
       });
     } catch (err) {
@@ -879,6 +1030,9 @@ class JsonRpcTransport {
         new TransportError("worker exited", { code: "worker_exited", retryable: true })
       );
     }
+    this.pendingToolCalls.clear();
+    this.threadToolSets.clear();
+    this.shimToolCalls.clear();
     this.contextsByConversation.clear();
     this.contextsByRequest.clear();
     this.activeRequests = 0;
@@ -898,6 +1052,10 @@ class JsonRpcTransport {
       console.warn(`${LOG_PREFIX} unable to parse worker output`, err, trimmed);
       return;
     }
+    if (payload.id !== undefined && payload.method) {
+      this.#handleServerRequest(payload);
+      return;
+    }
     if (payload.id !== undefined) {
       this.#handleRpcResponse(payload);
       return;
@@ -907,6 +1065,212 @@ class JsonRpcTransport {
       return;
     }
     console.warn(`${LOG_PREFIX} unrecognized worker message`, payload);
+  }
+
+  #handleServerRequest(message) {
+    if (!message || typeof message !== "object") return;
+    const method = String(message.method || "");
+    if (method !== "item/tool/call") {
+      this.#sendServerError(message.id, -32601, `unsupported method: ${method}`);
+      return;
+    }
+
+    const params = message.params && typeof message.params === "object" ? message.params : {};
+    const callId = params.callId || params.call_id || params.id || params.callID || null;
+    const threadId = params.threadId || params.thread_id || null;
+    const tool = params.tool || params.name || null;
+    const argumentsPayload = Object.prototype.hasOwnProperty.call(params, "arguments")
+      ? params.arguments
+      : (params.args ?? params.input);
+
+    if (!callId || !threadId || !tool) {
+      this.#sendServerError(message.id, -32600, "invalid tool call request");
+      return;
+    }
+
+    const threadKey = String(threadId);
+    const toolRaw = String(tool);
+    const mappedTool =
+      this.threadToolSets.get(threadKey)?.toolNameMap?.toClient?.get?.(toolRaw) ?? toolRaw;
+
+    const context = this.contextsByConversation.get(threadId) || this.#resolveContext({ threadId });
+
+    if (context?.trace) {
+      try {
+        logBackendNotification(context.trace, { method, params });
+      } catch {}
+    }
+
+    if (!context) {
+      this.#sendServerError(message.id, -32000, "no active context for tool call");
+      return;
+    }
+
+    const key = String(callId);
+    this.pendingToolCalls.set(key, {
+      rpcId: message.id,
+      callId: key,
+      threadId: String(threadId),
+      turnId: params.turnId || params.turn_id || null,
+      tool: mappedTool,
+      receivedAt: Date.now(),
+    });
+
+    try {
+      context.emitter.emit("notification", {
+        method: "codex/event/dynamic_tool_call_request",
+        params: {
+          tool: mappedTool,
+          arguments: argumentsPayload,
+          callId: key,
+          threadId: String(threadId),
+          turnId: params.turnId || params.turn_id || null,
+        },
+      });
+    } catch (err) {
+      console.warn(`${LOG_PREFIX} failed to emit dynamic tool request`, err);
+    }
+  }
+
+  respondToToolCall(callId, { output, success } = {}) {
+    if (!callId) return false;
+    const key = String(callId);
+    const pending = this.pendingToolCalls.get(key);
+    if (!pending) return false;
+    let outputText = "";
+    if (typeof output === "string") {
+      outputText = output;
+    } else {
+      try {
+        outputText = JSON.stringify(output ?? "");
+      } catch {
+        outputText = String(output ?? "");
+      }
+    }
+    const result = {
+      output: outputText,
+      success: typeof success === "boolean" ? success : true,
+    };
+    try {
+      this.#write({ jsonrpc: JSONRPC_VERSION, id: pending.rpcId, result });
+    } catch (err) {
+      console.warn(`${LOG_PREFIX} failed to respond to tool call`, err);
+      return false;
+    }
+    this.pendingToolCalls.delete(key);
+    return true;
+  }
+
+  registerShimToolCall(callId, details = {}) {
+    if (!callId) return false;
+    const key = String(callId);
+    this.shimToolCalls.set(key, {
+      ...details,
+      callId: key,
+      createdAt: Date.now(),
+    });
+    return true;
+  }
+
+  hasShimToolCall(callId) {
+    if (!callId) return false;
+    const key = String(callId);
+    return this.shimToolCalls.has(key);
+  }
+
+  consumeShimToolCall(callId) {
+    if (!callId) return null;
+    const key = String(callId);
+    const entry = this.shimToolCalls.get(key);
+    if (!entry) return null;
+    this.shimToolCalls.delete(key);
+    return entry;
+  }
+
+  #maybeShimInternalTool({ context, method, payload, toolType }) {
+    if (!context) return false;
+    const existingCallId =
+      payload?.item?.id ??
+      payload?.item?.callId ??
+      payload?.item?.call_id ??
+      payload?.callId ??
+      payload?.call_id ??
+      payload?.id ??
+      null;
+    if (existingCallId && this.shimToolCalls.has(String(existingCallId))) {
+      return true;
+    }
+    if (!shouldShimInternalTool({ toolType, method, payload })) return false;
+    const lowerMethod = method.toLowerCase();
+    const isTerminalEvent =
+      lowerMethod.includes("finished") ||
+      lowerMethod.includes("end") ||
+      lowerMethod.includes("done");
+    if (isTerminalEvent && !existingCallId) return false;
+    const args = extractShimArgs(payload);
+    const resolved = resolveShimToolName({ toolType, method, args });
+    if (!resolved?.name) return false;
+    const toolArgs = resolved.args ?? {};
+    if (resolved.name === "webSearch") {
+      if (toolArgs.query === undefined || toolArgs.query === null) {
+        const queryCandidate =
+          payload?.query ??
+          payload?.item?.query ??
+          payload?.item?.data?.query ??
+          payload?.data?.query ??
+          null;
+        if (queryCandidate != null) toolArgs.query = String(queryCandidate);
+      }
+      if (!Array.isArray(toolArgs.chatHistory)) toolArgs.chatHistory = [];
+    }
+    const callId = resolveShimCallId(payload);
+    if (this.shimToolCalls.has(callId)) return true;
+    const threadId =
+      payload?.threadId ??
+      payload?.thread_id ??
+      context.conversationId ??
+      context.clientConversationId ??
+      null;
+    this.registerShimToolCall(callId, {
+      toolName: resolved.name,
+      method,
+      toolType: toolType ?? null,
+      requestId: context.requestId ?? null,
+      threadId: threadId ? String(threadId) : null,
+    });
+    const turnId = payload?.turnId ?? payload?.turn_id ?? context.rpc?.turnId ?? null;
+    try {
+      context.emitter.emit("notification", {
+        method: "codex/event/dynamic_tool_call_request",
+        params: {
+          tool: resolved.name,
+          arguments: toolArgs,
+          callId,
+          threadId,
+          turnId,
+        },
+      });
+    } catch (err) {
+      console.warn(`${LOG_PREFIX} failed to emit shim tool request`, err);
+      return false;
+    }
+    logStructured(
+      { component: "json_rpc", event: "internal_tool_shimmed", level: "info" },
+      { tool_type: toolType ?? "unknown", resolved_name: resolved.name, method }
+    );
+    return true;
+  }
+
+  #sendServerError(id, code, message) {
+    try {
+      this.#write({
+        jsonrpc: JSONRPC_VERSION,
+        id,
+        error: { code, message },
+      });
+    } catch (err) {
+      console.warn(`${LOG_PREFIX} failed to send server error`, err);
+    }
   }
 
   #handleRpcResponse(message) {
@@ -922,13 +1286,13 @@ class JsonRpcTransport {
         code: message.error?.code || "worker_error",
         retryable: true,
       });
-      if (pending.type === "sendUserTurn" && pending.requestSummary) {
+      if (pending.type === "turn/start" && pending.requestSummary) {
         try {
           console.warn(
-            `${LOG_PREFIX} sendUserTurn rejected; request summary: ${JSON.stringify(pending.requestSummary)}`
+            `${LOG_PREFIX} turn/start rejected; request summary: ${JSON.stringify(pending.requestSummary)}`
           );
         } catch (err) {
-          console.warn(`${LOG_PREFIX} sendUserTurn rejected; unable to log request summary`, err);
+          console.warn(`${LOG_PREFIX} turn/start rejected; unable to log request summary`, err);
         }
       }
       if (trace) {
@@ -961,14 +1325,64 @@ class JsonRpcTransport {
         logBackendNotification(context.trace, { method: message.method, params });
       } catch {}
     }
+    const method = normalizeNotificationMethod(message.method);
+    const payload = params.msg && typeof params.msg === "object" ? params.msg : params;
+    if (CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG) {
+      const rawToolType = payload?.item?.type ?? payload?.type ?? null;
+      const toolType = normalizeToolType(rawToolType);
+      const isInternalToolType =
+        toolType === "commandExecution" ||
+        toolType === "fileChange" ||
+        toolType === "webSearch" ||
+        toolType === "WebSearch" ||
+        toolType === "mcpToolCall";
+      const isInternalToolMethod =
+        method.startsWith("item/commandExecution") ||
+        method.startsWith("item/fileChange") ||
+        method.startsWith("exec_command_") ||
+        method.startsWith("fileChange_") ||
+        method.startsWith("file_change_") ||
+        method.startsWith("web_search_") ||
+        method.startsWith("webSearch") ||
+        method.startsWith("mcpToolCall");
+      if (isInternalToolType || isInternalToolMethod) {
+        if (
+          CFG.PROXY_ENABLE_INTERNAL_TOOLS_SHIM &&
+          this.#maybeShimInternalTool({ context, method, payload, toolType })
+        ) {
+          return;
+        }
+        console.warn(
+          `${LOG_PREFIX} internal tool disabled; cancelling request ${context.requestId} (${method})`
+        );
+        this.#failContext(
+          context,
+          new TransportError("internal tools disabled", {
+            code: "internal_tools_disabled",
+            retryable: false,
+            details: {
+              method,
+              tool_type: toolType ?? null,
+            },
+          })
+        );
+        return;
+      }
+    }
     try {
       context.emitter.emit("notification", message);
     } catch (err) {
       console.warn(`${LOG_PREFIX} failed to emit notification`, err);
     }
-    const method = normalizeNotificationMethod(message.method);
-    const payload = params.msg && typeof params.msg === "object" ? params.msg : params;
     switch (method) {
+      case "thread/tokenUsage/updated": {
+        const tokenUsage =
+          payload && typeof payload === "object"
+            ? (payload.tokenUsage ?? payload.token_usage ?? payload)
+            : payload;
+        context.setUsage({ tokenUsage });
+        break;
+      }
       case "agentMessageDelta":
       case "agent_message_delta":
       case "agent_message_content_delta": {
@@ -1010,6 +1424,16 @@ class JsonRpcTransport {
         context.setUsage(usagePayload);
         break;
       }
+      case "response.output_item.added":
+      case "response.output_item.done":
+      case "response.function_call_arguments.delta":
+      case "response.function_call_arguments.done": {
+        if (payload && typeof payload === "object" && !payload.type) {
+          payload.type = method;
+        }
+        context.addDelta(payload);
+        break;
+      }
       case "requestTimeout":
         this.#failContext(
           context,
@@ -1027,6 +1451,17 @@ class JsonRpcTransport {
         context.setResult(payload);
         this.#scheduleCompletionCheck(context);
         break;
+      case "turn/completed": {
+        if (payload && typeof payload === "object") {
+          const turnStatus = payload.turn?.status ?? payload.status ?? null;
+          if (turnStatus === "failed") {
+            context.setFinishReason("error");
+          }
+        }
+        context.setResult(payload);
+        this.#scheduleCompletionCheck(context);
+        break;
+      }
       case "item/completed":
       case "item_completed": {
         const item =
@@ -1049,7 +1484,7 @@ class JsonRpcTransport {
               })
               .join("");
           }
-          if (text) context.setFinalMessage({ message: text });
+          if (text) context.setFinalMessage({ content: text });
         }
 
         if (!context.finishReason) context.setFinishReason("stop");
@@ -1070,7 +1505,12 @@ class JsonRpcTransport {
     }
     const hasResult = context.result !== null && context.result !== undefined;
     const hasFinalMessage = context.finalMessage !== null && context.finalMessage !== undefined;
-    if (hasResult && hasFinalMessage) {
+    const finishReason = typeof context.finishReason === "string" ? context.finishReason : "";
+    const normalizedFinishReason = finishReason.trim().toLowerCase();
+    // OpenAI-style tool calling ends the turn without an assistant message payload.
+    // We must release concurrency for these turns, otherwise they pin a slot until timeout.
+    const completesWithoutFinalMessage = normalizedFinishReason === "tool_calls";
+    if (hasResult && (hasFinalMessage || completesWithoutFinalMessage)) {
       this.#completeContext(context);
       return;
     }
@@ -1086,21 +1526,27 @@ class JsonRpcTransport {
 
   #resolveContext(params) {
     const idCandidates = [
-      params?.conversation_id,
-      params?.conversationId,
+      params?.threadId,
+      params?.thread_id,
       params?.conversation?.id,
-      params?.context?.conversation_id,
+      params?.context?.thread_id,
+      params?.context?.threadId,
       params?.request_id,
       params?.requestId,
     ];
+    let hasExplicitIdCandidate = false;
     for (const candidate of idCandidates) {
       if (!candidate) continue;
+      hasExplicitIdCandidate = true;
       const ctx =
         this.contextsByConversation.get(candidate) || this.contextsByRequest.get(candidate);
       if (ctx) return ctx;
     }
-    // Fallback: single active request
-    if (this.contextsByRequest.size === 1) {
+
+    // Fallback only when the worker didn't give us any identifiers.
+    // If a threadId/requestId is present but doesn't map to an active context, it likely belongs to
+    // a different (stale) request and must not be attributed to the only active request.
+    if (!hasExplicitIdCandidate && this.contextsByRequest.size === 1) {
       return this.contextsByRequest.values().next().value;
     }
     return null;
@@ -1123,6 +1569,7 @@ class JsonRpcTransport {
     }
     this.contextsByRequest.delete(context.requestId);
     this.activeRequests = Math.max(0, this.activeRequests - 1);
+    this.#logConcurrency(context, "released", -1);
     const payload = {
       requestId: context.requestId,
       conversationId: context.conversationId ?? context.clientConversationId,
@@ -1152,7 +1599,12 @@ class JsonRpcTransport {
     }
     this.contextsByRequest.delete(context.requestId);
     this.activeRequests = Math.max(0, this.activeRequests - 1);
-    context.reject(error instanceof Error ? error : new TransportError(String(error)));
+    this.#logConcurrency(context, "released", -1);
+    const resolvedError = error instanceof Error ? error : new TransportError(String(error));
+    try {
+      context.emitter.emit("error", resolvedError);
+    } catch {}
+    context.reject(resolvedError);
   }
 
   #write(message) {
@@ -1280,6 +1732,12 @@ const TRANSPORT_ERROR_DETAILS = {
     message: "request aborted by client",
     retryable: false,
   },
+  tool_outputs_multi_thread: {
+    statusCode: 400,
+    type: "invalid_request_error",
+    message: "tool outputs span multiple threads",
+    retryable: false,
+  },
 };
 
 export function mapTransportError(err) {
@@ -1312,6 +1770,17 @@ export function mapTransportError(err) {
       statusCode: 401,
       body: authErrorBody({ details, code: codeOverride, message: messageOverride }),
     };
+  }
+  if (err.details?.raw_codex_error) {
+    const normalized = normalizeCodexError(err.details.raw_codex_error);
+    if (normalized) {
+      return { statusCode: normalized.statusCode, body: normalized.body };
+    }
+  }
+  const numericCode = Number.isFinite(Number(rawCode)) ? Number(rawCode) : null;
+  if (numericCode !== null && [-32700, -32600, -32602].includes(numericCode)) {
+    const normalized = normalizeCodexError({ code: numericCode, message: err.message });
+    return { statusCode: normalized.statusCode, body: normalized.body };
   }
   const hasMapping = Object.prototype.hasOwnProperty.call(TRANSPORT_ERROR_DETAILS, lookupKey);
   // eslint-disable-next-line security/detect-object-injection -- lookupKey guarded by hasOwnProperty

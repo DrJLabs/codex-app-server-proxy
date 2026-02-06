@@ -15,6 +15,22 @@
 - In app-server mode (`PROXY_USE_APP_SERVER=true`), `/v1/chat/completions` and `/v1/responses` are gated by worker readiness.
 - Check `/readyz` and `/healthz` for readiness reasons and supervisor state.
 
+## "internal tools disabled" / `internal_tools_disabled`
+
+If you see an error like `internal tools disabled` (or `code: "internal_tools_disabled"`), the Codex app-server attempted to invoke an internal tool (for example: WebSearch/fileChange/commandExecution) but the proxy blocked it.
+
+Common causes:
+
+- A client tool name collides with a Codex internal tool name (example: client `webSearch`). The proxy rewrites reserved names at `thread/start` (for example: `webSearch` -> `client_webSearch`) and maps back to the client name at the HTTP boundary.
+- The model does not see the expected dynamic tool registry (missing/empty tools on the thread), so it falls back to internal tools.
+- A follow-up tool-output request is treated as a new thread and loses the original tool manifest/instructions.
+
+Mitigations:
+
+- Keep `PROXY_DISABLE_INTERNAL_TOOLS_CONFIG=true` and `PROXY_DISABLE_INTERNAL_TOOLS_PROMPT=true`.
+- Ensure follow-up tool outputs include the original `call_id` and go to the same proxy instance.
+- In dev, enable raw capture (`PROXY_CAPTURE_APP_SERVER_RAW=true` and `PROXY_CAPTURE_RESPONSES_RAW_TRANSCRIPTS=true`) and inspect `test-results/app-server/raw/app-server-raw.ndjson` plus `test-results/responses-copilot/raw-unredacted/`.
+
 ## `/v1/responses` missing
 
 - `/v1/responses` is gated by `PROXY_ENABLE_RESPONSES` (default true).

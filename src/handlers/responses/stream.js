@@ -16,11 +16,11 @@ import { normalizeResponsesRequest, ResponsesJsonRpcNormalizationError } from ".
 import { ensureResponsesCapabilities } from "./native/capabilities.js";
 import { runNativeResponses } from "./native/execute.js";
 import { createJsonRpcChildAdapter } from "../../services/transport/child-adapter.js";
-import { mapTransportError } from "../../services/transport/index.js";
+import { getJsonRpcTransport, mapTransportError } from "../../services/transport/index.js";
 import { createResponsesStreamAdapter } from "./stream-adapter.js";
 import { createStreamMetadataSanitizer } from "../chat/stream-metadata-sanitizer.js";
 import { applyGuardHeaders, setupStreamGuard } from "../../services/concurrency-guard.js";
-import { logStructured } from "../../services/logging/schema.js";
+import { logStructured, sha256 } from "../../services/logging/schema.js";
 import {
   extractMetadataFromPayload,
   metadataKeys,
@@ -33,9 +33,13 @@ import {
   logSanitizerSummary,
   logSanitizerToggle,
 } from "../../dev-logging.js";
+import { appendThinkingRawCapture } from "../../dev-trace/raw-capture.js";
 import { applyCors as applyCorsUtil, normalizeModel } from "../../utils.js";
 import { acceptedModelIds } from "../../config/models.js";
 import { setSSEHeaders, computeKeepaliveMs, startKeepalives } from "../../services/sse.js";
+import { buildDynamicTools } from "../../lib/tools/dynamic-tools.js";
+import { RESPONSES_INTERNAL_TOOLS_INSTRUCTION } from "../../lib/prompts/internal-tools-instructions.js";
+import { TOOL_CHOICE_REQUIRED_INSTRUCTION } from "../../lib/prompts/tool-choice-required-instructions.js";
 
 const DEFAULT_MODEL = CFG.CODEX_MODEL;
 const ACCEPTED_MODEL_IDS = acceptedModelIds(DEFAULT_MODEL);
@@ -75,23 +79,194 @@ const normalizeChoiceCount = (raw) => {
 
 const applyCors = (req, res) => applyCorsUtil(req, res, CORS_ENABLED, CORS_ALLOWED);
 
-const buildToolsPayload = ({ definitions, toolChoice, parallelToolCalls }) => {
-  const payload = {};
-  if (definitions) payload.definitions = definitions;
-  if (toolChoice !== undefined) payload.choice = toolChoice;
-  if (parallelToolCalls !== undefined) payload.parallelToolCalls = parallelToolCalls;
-  return Object.keys(payload).length ? payload : undefined;
+const countDynamicTools = (dynamicTools) => (Array.isArray(dynamicTools) ? dynamicTools.length : 0);
+
+const normalizeToolChoiceMode = (toolChoice) => {
+  if (typeof toolChoice !== "string") return null;
+  return toolChoice.trim().toLowerCase();
 };
 
-const countToolDefinitions = (payload) => {
-  if (!payload || typeof payload !== "object") return 0;
-  const defs =
-    payload.definitions ||
-    payload.tools ||
-    payload.tool_definitions ||
-    payload.toolDefinitions ||
-    payload.functions;
-  return Array.isArray(defs) ? defs.length : 0;
+const appendInstructions = (...parts) =>
+  parts
+    .filter((part) => typeof part === "string" && part.trim())
+    .map((part) => part.trim())
+    .join("\n\n");
+
+const respondToToolOutputs = (child, toolOutputs, { reqId, route, mode } = {}) => {
+  const handledCallIds = new Set();
+  if (!Array.isArray(toolOutputs) || toolOutputs.length === 0) {
+    return { unmatched: [], handledCallIds };
+  }
+  if (!child) {
+    return { unmatched: toolOutputs, handledCallIds };
+  }
+  const transport = child.transport;
+  if (!transport || typeof transport.respondToToolCall !== "function") {
+    return { unmatched: toolOutputs, handledCallIds };
+  }
+  const unmatched = [];
+  toolOutputs.forEach((toolOutput) => {
+    const callId = toolOutput?.callId;
+    if (!callId) return;
+    const callIdKey = String(callId);
+    const outputValue = toolOutput?.output;
+    // toolOutput.output can be non-string (objects, arrays). Keep the raw value for respondToToolCall,
+    // but coerce to a stable string for hashing/logging to avoid sha256 exceptions.
+    let outputText = "";
+    if (typeof outputValue === "string") {
+      outputText = outputValue;
+    } else {
+      try {
+        outputText = JSON.stringify(outputValue);
+      } catch {
+        outputText = String(outputValue ?? "");
+      }
+    }
+    const outputBytes = Buffer.byteLength(outputText, "utf8");
+    logStructured(
+      {
+        component: "responses",
+        event: "tool_call_output",
+        level: "debug",
+        req_id: reqId,
+        route,
+        mode,
+      },
+      {
+        tool_call_id: callIdKey,
+        tool_name: toolOutput?.toolName ?? null,
+        tool_output_bytes: outputBytes,
+        tool_output_hash: sha256(outputText),
+      }
+    );
+    const ok = transport.respondToToolCall(callIdKey, {
+      output: toolOutput.output,
+      success: toolOutput.success,
+    });
+    if (!ok) {
+      logStructured(
+        {
+          component: "responses",
+          event: "responses_tool_output_unmatched",
+          level: "warn",
+          req_id: reqId,
+          route,
+          mode,
+        },
+        { call_id: callIdKey }
+      );
+      unmatched.push(toolOutput);
+      return;
+    }
+    handledCallIds.add(callIdKey);
+  });
+  return { unmatched, handledCallIds };
+};
+
+const stripToolOutputLines = (items, callIds) => {
+  if (!Array.isArray(items) || !callIds || callIds.size === 0) return;
+
+  const stripQuotes = (raw) => {
+    const value = typeof raw === "string" ? raw.trim() : "";
+    if (!value) return "";
+    if (value.startsWith('"')) {
+      try {
+        const parsed = JSON.parse(value);
+        return typeof parsed === "string" ? parsed : String(parsed ?? "");
+      } catch {}
+    }
+    if (value.startsWith('"') && value.endsWith('"') && value.length >= 2) {
+      return value.slice(1, -1);
+    }
+    return value;
+  };
+
+  const extractCallId = (line) => {
+    if (typeof line !== "string") return "";
+    const match = line.match(/^\[function_call_output\s+call_id=([^\s]+)\s+/);
+    if (!match) return "";
+    return stripQuotes(match[1]);
+  };
+
+  let changed = false;
+  const next = [];
+  items.forEach((item) => {
+    if (!item || typeof item !== "object") {
+      next.push(item);
+      return;
+    }
+    if (item.type !== "text") {
+      next.push(item);
+      return;
+    }
+    const data = item.data && typeof item.data === "object" ? item.data : null;
+    const text = typeof data?.text === "string" ? data.text : "";
+    if (!text) {
+      next.push(item);
+      return;
+    }
+
+    const lines = text.split("\n");
+    const filtered = lines.filter((line) => {
+      const callId = extractCallId(line);
+      if (!callId) return true;
+      return !callIds.has(callId);
+    });
+    if (filtered.length === lines.length) {
+      next.push(item);
+      return;
+    }
+    changed = true;
+    const nextText = filtered.join("\n");
+    if (!nextText) return;
+    next.push({ ...item, data: { ...data, text: nextText } });
+  });
+
+  if (!changed) return;
+  items.splice(0, items.length, ...next);
+};
+
+const formatShimToolOutputLine = (toolOutput) => {
+  const encodeValue = (value) => {
+    const raw =
+      typeof value === "string"
+        ? value
+        : (() => {
+            try {
+              return JSON.stringify(value ?? "");
+            } catch {
+              return String(value ?? "");
+            }
+          })();
+    return JSON.stringify(raw).replaceAll("[", "\\u005b").replaceAll("]", "\\u005d");
+  };
+
+  const callId = encodeValue(toolOutput?.callId ?? "");
+  const outputText = encodeValue(toolOutput?.output ?? "");
+  return `[function_call_output call_id=${callId} output=${outputText}]`;
+};
+
+const appendShimToolOutputs = (transport, toolOutputs, turn, message, logMeta) => {
+  if (!transport || typeof transport.consumeShimToolCall !== "function") return;
+  toolOutputs.forEach((toolOutput) => {
+    const shimEntry = transport.consumeShimToolCall(toolOutput?.callId);
+    if (!shimEntry) return;
+    const line = formatShimToolOutputLine(toolOutput);
+    const item = { type: "text", data: { text: line } };
+    turn.items.push(item);
+    if (message.items !== turn.items) message.items.push(item);
+    logStructured(
+      {
+        component: "responses",
+        event: "responses_tool_output_shimmed",
+        level: "info",
+        req_id: logMeta?.reqId,
+        route: logMeta?.route,
+        mode: logMeta?.mode,
+      },
+      { call_id: toolOutput?.callId, tool_name: shimEntry.toolName ?? null }
+    );
+  });
 };
 
 const buildPromptFromItems = (items) => {
@@ -224,15 +399,72 @@ export async function postResponsesStream(req, res) {
   );
 
   const { nativeTools, functionTools } = splitResponsesTools(normalized.tools);
-  const toolDefinitions = nativeTools.concat(functionTools);
+  if (nativeTools.length > 0) {
+    applyCors(req, res);
+    res
+      .status(400)
+      .json(
+        invalidRequestBody(
+          "tools",
+          "native tools are disabled; only function tools are supported",
+          "native_tools_disabled"
+        )
+      );
+    restoreOutputMode();
+    return;
+  }
   const capabilityCheck = await ensureResponsesCapabilities({
-    toolsRequested: nativeTools.length > 0 || functionTools.length > 0,
+    toolsRequested: functionTools.length > 0,
   });
   if (!capabilityCheck.ok) {
     applyCors(req, res);
     res.status(capabilityCheck.statusCode).json(capabilityCheck.body);
     restoreOutputMode();
     return;
+  }
+
+  const hasToolOutputs = Array.isArray(normalized.toolOutputs) && normalized.toolOutputs.length > 0;
+  let resolvedThread = null;
+  if (hasToolOutputs) {
+    try {
+      const transport = getJsonRpcTransport();
+      resolvedThread = transport.resolveThreadForToolOutputs(normalized.toolOutputs);
+    } catch (err) {
+      const mapped = mapTransportError(err);
+      applyCors(req, res);
+      if (mapped?.body?.error) {
+        res.status(mapped.statusCode || 500).json(mapped.body);
+      } else {
+        res.status(500).json({
+          error: { message: "internal error", type: "server_error", code: "transport_error" },
+        });
+      }
+      restoreOutputMode();
+      return;
+    }
+    if (!resolvedThread) {
+      const message = "tool outputs do not match any active tool call";
+      applyCors(req, res);
+      res.status(400).json(invalidRequestBody("input", message, "tool_outputs_unmatched"));
+      restoreOutputMode();
+      return;
+    }
+    if (resolvedThread?.hasUnmatched) {
+      logStructured(
+        {
+          component: "responses",
+          event: "tool_outputs_unmatched",
+          level: "warn",
+          req_id: reqId,
+          route,
+          mode,
+        },
+        {
+          thread_id: resolvedThread.threadId ?? null,
+          unmatched_count: resolvedThread.unmatchedCount ?? null,
+        }
+      );
+    }
   }
 
   const guardContext = setupStreamGuard({
@@ -263,12 +495,31 @@ export async function postResponsesStream(req, res) {
 
   const fallbackMax = Number(CFG.PROXY_RESPONSES_DEFAULT_MAX_TOKENS || 0);
   const maxOutputTokens = normalized.maxOutputTokens ?? (fallbackMax > 0 ? fallbackMax : undefined);
-  const toolsPayload = buildToolsPayload({
-    definitions: toolDefinitions.length ? toolDefinitions : undefined,
-    toolChoice: toolDefinitions.length ? normalized.toolChoice : undefined,
-    parallelToolCalls: toolDefinitions.length ? normalized.parallelToolCalls : undefined,
-  });
+  const dynamicTools = buildDynamicTools(functionTools, normalized.toolChoice);
   const includeUsage = Boolean(originalBody?.stream_options?.include_usage);
+
+  const developerInstructions = normalized.developerInstructions;
+  const baseInstructions = CFG.PROXY_DISABLE_INTERNAL_TOOLS_PROMPT
+    ? RESPONSES_INTERNAL_TOOLS_INSTRUCTION
+    : undefined;
+  const appServerConfig = CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG
+    ? {
+        features: {
+          web_search_request: false,
+          shell_tool: false,
+          shell_snapshot: false,
+          exec_policy: false,
+          streamable_shell: false,
+          unified_exec: false,
+          view_image_tool: false,
+          apply_patch_freeform: false,
+        },
+        tools: {
+          web_search: false,
+          view_image: false,
+        },
+      }
+    : undefined;
 
   const turn = {
     model: effectiveModel,
@@ -277,15 +528,20 @@ export async function postResponsesStream(req, res) {
     approvalPolicy: APPROVAL_POLICY,
     sandboxPolicy: SANDBOX_MODE ? { type: SANDBOX_MODE } : undefined,
     summary: "auto",
-    includeApplyPatchTool: true,
   };
   if (Number.isInteger(nValue) && nValue > 0) turn.choiceCount = nValue;
-  if (toolsPayload) turn.tools = toolsPayload;
-  if (normalized.developerInstructions) {
-    turn.developerInstructions = normalized.developerInstructions;
+  if (dynamicTools !== undefined) turn.dynamicTools = dynamicTools;
+  if (developerInstructions) {
+    turn.developerInstructions = developerInstructions;
   }
-  if (normalized.finalOutputJsonSchema !== undefined) {
-    turn.finalOutputJsonSchema = normalized.finalOutputJsonSchema;
+  if (appServerConfig) {
+    turn.config = appServerConfig;
+  }
+  if (baseInstructions) {
+    turn.baseInstructions = baseInstructions;
+  }
+  if (normalized.outputSchema !== undefined) {
+    turn.outputSchema = normalized.outputSchema;
   }
 
   const message = {
@@ -294,16 +550,65 @@ export async function postResponsesStream(req, res) {
     stream: true,
   };
   if (maxOutputTokens !== undefined) message.maxOutputTokens = maxOutputTokens;
-  if (toolsPayload) message.tools = toolsPayload;
   if (normalized.responseFormat !== undefined) message.responseFormat = normalized.responseFormat;
-  if (normalized.finalOutputJsonSchema !== undefined) {
-    message.finalOutputJsonSchema = normalized.finalOutputJsonSchema;
+  if (normalized.outputSchema !== undefined) {
+    message.outputSchema = normalized.outputSchema;
+  }
+  if (dynamicTools !== undefined) message.dynamicTools = dynamicTools;
+
+  if (resolvedThread?.threadId) {
+    turn.threadId = resolvedThread.threadId;
+    if (resolvedThread.toolset?.dynamicTools) {
+      turn.dynamicTools = resolvedThread.toolset.dynamicTools;
+      message.dynamicTools = resolvedThread.toolset.dynamicTools;
+    }
+    const persistedBaseInstructions = resolvedThread.toolset?.baseInstructions;
+    if (typeof persistedBaseInstructions === "string" && persistedBaseInstructions.trim()) {
+      turn.baseInstructions = persistedBaseInstructions;
+    }
+    const persistedDeveloperInstructions = resolvedThread.toolset?.developerInstructions;
+    if (persistedDeveloperInstructions !== null && persistedDeveloperInstructions !== undefined) {
+      if (
+        typeof persistedDeveloperInstructions !== "string" ||
+        persistedDeveloperInstructions.trim() !== ""
+      ) {
+        turn.developerInstructions = persistedDeveloperInstructions;
+      }
+    }
   }
 
-  const ingressToolCount = toolDefinitions.length;
-  const turnToolCount = countToolDefinitions(turn.tools);
-  const messageToolCount = countToolDefinitions(message.tools);
-  const toolsMismatch = ingressToolCount !== turnToolCount || ingressToolCount !== messageToolCount;
+  const requestTools = resolvedThread?.toolset?.requestTools ?? normalized.tools;
+  if (requestTools !== undefined) {
+    // Persist the original OpenAI tools manifest so tool-output follow-ups can reuse it.
+    turn.tools = requestTools;
+  }
+
+  const toolChoiceMode = normalizeToolChoiceMode(normalized.toolChoice);
+  if (toolChoiceMode === "required") {
+    if (!functionTools.length) {
+      res
+        .status(400)
+        .json(
+          invalidRequestBody(
+            "tool_choice",
+            "tool_choice=required requires tools definitions",
+            "tool_choice_requires_tools"
+          )
+        );
+      restoreOutputMode();
+      releaseGuard("error");
+      return;
+    }
+    turn.baseInstructions = appendInstructions(
+      turn.baseInstructions,
+      TOOL_CHOICE_REQUIRED_INSTRUCTION
+    );
+  }
+
+  const ingressToolCount = functionTools.length;
+  const turnToolCount = countDynamicTools(turn.dynamicTools);
+  const messageToolCount = countDynamicTools(message.dynamicTools);
+  const toolsMismatch = ingressToolCount !== turnToolCount;
   logStructured(
     {
       component: "responses",
@@ -326,17 +631,53 @@ export async function postResponsesStream(req, res) {
     reqId,
     timeoutMs: REQ_TIMEOUT_MS,
     normalizedRequest,
-    trace: { reqId, route, mode },
+    trace: {
+      reqId,
+      route,
+      mode,
+      trace_id: locals.trace_id || null,
+      copilot_trace_id: locals.copilot_trace_id || null,
+    },
   });
+  const { unmatched: unmatchedToolOutputs, handledCallIds } = respondToToolOutputs(
+    child,
+    normalized.toolOutputs,
+    {
+      reqId,
+      route,
+      mode,
+    }
+  );
+  const stripCallIds = new Set(handledCallIds);
+  const transport = child?.transport;
+  if (transport?.hasShimToolCall && unmatchedToolOutputs.length) {
+    unmatchedToolOutputs.forEach((toolOutput) => {
+      const callId = toolOutput?.callId;
+      if (!callId) return;
+      if (transport.hasShimToolCall(callId)) {
+        stripCallIds.add(String(callId));
+      }
+    });
+  }
+  stripToolOutputLines(turn.items, stripCallIds);
+  stripToolOutputLines(message.items, stripCallIds);
+  if (unmatchedToolOutputs.length) {
+    appendShimToolOutputs(child?.transport, unmatchedToolOutputs, turn, message, {
+      reqId,
+      route,
+      mode,
+    });
+  }
 
   let responded = false;
   let usage = null;
   let idleTimer = null;
   let keepalive = null;
 
+  const effectiveTools = requestTools ?? normalized.tools ?? originalBody.tools;
   const adapterBody = {
     ...originalBody,
-    tools: normalized.tools ?? originalBody.tools,
+    tools: effectiveTools,
     tool_choice: normalized.toolChoice ?? originalBody.tool_choice,
     toolChoice: normalized.toolChoice ?? originalBody.toolChoice,
   };
@@ -424,12 +765,51 @@ export async function postResponsesStream(req, res) {
     getSummaryData: getSanitizerSummaryData,
   } = metadataSanitizer;
 
+  let toolNameMapCache = undefined;
+  const resolveToolNameMap = () => {
+    if (toolNameMapCache !== undefined) return toolNameMapCache;
+    const map = child?.transport?.getClientToolNameMap?.(reqId) ?? null;
+    toolNameMapCache = map && typeof map.get === "function" ? map : null;
+    return toolNameMapCache;
+  };
+
+  const mapToolCallsToClient = (toolCalls) => {
+    const map = resolveToolNameMap();
+    if (!map || !Array.isArray(toolCalls) || toolCalls.length === 0) return toolCalls;
+    return toolCalls.map((call) => {
+      const fn = call?.function;
+      const name = typeof fn?.name === "string" ? fn.name : null;
+      if (!name) return call;
+      const mappedName = map.get(name);
+      if (!mappedName || mappedName === name) return call;
+      return { ...call, function: { ...fn, name: mappedName } };
+    });
+  };
+
+  const mapFunctionCallToClient = (functionCall) => {
+    const map = resolveToolNameMap();
+    if (!map || !functionCall || typeof functionCall !== "object") return functionCall;
+    const name = typeof functionCall.name === "string" ? functionCall.name : null;
+    if (!name) return functionCall;
+    const mappedName = map.get(name);
+    if (!mappedName || mappedName === name) return functionCall;
+    return { ...functionCall, name: mappedName };
+  };
+
   const handleEvent = (event) => {
     if (!event || typeof event !== "object") return;
     resetIdle();
     const choiceIndex = Number.isInteger(event.choiceIndex) ? event.choiceIndex : 0;
     if (event.type === "text_delta") {
       const delta = event.delta;
+      appendThinkingRawCapture({
+        req_id: reqId,
+        trace_id: res.locals?.trace_id || null,
+        copilot_trace_id: res.locals?.copilot_trace_id || null,
+        event_type: "text_delta",
+        delta,
+        metadata_info: event.metadataInfo ?? null,
+      });
       if (SANITIZE_METADATA) {
         enqueueSanitizedSegment(
           delta,
@@ -444,6 +824,14 @@ export async function postResponsesStream(req, res) {
     }
     if (event.type === "text") {
       const text = event.text;
+      appendThinkingRawCapture({
+        req_id: reqId,
+        trace_id: res.locals?.trace_id || null,
+        copilot_trace_id: res.locals?.copilot_trace_id || null,
+        event_type: "text",
+        delta: text,
+        metadata_info: event.metadataInfo ?? null,
+      });
       if (SANITIZE_METADATA) {
         enqueueSanitizedSegment(
           text,
@@ -465,6 +853,39 @@ export async function postResponsesStream(req, res) {
     if (event.type === "finish" && SANITIZE_METADATA) {
       flushSanitizedSegments({ stage: "finish", eventType: "finish" });
     }
+    if (event.type === "dynamic_tool_call") {
+      const mappedToolCalls = mapToolCallsToClient(event.toolCallDelta?.tool_calls);
+      const mappedDelta =
+        mappedToolCalls === event.toolCallDelta?.tool_calls
+          ? event.toolCallDelta
+          : { ...event.toolCallDelta, tool_calls: mappedToolCalls };
+      const payload = event.messagePayload || event.payload?.msg || event.payload;
+      const tool = typeof payload?.tool === "string" ? payload.tool : null;
+      const toolMap = resolveToolNameMap();
+      const mappedTool = tool && toolMap ? (toolMap.get(tool) ?? tool) : tool;
+      const mappedPayload =
+        mappedTool && mappedTool !== tool ? { ...payload, tool: mappedTool } : payload;
+      streamAdapter.handleEvent({
+        ...event,
+        toolCallDelta: mappedDelta,
+        messagePayload: mappedPayload,
+      });
+      return;
+    }
+    if (event.type === "tool_calls_delta" || event.type === "tool_calls") {
+      const mapped = mapToolCallsToClient(event.tool_calls);
+      streamAdapter.handleEvent(
+        mapped === event.tool_calls ? event : { ...event, tool_calls: mapped }
+      );
+      return;
+    }
+    if (event.type === "function_call_delta" || event.type === "function_call") {
+      const mapped = mapFunctionCallToClient(event.function_call);
+      streamAdapter.handleEvent(
+        mapped === event.function_call ? event : { ...event, function_call: mapped }
+      );
+      return;
+    }
     streamAdapter.handleEvent(event);
   };
 
@@ -479,11 +900,7 @@ export async function postResponsesStream(req, res) {
 
   try {
     const prompt = buildPromptFromItems(normalized.inputItems);
-    const submission = {
-      id: reqId,
-      op: { type: "user_input", items: [{ type: "text", text: prompt }] },
-    };
-    child.stdin.write(JSON.stringify(submission) + "\n");
+    child.stdin.write(JSON.stringify({ prompt }) + "\n");
   } catch (error) {
     logStructured(
       {
@@ -498,6 +915,9 @@ export async function postResponsesStream(req, res) {
         message: error?.message,
       }
     );
+    clearTimeout(requestTimeout);
+    respondStreamFailure({ message: "failed to submit prompt", code: "submit_failed" });
+    return;
   }
 
   try {
@@ -507,6 +927,7 @@ export async function postResponsesStream(req, res) {
         onEvent: handleEvent,
         sanitizeMetadata: SANITIZE_METADATA,
         extractMetadataFromPayload,
+        dynamicToolCallMode: "atomic",
       }),
       new Promise((_resolve, reject) => child.once("error", reject)),
     ]);

@@ -47,9 +47,10 @@ describe("fake-codex jsonrpc stdout flush", () => {
         JSON.stringify({
           jsonrpc: "2.0",
           id: 1,
-          method: "sendUserMessage",
+          method: "turn/start",
           params: {
-            message: { role: "user", content: "Hello" },
+            threadId: "thread-1",
+            input: [{ type: "text", text: "Hello", text_elements: [] }],
           },
         }),
       ],

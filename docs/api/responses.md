@@ -66,6 +66,34 @@ Follow-up requests should send tool results as `function_call_output` items:
 
 Clients that echo `function_call` items back in `input` are accepted.
 
+## Tool outputs and thread continuity
+
+When a client submits `function_call_output` items, the proxy resolves the originating app-server thread and reuses its canonical tool manifest and instructions.
+
+- If **none** of the tool outputs map to an active tool call, the request is rejected with `tool_outputs_unmatched`.
+- If some outputs match and others do not, the request is accepted. Unmatched outputs are left in the next turn transcript and the proxy logs `tool_outputs_unmatched` with a count.
+
+## Tool name rewriting (internal collision avoidance)
+
+Before starting a new app-server thread, the proxy rewrites function-tool names that collide with Codex internal tool namespaces. For example, a client tool named `webSearch` is declared to the app-server as `client_webSearch`, but tool calls in `/v1/responses` are mapped back to `webSearch` for the client.
+
+Raw app-server traces will show the rewritten names.
+
+## Native tools
+
+This proxy only supports `function` tools on `/v1/responses`. Non-function tool types (for example: `web_search`) are rejected with `native_tools_disabled`.
+
+## Internal tool shim (optional)
+
+When `PROXY_DISABLE_INTERNAL_TOOLS_CONFIG=true`, internal app-server tool notifications are blocked. If `PROXY_ENABLE_INTERNAL_TOOLS_SHIM=true`, the proxy can translate some internal tool events into dynamic tool calls:
+
+- Internal `webSearch` events -> dynamic tool `webSearch` (ensures `chatHistory: []`).
+- Internal `fileChange` events -> dynamic tool `writeToFile` or `replaceInFile` (based on presence of `diff`).
+
+When the shim recognizes a tool output for a shimmed internal tool call, the proxy appends a `[function_call_output ...]` text line to the next turn so the model can continue.
+
+This shim requires the client tool names above to exist; other internal tool types (for example: `commandExecution`) still fail when internal tools are disabled.
+
 ## Streaming (typed SSE)
 
 When `stream:true`, the proxy emits typed SSE events such as:

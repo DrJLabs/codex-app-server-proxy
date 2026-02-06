@@ -472,8 +472,8 @@
           "content": "<redacted>"
         }
       ],
-      "tool_choice": "<redacted>",
-      "toolChoice": "<redacted>"
+      "tool_choice": "auto",
+      "toolChoice": "auto"
     }
   },
   "stream": [
@@ -497,7 +497,7 @@
       "data": {
         "type": "response.output_item.added",
         "response_id": "<response-id>",
-        "output_index": 0,
+        "output_index": 1,
         "item": {
           "id": "<id>",
           "call_id": "<redacted>",
@@ -515,7 +515,7 @@
       "data": {
         "type": "response.function_call_arguments.delta",
         "response_id": "<response-id>",
-        "output_index": 0,
+        "output_index": 1,
         "item_id": "<item-id>",
         "delta": "<redacted>",
         "sequence_number": 3
@@ -528,7 +528,7 @@
       "data": {
         "type": "response.function_call_arguments.done",
         "response_id": "<response-id>",
-        "output_index": 0,
+        "output_index": 1,
         "item_id": "<item-id>",
         "arguments": "<redacted>",
         "sequence_number": 4
@@ -541,7 +541,7 @@
       "data": {
         "type": "response.output_item.done",
         "response_id": "<response-id>",
-        "output_index": 0,
+        "output_index": 1,
         "item": {
           "id": "<id>",
           "call_id": "<redacted>",
@@ -559,6 +559,7 @@
       "ts": 1769404911737,
       "data": {
         "type": "response.output_text.done",
+        "output_index": 0,
         "sequence_number": 6
       }
     },

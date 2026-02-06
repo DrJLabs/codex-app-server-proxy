@@ -18,6 +18,12 @@ This folder is the canonical index for repository documentation. Update this fil
 - [`api/chat-completions.md`](api/chat-completions.md) — `/v1/chat/completions` usage notes
 - [`troubleshooting.md`](troubleshooting.md) — common errors and fixes
 
+## Defaults (important)
+
+- Internal Codex tools (`shell`, `apply_patch`, etc.) are disabled by default and only client-provided dynamic tool calls are allowed.
+- Tool registries are thread-scoped in Codex; the proxy forwards request `tools[]` at `thread/start` and reuses the thread's canonical toolset/instructions when clients send `function_call_output` items.
+- See `configuration.md` for `PROXY_DISABLE_INTERNAL_TOOLS`, `PROXY_DISABLE_INTERNAL_TOOLS_CONFIG`, `PROXY_DISABLE_INTERNAL_TOOLS_PROMPT`, and `PROXY_ENABLE_INTERNAL_TOOLS_SHIM`.
+
 ## Deployment and ops
 
 - [`deployment/dev-stack.md`](deployment/dev-stack.md) — dev stack (`infra/compose/compose.dev.stack.yml`)
@@ -34,18 +40,24 @@ This folder is the canonical index for repository documentation. Update this fil
 - [`openai-endpoint-golden-parity.md`](openai-endpoint-golden-parity.md) — golden transcript contract for `/v1/chat/completions` and `/v1/responses`
 - [`responses-endpoint/overview.md`](responses-endpoint/overview.md) — `/v1/responses` implementation notes
 - [`responses-endpoint/app-server-tools.md`](responses-endpoint/app-server-tools.md) — tool manifest limitations and MCP integration notes
-- [`responses-endpoint/obsidian-tool-call-simulation.md`](responses-endpoint/obsidian-tool-call-simulation.md) — OpenAI-parity tool-call simulation plan
 - [`responses-endpoint/prompt-injection.md`](responses-endpoint/prompt-injection.md) — `/v1/responses` tool-call prompt injection matrix
+- [`reference/obsidian-tool-manifest.md`](reference/obsidian-tool-manifest.md) — Obsidian Copilot tool manifest capture
+- [`reference/obsidian-developer-prompt-5-tools.md`](reference/obsidian-developer-prompt-5-tools.md) — Obsidian Copilot developer prompt capture (short tools)
+- [`reference/obsidian-developer-prompt-13-tools.md`](reference/obsidian-developer-prompt-13-tools.md) — Obsidian Copilot developer prompt capture (full tools)
 - [`reference/app-server-protocol.schema.json`](reference/app-server-protocol.schema.json) — JSON-RPC schema bundle (Codex app-server)
 - [`reference/app-server-schema-0.89-tools.md`](reference/app-server-schema-0.89-tools.md) — schema extract for tool support (Codex 0.89.0)
 
 ## Deep dives and backlogs
 
 - [`logging-gaps/README.md`](logging-gaps/README.md) — observability gap tracker
+- [`api-v2-migration/client-to-app-server.md`](api-v2-migration/client-to-app-server.md) — `/v1/responses` openai-json ingress -> JSON-RPC handoff trace
+- [`api-v2-migration/app-server-to-client.md`](api-v2-migration/app-server-to-client.md) — app-server tool request/output -> client response reverse trace
 
 ## Plans (working drafts)
 
 - [`plans/2026-01-25-obsidian-tool-call-simulation-v2.md`](plans/2026-01-25-obsidian-tool-call-simulation-v2.md) — Responses tool-call simulation v2 implementation plan
+- [`plans/2026-01-29-logging-gaps-full-tracing-design.md`](plans/2026-01-29-logging-gaps-full-tracing-design.md) — Dev-only raw capture design for `/v1/responses`
+- [`plans/2026-01-29-logging-gaps-full-tracing-plan.md`](plans/2026-01-29-logging-gaps-full-tracing-plan.md) — Implementation plan for full tracing gaps
 
 ## Internal docs (not published)
 

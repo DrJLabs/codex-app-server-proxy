@@ -10,11 +10,8 @@ import {
   CODEX_CLI_VERSION,
   JSONRPC_VERSION,
   buildInitializeParams,
-  buildNewConversationParams,
-  buildAddConversationListenerParams,
-  buildRemoveConversationListenerParams,
-  buildSendUserMessageParams,
-  buildSendUserTurnParams,
+  buildThreadStartParams,
+  buildTurnStartParams,
   createUserMessageItem,
   extractConversationId,
   extractRequestId,
@@ -24,14 +21,11 @@ import {
   isJsonRpcErrorResponse,
   isJsonRpcNotification,
   isJsonRpcSuccessResponse,
-  isSendUserMessageResult,
-  isSendUserTurnResult,
   isTokenCountNotification,
   type AgentMessageDeltaNotification,
   type AgentMessageNotification,
   type TokenCountNotification,
   type JsonRpcSuccessResponse,
-  type SendUserMessageResult,
 } from "../../src/lib/json-rpc/schema.ts";
 import { ensureTranscripts, loadTranscript } from "../shared/transcript-utils.js";
 
@@ -170,8 +164,8 @@ describe("json-rpc schema bindings", () => {
     ensureTranscripts(["streaming-tool-calls.json"], { backend: "app" });
   }, 30000);
 
-  it("pins the schema to Codex CLI 0.89.0", () => {
-    expect(CODEX_CLI_VERSION).toBe("0.89.0");
+  it("pins the schema to Codex CLI 0.92.0", () => {
+    expect(CODEX_CLI_VERSION).toBe("0.92.0");
   });
 
   it("parses streaming text notifications and token counts", async () => {
@@ -183,61 +177,60 @@ describe("json-rpc schema bindings", () => {
         jsonrpc: JSONRPC_VERSION,
         id: 1,
         method: "initialize",
-        params: { client_info: { name: "unit-test", version: "1.0.0" } },
+        params: { clientInfo: { name: "unit-test", version: "1.0.0" }, protocolVersion: "v2" },
       });
       expect(isInitializeResult(initResp.result)).toBe(true);
 
-      const turnResp = await sendAndExpectResult(worker.child, worker.reader, {
+      const threadResp = await sendAndExpectResult(worker.child, worker.reader, {
         jsonrpc: JSONRPC_VERSION,
         id: 2,
-        method: "sendUserTurn",
-        params: { conversation_id: "conv-text" },
+        method: "thread/start",
+        params: { model: "gpt-5.2" },
       });
-      expect(isSendUserTurnResult(turnResp.result)).toBe(true);
-      const conversationId =
-        turnResp.result?.conversation_id ||
-        (turnResp.result as Record<string, unknown>).conversationId;
-      expect(typeof conversationId === "string").toBe(true);
+      const threadId =
+        threadResp.result?.threadId || (threadResp.result as Record<string, unknown>).thread_id;
+      expect(typeof threadId === "string").toBe(true);
 
       const requestId = "req-text";
-      const sendMessageRequest = {
+      const turnRequest = {
         jsonrpc: JSONRPC_VERSION,
         id: 3,
-        method: "sendUserMessage",
+        method: "turn/start",
         params: {
-          conversation_id: conversationId,
-          request_id: requestId,
-          text: "User says hello",
-          metadata: { include_usage: true },
+          threadId,
+          input: [{ type: "text", text: "User says hello", text_elements: [] }],
+          approvalPolicy: "never",
+          summary: "auto",
         },
       } as const;
 
-      worker.child.stdin.write(`${JSON.stringify(sendMessageRequest)}\n`);
+      worker.child.stdin.write(`${JSON.stringify(turnRequest)}\n`);
 
       const notifications: Record<string, unknown>[] = [];
-      let messageResponse: JsonRpcSuccessResponse<SendUserMessageResult> | null = null;
-      while (!messageResponse) {
+      let turnResponse: JsonRpcSuccessResponse<Record<string, unknown>> | null = null;
+      while (!turnResponse) {
         const payload = await nextLineAsJson(worker.reader);
         if (payload.method) {
           notifications.push(payload);
           continue;
         }
-        if (payload.id === sendMessageRequest.id) {
-          expect(isJsonRpcSuccessResponse<SendUserMessageResult>(payload)).toBe(true);
-          messageResponse = payload as JsonRpcSuccessResponse<SendUserMessageResult>;
+        if (payload.id === turnRequest.id) {
+          expect(isJsonRpcSuccessResponse<Record<string, unknown>>(payload)).toBe(true);
+          turnResponse = payload as JsonRpcSuccessResponse<Record<string, unknown>>;
           break;
         }
       }
 
-      expect(messageResponse).not.toBeNull();
-      expect(isSendUserMessageResult(messageResponse?.result)).toBe(true);
+      expect(turnResponse).not.toBeNull();
 
       const delta = notifications.find(isAgentMessageDeltaNotification);
       expect(delta).toBeDefined();
       if (delta) {
         const params = (delta as AgentMessageDeltaNotification).params;
-        expect(extractConversationId(params)).toBe(conversationId);
-        expect(extractRequestId(params)).toBe(requestId);
+        expect(extractConversationId(params)).toBe(threadId);
+        if (extractRequestId(params)) {
+          expect(extractRequestId(params)).toBe(requestId);
+        }
       }
 
       const agentMessage = notifications.find(isAgentMessageNotification);
@@ -278,45 +271,46 @@ describe("json-rpc schema bindings", () => {
         jsonrpc: JSONRPC_VERSION,
         id: 11,
         method: "initialize",
-        params: { client_info: { name: "unit-test", version: CODEX_CLI_VERSION } },
+        params: {
+          clientInfo: { name: "unit-test", version: CODEX_CLI_VERSION },
+          protocolVersion: "v2",
+        },
       });
 
-      const turnResp = await sendAndExpectResult(worker.child, worker.reader, {
+      const threadResp = await sendAndExpectResult(worker.child, worker.reader, {
         jsonrpc: JSONRPC_VERSION,
         id: 12,
-        method: "sendUserTurn",
-        params: {},
+        method: "thread/start",
+        params: { model: "gpt-5.2" },
       });
-      const conversationId =
-        turnResp.result?.conversation_id ||
-        (turnResp.result as Record<string, unknown>).conversationId;
+      const threadId =
+        threadResp.result?.threadId || (threadResp.result as Record<string, unknown>).thread_id;
 
-      const requestId = "req-tool";
-      const sendMessageRequest = {
+      const turnRequest = {
         jsonrpc: JSONRPC_VERSION,
         id: 13,
-        method: "sendUserMessage",
+        method: "turn/start",
         params: {
-          conversation_id: conversationId,
-          request_id: requestId,
-          text: "Execute tool",
-          metadata: { include_usage: true },
+          threadId,
+          input: [{ type: "text", text: "Execute tool", text_elements: [] }],
+          approvalPolicy: "never",
+          summary: "auto",
         },
       } as const;
 
-      worker.child.stdin.write(`${JSON.stringify(sendMessageRequest)}\n`);
+      worker.child.stdin.write(`${JSON.stringify(turnRequest)}\n`);
 
       const notifications: Record<string, unknown>[] = [];
-      let messageResponse: JsonRpcSuccessResponse<SendUserMessageResult> | null = null;
-      while (!messageResponse) {
+      let turnResponse: JsonRpcSuccessResponse<Record<string, unknown>> | null = null;
+      while (!turnResponse) {
         const payload = await nextLineAsJson(worker.reader);
         if (payload.method) {
           notifications.push(payload);
           continue;
         }
-        if (payload.id === sendMessageRequest.id) {
-          expect(isJsonRpcSuccessResponse<SendUserMessageResult>(payload)).toBe(true);
-          messageResponse = payload as JsonRpcSuccessResponse<SendUserMessageResult>;
+        if (payload.id === turnRequest.id) {
+          expect(isJsonRpcSuccessResponse<Record<string, unknown>>(payload)).toBe(true);
+          turnResponse = payload as JsonRpcSuccessResponse<Record<string, unknown>>;
         }
       }
 
@@ -343,11 +337,6 @@ describe("json-rpc schema bindings", () => {
 
       const tokenCount = notifications.find(isTokenCountNotification);
       expect(tokenCount).toBeDefined();
-
-      expect(isSendUserMessageResult(messageResponse?.result)).toBe(true);
-      if (messageResponse?.result?.finish_reason) {
-        expect(typeof messageResponse.result.finish_reason).toBe("string");
-      }
     } finally {
       worker.reader.close();
       worker.stderr?.close();
@@ -357,7 +346,7 @@ describe("json-rpc schema bindings", () => {
 
   it("deserializes parity fixture streams into notification envelopes", async () => {
     const fixture = await loadTranscript("streaming-tool-calls.json", { backend: "app" });
-    const conversationId = "fixture-conv";
+    const threadId = "fixture-conv";
     const requestId = "fixture-req";
 
     const notifications: Record<string, unknown>[] = [];
@@ -376,7 +365,7 @@ describe("json-rpc schema bindings", () => {
           jsonrpc: JSONRPC_VERSION,
           method: "agentMessageDelta",
           params: {
-            conversation_id: conversationId,
+            threadId,
             request_id: requestId,
             delta,
           },
@@ -399,7 +388,7 @@ describe("json-rpc schema bindings", () => {
           jsonrpc: JSONRPC_VERSION,
           method: "tokenCount",
           params: {
-            conversation_id: conversationId,
+            threadId,
             request_id: requestId,
             prompt_tokens: entry.data.usage.prompt_tokens,
             completion_tokens: entry.data.usage.completion_tokens,
@@ -414,7 +403,7 @@ describe("json-rpc schema bindings", () => {
       jsonrpc: JSONRPC_VERSION,
       method: "agentMessage",
       params: {
-        conversation_id: conversationId,
+        threadId,
         request_id: requestId,
         message: {
           role: "assistant",
@@ -432,16 +421,16 @@ describe("json-rpc schema bindings", () => {
   });
 
   describe("serializer helpers", () => {
-    it("builds initialize params with camelCase mirrors", () => {
+    it("builds initialize params with camelCase fields", () => {
       const params = buildInitializeParams({ clientInfo: { name: "tester", version: "1.2.3" } });
       expect(params.clientInfo).toMatchObject({ name: "tester", version: "1.2.3" });
-      expect(params.client_info).toMatchObject({ name: "tester", version: "1.2.3" });
+      expect(params).not.toHaveProperty("client_info");
       expect(params.protocolVersion).toBeUndefined();
-      expect(params.protocol_version).toBeUndefined();
+      expect(params).not.toHaveProperty("protocol_version");
     });
 
-    it("builds newConversation params with normalized optional fields", () => {
-      const params = buildNewConversationParams({
+    it("builds thread/start params with normalized optional fields", () => {
+      const params = buildThreadStartParams({
         model: " gpt-5.2 ",
         profile: "",
         cwd: "/tmp/codex-work",
@@ -449,7 +438,6 @@ describe("json-rpc schema bindings", () => {
         sandbox: { type: "workspace-write", writable_roots: ["/tmp"] },
         baseInstructions: "  base ",
         developerInstructions: null,
-        includeApplyPatchTool: true,
       });
       expect(params.model).toBe("gpt-5.2");
       expect(params.profile).toBeNull();
@@ -458,147 +446,82 @@ describe("json-rpc schema bindings", () => {
       expect(params.sandbox).toBe("workspace-write");
       expect(params.baseInstructions).toBe("base");
       expect(params.developerInstructions).toBeNull();
-      expect(params.includeApplyPatchTool).toBe(true);
     });
 
-    it("builds sendUserTurn params with normalized values", () => {
+    it("passes through config and dynamicTools in thread/start params", () => {
+      const config = { featureFlags: { experimental: true } };
+      const dynamicTools = [{ name: "lookup", description: "", inputSchema: { type: "object" } }];
+      const params = buildThreadStartParams({
+        config,
+        dynamicTools,
+      });
+      expect(params.config).toEqual(config);
+      expect(params.dynamicTools).toEqual(dynamicTools);
+      expect(params).not.toHaveProperty("compactPrompt");
+      expect(params).not.toHaveProperty("dynamic_tools");
+    });
+
+    it("drops invalid sandbox types in thread/start params", () => {
+      const params = buildThreadStartParams({
+        // @ts-expect-error test runtime validation
+        sandbox: true,
+      });
+      expect(params.sandbox).toBeUndefined();
+    });
+
+    it("normalizes legacy sandbox policy objects in thread/start params", () => {
+      const params = buildThreadStartParams({
+        // @ts-expect-error test legacy object shape support
+        sandbox: { type: "read-only" },
+      });
+      expect(params.sandbox).toBe("read-only");
+    });
+
+    it("builds turn/start params with normalized values", () => {
       const item = createUserMessageItem("hello", { message_count: 1, messageCount: 1 });
-      const params = buildSendUserTurnParams({
+      const params = buildTurnStartParams({
         items: [item],
-        conversationId: "conv-1",
-        cwd: "/tmp/work",
+        threadId: "conv-1",
         approvalPolicy: "NEVER",
         sandboxPolicy: { type: "workspace-write", writable_roots: ["/tmp"] },
-        model: "gpt-5.2",
         summary: "concise",
         effort: "high",
       });
-      expect(params.conversationId).toBe("conv-1");
-      expect(params.cwd).toBe("/tmp/work");
+      expect(params.threadId).toBe("conv-1");
       expect(params.approvalPolicy).toBe("never");
       expect(params.sandboxPolicy).toMatchObject({
-        type: "workspace-write",
-        writable_roots: ["/tmp"],
+        type: "workspaceWrite",
+        writableRoots: ["/tmp"],
       });
       expect(params.summary).toBe("concise");
       expect(params.effort).toBe("high");
-      expect(params.items).toHaveLength(1);
-      expect(params.items[0]).not.toBe(item);
+      expect(params.input).toHaveLength(1);
     });
 
-    it("normalizes output schema options for sendUserTurn params", () => {
+    it("normalizes output schema options for turn/start params", () => {
       const item = createUserMessageItem("hello");
       const outputSchema = { type: "object", properties: { title: { type: "string" } } };
-      const snakeSchema = { type: "array" };
-      const legacySchema = { type: "string" };
-      const params = buildSendUserTurnParams({
+      const params = buildTurnStartParams({
         items: [item],
-        conversationId: "conv-schema",
+        threadId: "conv-schema",
         outputSchema,
-        output_schema: snakeSchema,
-        finalOutputJsonSchema: legacySchema,
       });
 
       expect(params.outputSchema).toEqual(outputSchema);
-      expect(params.output_schema).toEqual(outputSchema);
-
-      const paramsSnake = buildSendUserTurnParams({
-        items: [item],
-        conversationId: "conv-schema-snake",
-        output_schema: snakeSchema,
-      });
-
-      expect(paramsSnake.outputSchema).toEqual(snakeSchema);
-      expect(paramsSnake.output_schema).toEqual(snakeSchema);
-
-      const paramsLegacy = buildSendUserTurnParams({
-        items: [item],
-        conversationId: "conv-schema-legacy",
-        finalOutputJsonSchema: legacySchema,
-      });
-
-      expect(paramsLegacy.outputSchema).toEqual(legacySchema);
-      expect(paramsLegacy.output_schema).toEqual(legacySchema);
     });
 
     it("normalizes legacy item shapes to typed input items", () => {
-      const params = buildSendUserTurnParams({
+      const params = buildTurnStartParams({
         items: ["hi", { text: "hello" }, { data: { text: "hey" } }],
-        conversationId: "conv-legacy",
-        cwd: "/tmp/work",
+        threadId: "conv-legacy",
         approvalPolicy: "never",
         sandboxPolicy: "read-only",
-        model: "gpt-5.2",
         summary: "auto",
       });
-      expect(params.items).toHaveLength(3);
-      expect(params.items[0]).toMatchObject({ type: "text", data: { text: "hi" } });
-      expect(params.items[1]).toMatchObject({ type: "text", data: { text: "hello" } });
-      expect(params.items[2]).toMatchObject({ type: "text", data: { text: "hey" } });
-    });
-
-    it("builds sendUserMessage params with normalized items and options", () => {
-      const item = createUserMessageItem("payload");
-      const params = buildSendUserMessageParams({
-        items: [item],
-        conversationId: "conv-9",
-        includeUsage: true,
-        metadata: { trace: true },
-        stream: true,
-        temperature: 0.75,
-        topP: 0.5,
-        maxOutputTokens: 256,
-        tools: { definitions: [{ type: "function", function: { name: "noop" } }] },
-        responseFormat: { type: "json_schema" },
-        reasoning: { effort: "low" },
-        finalOutputJsonSchema: { type: "object" },
-      });
-      expect(params.conversationId).toBe("conv-9");
-      expect(params.items).toHaveLength(1);
-      expect(params.items[0]).not.toBe(item);
-      expect(params.includeUsage).toBe(true);
-      expect(params.include_usage).toBe(true);
-      expect(params.metadata).toEqual({ trace: true });
-      expect(params.stream).toBe(true);
-      expect(params.temperature).toBe(0.75);
-      expect(params.topP).toBe(0.5);
-      expect(params.top_p).toBe(0.5);
-      expect(params.maxOutputTokens).toBe(256);
-      expect(params.max_output_tokens).toBe(256);
-      expect(params.tools).toEqual({
-        definitions: [{ type: "function", function: { name: "noop" } }],
-      });
-      expect(params.responseFormat).toEqual({ type: "json_schema" });
-      expect(params.response_format).toEqual({ type: "json_schema" });
-      expect(params.reasoning).toEqual({ effort: "low" });
-      expect(params.finalOutputJsonSchema).toEqual({ type: "object" });
-      expect(params.final_output_json_schema).toEqual({ type: "object" });
-    });
-
-    it("normalizes legacy item shapes for sendUserMessage params", () => {
-      const params = buildSendUserMessageParams({
-        items: ["hi", { text: "hello" }, { data: { text: "hey" } }],
-        conversationId: "conv-legacy",
-        includeUsage: true,
-      });
-      expect(params.items).toHaveLength(3);
-      expect(params.items[0]).toMatchObject({ type: "text", data: { text: "hi" } });
-      expect(params.items[1]).toMatchObject({ type: "text", data: { text: "hello" } });
-      expect(params.items[2]).toMatchObject({ type: "text", data: { text: "hey" } });
-    });
-
-    it("builds add/remove conversation listener params", () => {
-      const addParams = buildAddConversationListenerParams({
-        conversationId: "conv-abc",
-        experimentalRawEvents: undefined,
-      });
-      expect(addParams.conversationId).toBe("conv-abc");
-      expect(addParams.experimentalRawEvents).toBeUndefined();
-
-      const removeParams = buildRemoveConversationListenerParams({
-        subscriptionId: "sub-123",
-      });
-      expect(removeParams.subscriptionId).toBe("sub-123");
+      expect(params.input).toHaveLength(3);
+      expect(params.input[0]).toMatchObject({ type: "text", text: "hi" });
+      expect(params.input[1]).toMatchObject({ type: "text", text: "hello" });
+      expect(params.input[2]).toMatchObject({ type: "text", text: "hey" });
     });
   });
 });

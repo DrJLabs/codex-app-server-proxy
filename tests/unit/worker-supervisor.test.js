@@ -53,6 +53,7 @@ beforeEach(async () => {
   process.env.WORKER_RESTART_MAX = "3";
   process.env.CODEX_FORCE_PROVIDER = "openai";
   process.env.PROXY_ENABLE_PARALLEL_TOOL_CALLS = "true";
+  process.env.PROXY_DISABLE_INTERNAL_TOOLS = "true";
 
   const module = await import("../../src/services/worker/supervisor.js");
   ensureWorkerSupervisor = module.ensureWorkerSupervisor;
@@ -72,6 +73,7 @@ afterEach(async () => {
   delete process.env.WORKER_RESTART_MAX;
   delete process.env.CODEX_FORCE_PROVIDER;
   delete process.env.PROXY_ENABLE_PARALLEL_TOOL_CALLS;
+  delete process.env.PROXY_DISABLE_INTERNAL_TOOLS;
   vi.clearAllMocks();
 });
 
@@ -80,7 +82,8 @@ describe("CodexWorkerSupervisor health snapshots", () => {
     const args = spawnCodexSpy.mock.calls[0]?.[0] ?? [];
     expect(args).toContain("app-server");
     expect(args).toContain('model_provider="openai"');
-    expect(args).toContain('parallel_tool_calls="true"');
+    expect(args).toContain("parallel_tool_calls=true");
+    expect(args).toContain("tools.web_search=false");
   });
 
   test("readiness toggles on handshake and exit events", async () => {

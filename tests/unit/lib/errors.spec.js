@@ -3,6 +3,7 @@ import {
   authErrorBody,
   invalidRequestBody,
   modelNotFoundBody,
+  normalizeCodexError,
   permissionErrorBody,
   serverErrorBody,
   sseErrorBody,
@@ -112,6 +113,79 @@ describe("error helpers", () => {
     });
     expect(sseErrorBody(new Error("spawn error"))).toEqual({
       error: { message: "spawn error", type: "server_error", code: "spawn_error" },
+    });
+  });
+
+  it("normalizes codex error payloads into OpenAI envelopes", () => {
+    expect(
+      normalizeCodexError({ codexErrorInfo: "Unauthorized", message: "Authentication required" })
+    ).toMatchObject({
+      statusCode: 401,
+      body: {
+        error: { type: "authentication_error", code: "unauthorized" },
+      },
+    });
+
+    expect(normalizeCodexError({ codexErrorInfo: "UsageLimitExceeded" })).toMatchObject({
+      statusCode: 429,
+      body: {
+        error: { type: "rate_limit_error", code: "rate_limit_exceeded" },
+      },
+    });
+
+    expect(
+      normalizeCodexError({
+        codexErrorInfo: "UsageLimitExceeded",
+        additionalDetails: { retryAfterSeconds: "30" },
+      })
+    ).toMatchObject({
+      statusCode: 429,
+      retryAfterSeconds: 30,
+    });
+
+    expect(normalizeCodexError({ codexErrorInfo: "ContextWindowExceeded" })).toMatchObject({
+      statusCode: 400,
+      body: {
+        error: { type: "invalid_request_error", code: "context_length_exceeded" },
+      },
+    });
+
+    expect(normalizeCodexError({ code: -32602, message: "Invalid params" })).toMatchObject({
+      statusCode: 400,
+      body: {
+        error: { type: "invalid_request_error", code: "invalid_request_error" },
+      },
+    });
+
+    expect(
+      normalizeCodexError({
+        codexErrorInfo: { type: "HttpConnectionFailed", httpStatusCode: 503 },
+      })
+    ).toMatchObject({
+      statusCode: 503,
+      body: {
+        error: { type: "server_error", code: "upstream_error" },
+      },
+    });
+
+    expect(
+      normalizeCodexError({
+        httpStatusCode: 429,
+        additionalDetails: { retryAfterSeconds: 12 },
+      })
+    ).toMatchObject({
+      statusCode: 429,
+      retryAfterSeconds: 12,
+    });
+
+    expect(normalizeCodexError({ httpStatusCode: 401 })).toMatchObject({
+      statusCode: 401,
+      body: { error: { type: "authentication_error", code: "unauthorized" } },
+    });
+
+    expect(normalizeCodexError({ httpStatusCode: 403 })).toMatchObject({
+      statusCode: 403,
+      body: { error: { type: "permission_error", code: "permission_denied" } },
     });
   });
 });

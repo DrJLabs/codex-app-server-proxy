@@ -1,74 +1,75 @@
-# Codex App-Server Tools vs Client Tool Manifests
+# Codex App-Server Tools and Client Tool Manifests
 
 ## Summary
 
-The Codex app-server does **not** accept per-request tool manifests in JSON-RPC. It only enables:
+Codex app-server (JSON-RPC v2) only accepts custom tool manifests at **thread start** (`thread/start.dynamicTools`). There is no per-turn/per-request tool manifest on `turn/start`.
 
-- Built-in tools toggled in config (`web_search`, `view_image`)
-- MCP tools loaded from configured MCP servers
+Implications for this proxy:
 
-As a result, `/v1/responses` requests that include `tools` are accepted by the proxy ingress but **cannot be forwarded** to the app-server as tool definitions. The JSON-RPC `SendUserTurnParams` only accepts `items` (text/image/localImage/skill), so client tool manifests are dropped before Codex core sees them.
+- `/v1/responses` accepts OpenAI `tools[]` and forwards **function tools** to Codex as `dynamicTools` when the proxy creates a new thread.
+- Once a thread exists, the Codex tool registry is fixed for that thread. Tool manifests cannot be changed without starting a new thread.
+- When the client sends `function_call_output` items, the proxy resolves the originating thread from pending tool calls and reuses that thread's canonical tool manifest and instructions. `tools[]` included on the follow-up request are treated as advisory only (used for parsing/fallback) and are not allowed to mutate the active thread toolset.
 
-## Evidence (Codex 0.89.0)
+## Evidence (Codex 0.92.0)
 
-### JSON-RPC request payloads do not include tools
+### Turn requests do not carry tool manifests
 
-Exported schema (from the live CLI) confirms no `tools` field on the request params:
+Exported schema (from the live CLI) shows:
+
+- `TurnStartParams` supports `threadId`, `input`, `cwd`, `approvalPolicy`, `sandboxPolicy`, `model`, etc.
+- `TurnStartParams` does **not** include `tools` or `dynamicTools`.
+
+Generate locally:
 
 ```bash
 codex app-server generate-json-schema --out /tmp/app-server-schema
 ```
 
-- `SendUserTurnParams` only supports `conversation_id`, `items`, `cwd`, `approval_policy`, `sandbox_policy`, `model`, etc.
-  - `/tmp/app-server-schema/codex_app_server_protocol.schemas.json` (exported schema)
-  - `/external/codex/codex-rs/app-server-protocol/src/protocol/v1.rs`
-- `SendUserMessageParams` only supports `conversationId` and `items`.
-  - `/tmp/app-server-schema/codex_app_server_protocol.schemas.json` (exported schema)
+### Thread start accepts dynamic tools
 
-### Tool configuration is config + MCP only
+`ThreadStartParams` supports:
 
-- `ToolsV2` only exposes `web_search` and `view_image` toggles.
-  - `/tmp/app-server-schema/codex_app_server_protocol.schemas.json` (exported schema)
-- Core tool registry is built from config and MCP tools (converted into OpenAI tool specs).
-  - `/external/codex/codex-rs/core/src/tools/spec.rs`
+- `dynamicTools` (custom tool manifest)
+- `baseInstructions` / `developerInstructions`
+- `config` (per-thread feature/tool toggles)
 
-### MCP is the only dynamic tool source
+### Built-in tool toggles are capability flags only
 
-- App-server exposes MCP server listing and status (`mcpServerStatus/list`), and reload (`config/mcpServer/reload`).
-  - `/external/codex/codex-rs/app-server/README.md`
-- Exported schema shows `v2.McpServerStatus.tools` as a map of tool name → `Tool` (name + JSON schemas).
-  - `/tmp/app-server-schema/codex_app_server_protocol.schemas.json`
+`ToolsV2` only exposes built-in capability toggles:
 
-## How this fits into the proxy
+- `web_search`
+- `view_image`
 
-The proxy currently does two distinct things:
+Custom tools are not declared through these toggles.
 
-1. Accepts OpenAI-style `/v1/responses` requests (including `tools`).
-2. Normalizes/flat-flattens input and forwards `items` to the Codex app-server via JSON-RPC.
+## Tool name collisions (internal vs dynamic)
 
-Because JSON-RPC does **not** carry tool manifests, tool definitions in the HTTP request cannot reach Codex core. This explains why the client sees “no tools available” even though ingress logs show the tools in the original request.
+Codex reserves internal tool namespaces (for example: `WebSearch` / `web_search_*`, `fileChange`, `commandExecution`, `view_image`, `exec_command_*`). If a client provides a dynamic tool with a colliding name (for example: `webSearch`), Codex may route a call to the internal tool instead of the dynamic tool.
 
-## Implication for Obsidian tools
+When internal tools are disabled in this proxy, those internal tool attempts are blocked and surface as `internal_tools_disabled` failures.
 
-To make Obsidian tools available to Codex via the app-server, they must be exposed **as MCP tools** (or another Codex-native tool source) and configured in `CODEX_HOME/config.toml`. Client-supplied `tools` in `/v1/responses` cannot be used directly by app-server today.
+To avoid collisions, the proxy rewrites reserved function-tool names **before** `thread/start` and stores a per-thread name map:
 
-Example MCP config pattern (from Codex docs):
+- Client tool name: `webSearch`
+- App-server tool name: `client_webSearch`
 
-```toml
-# config.toml
-[mcp_servers.obsidian]
-command = "codex-stdio-to-uds"
-args = ["/tmp/mcp.sock"]
-```
+At the HTTP API boundary, tool calls and tool outputs are mapped back to the original client name so clients do not need to change their tool list. Raw app-server captures will show the rewritten names.
 
-After updating config, call `config/mcpServer/reload` (or restart the app-server) and verify tools via `mcpServerStatus/list`.
+## Internal tool disabling (two layers)
 
-## Options to support client tool manifests (proxy-level)
+When `PROXY_DISABLE_INTERNAL_TOOLS_CONFIG=true` (default), the proxy disables internal tools at two layers:
 
-If we want to accept `tools` from `/v1/responses` and make them available to Codex:
+- **Per-thread/turn config**: `turn.config.features.*` and `turn.config.tools.*` passed through JSON-RPC.
+- **Worker launch config**: `codex app-server -c features.web_search_request=false -c features.shell_tool=false -c features.shell_snapshot=false -c features.unified_exec=false -c features.exec_policy=false -c features.streamable_shell=false -c features.view_image_tool=false -c features.apply_patch_freeform=false -c tools.web_search=false -c tools.view_image=false ...`.
 
-1. **Protocol extension**: Add a JSON-RPC method or parameter that allows sending a tool manifest (and teach app-server/core to ingest it).
-2. **Ephemeral MCP bridge**: Spin up a local MCP server from the client manifest and register it in the app-server config for the session.
-3. **Config layer injection**: Use the v2 `config/write` APIs to write an overlay config that injects MCP tooling and reloads.
+When `PROXY_DISABLE_INTERNAL_TOOLS_PROMPT=true` (default), `/v1/responses` also injects explicit base instructions naming internal tool variants that must not be called.
 
-Until one of the above exists, the proxy can only use built-in + MCP tools configured outside the request.
+## Optional internal tool shim (off by default)
+
+If `PROXY_ENABLE_INTERNAL_TOOLS_SHIM=true`, the proxy can translate some internal tool notifications into dynamic tool call requests (for example: internal web search or file changes). This is off by default and is not required for normal OpenAI Responses clients.
+
+## MCP tools (server-side)
+
+MCP tools are configured in `CODEX_HOME/config.toml` and are executed inside the app-server. They are independent from client-provided dynamic tools declared via `dynamicTools`.
+
+If you need server-side tools, configure MCP and reload the server, for example with `config/mcpServer/reload`.

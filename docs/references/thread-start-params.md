@@ -1,0 +1,375 @@
+# ThreadStartParams (on wire)
+
+```json
+{
+  "model": "gpt-5.2",
+  "cwd": "/tmp/codex-work",
+  "approvalPolicy": "never",
+  "sandbox": "danger-full-access",
+  "dynamicTools": [
+    {
+      "name": "localSearch",
+      "description": "Search for notes in the vault based on query, salient terms, and optional time range",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The search query to find relevant notes"
+          },
+          "salientTerms": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Keywords extracted from the user's query for BM25 full-text search. Must be from original query."
+          },
+          "timeRange": {
+            "type": "object",
+            "properties": {
+              "startTime": {
+                "type": "number",
+                "description": "Start time as epoch milliseconds"
+              },
+              "endTime": {
+                "type": "number",
+                "description": "End time as epoch milliseconds"
+              }
+            },
+            "required": [
+              "startTime",
+              "endTime"
+            ],
+            "additionalProperties": false,
+            "description": "Optional time range filter. Use epoch milliseconds from getTimeRangeMs result."
+          },
+          "_preExpandedQuery": {
+            "type": "object",
+            "properties": {
+              "originalQuery": {
+                "type": "string"
+              },
+              "salientTerms": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "expandedQueries": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "expandedTerms": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "recallTerms": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "originalQuery",
+              "salientTerms",
+              "expandedQueries",
+              "expandedTerms",
+              "recallTerms"
+            ],
+            "additionalProperties": false,
+            "description": "Internal: pre-expanded query data injected by the system to avoid double expansion"
+          }
+        },
+        "required": [
+          "query",
+          "salientTerms"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "webSearch",
+      "description": "Search the INTERNET (NOT vault notes) when user explicitly asks for web/online information",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The search query to search the internet"
+          },
+          "chatHistory": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "user",
+                    "assistant"
+                  ]
+                },
+                "content": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "role",
+                "content"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Previous conversation turns for context (usually empty array)"
+          }
+        },
+        "required": [
+          "query",
+          "chatHistory"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "getCurrentTime",
+      "description": "Get the current time in local timezone or at a specified UTC offset. Returns epoch time, ISO string, and formatted strings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "timezoneOffset": {
+            "type": "string",
+            "description": "Optional UTC offset. IMPORTANT: Must be a numeric offset, NOT a timezone name.\n\nEXAMPLES OF CORRECT USAGE:\n- \"what time is it\" → No parameter (uses local time)\n- \"what time is it in Tokyo\" → timezoneOffset: \"+9\"\n- \"what time is it in Beijing\" → timezoneOffset: \"+8\"\n- \"what time is it in New York\" → timezoneOffset: \"-5\" (or \"-4\" during DST)\n- \"what time is it in Mumbai\" → timezoneOffset: \"+5:30\"\n\nSUPPORTED FORMATS:\n- Simple: \"+8\", \"-5\", \"+5:30\"\n- With prefix: \"UTC+8\", \"GMT-5\", \"UTC+5:30\"\n\nCOMMON TIMEZONE OFFSETS:\n- Tokyo: UTC+9\n- Beijing/Singapore: UTC+8\n- Mumbai: UTC+5:30\n- Dubai: UTC+4\n- London: UTC+0 (UTC+1 during BST)\n- New York: UTC-5 (UTC-4 during DST)\n- Los Angeles: UTC-8 (UTC-7 during DST)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "getTimeInfoByEpoch",
+      "description": "Convert a Unix timestamp (in seconds or milliseconds) to detailed time information",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "epoch": {
+            "type": "number",
+            "description": "Unix timestamp in seconds or milliseconds"
+          }
+        },
+        "required": [
+          "epoch"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "getTimeRangeMs",
+      "description": "Convert natural language time expressions to date ranges for use with localSearch",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "timeExpression": {
+            "type": "string",
+            "description": "Natural language time expression to convert to a date range.\n\nCOMMON EXPRESSIONS:\n- Relative past: \"yesterday\", \"last week\", \"last month\", \"last year\"\n- Relative ranges: \"this week\", \"this month\", \"this year\"\n- Specific dates: \"July 1\", \"July 1 2023\", \"2023-07-01\"\n- Date ranges: \"from July 1 to July 15\", \"between May and June\"\n- Time periods: \"last 7 days\", \"past 30 days\", \"previous 3 months\"\n\nIMPORTANT: This tool is typically used as the first step before localSearch when searching notes by time.\n\nEXAMPLE WORKFLOW:\n1. User: \"what did I do last week\"\n2. First call getTimeRangeMs with timeExpression: \"last week\"\n3. Then use the returned time range with localSearch"
+          }
+        },
+        "required": [
+          "timeExpression"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "convertTimeBetweenTimezones",
+      "description": "Convert a specific time from one timezone to another using UTC offsets",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "time": {
+            "type": "string",
+            "description": "Time to convert. Supports various formats:\n- 12-hour: \"6pm\", \"3:30 PM\", \"11:45 am\"\n- 24-hour: \"18:00\", \"15:30\", \"23:45\"\n- Relative: \"noon\", \"midnight\""
+          },
+          "fromOffset": {
+            "type": "string",
+            "description": "Source UTC offset. Must be numeric, not timezone name.\nExamples: \"-8\" for PT, \"+0\" for London, \"+8\" for Beijing"
+          },
+          "toOffset": {
+            "type": "string",
+            "description": "Target UTC offset. Must be numeric, not timezone name.\nExamples: \"+9\" for Tokyo, \"-5\" for NY, \"+5:30\" for Mumbai\n\nEXAMPLE USAGE:\n- \"what time is 6pm PT in Tokyo\" → time: \"6pm\", fromOffset: \"-8\", toOffset: \"+9\"\n- \"convert 3:30 PM EST to London time\" → time: \"3:30 PM\", fromOffset: \"-5\", toOffset: \"+0\"\n- \"what is 9am Beijing time in New York\" → time: \"9am\", fromOffset: \"+8\", toOffset: \"-5\""
+          }
+        },
+        "required": [
+          "time",
+          "fromOffset",
+          "toOffset"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "readNote",
+      "description": "Read a single note in search v3 sized chunks. Use only when you already know the exact note path and need its contents.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "notePath": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Full path to the note (relative to the vault root) that needs to be read, such as 'Projects/plan.md'."
+          },
+          "chunkIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0-based chunk index to read. Omit to read the first chunk."
+          }
+        },
+        "required": [
+          "notePath"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "writeToFile",
+      "description": "Request to write content to a file at the specified path and show the changes in a Change Preview UI.\n\n      # Steps to find the the target path\n      1. Extract the target file information from user message and find out the file path from the context.\n      2. If target file is not specified, use the active note as the target file.\n      3. If still failed to find the target file or the file path, ask the user to specify the target file.\n      ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "(Required) The path to the file to write to. \n          The path must end with explicit file extension, such as .md or .canvas .\n          Prefer to create new files in existing folders or root folder unless the user's request specifies otherwise.\n          The path must be relative to the root of the vault."
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              }
+            ],
+            "description": "(Required) The content to write to the file. Can be either a string or an object.\n          ALWAYS provide the COMPLETE intended content of the file, without any truncation or omissions. \n          You MUST include ALL parts of the file, even if they haven't been modified.\n\n          # For string content\n          * Use when writing text files like .md, .txt, etc.\n          \n          # For object content  \n          * Use when writing structured data files like .json, .canvas, etc.\n          * The object will be automatically converted to JSON string format\n          \n          # Canvas JSON Format (JSON Canvas spec 1.0)\n          Required node fields: id, type, x, y, width, height\n          Node types: \"text\" (needs text), \"file\" (needs file), \"link\" (needs url), \"group\" (optional label)\n          Optional node fields: color (hex #FF0000 or preset \"1\"-\"6\"), subpath (file nodes, starts with #)\n          Required edge fields: id, fromNode, toNode\n          Optional edge fields: fromSide/toSide (\"top\"/\"right\"/\"bottom\"/\"left\"), fromEnd/toEnd (\"none\"/\"arrow\"), color, label\n          All IDs must be unique. Edge nodes must reference existing node IDs.\n          \n          Example:\n          {\n            \"nodes\": [\n              {\"id\": \"1\", \"type\": \"text\", \"text\": \"Hello\", \"x\": 0, \"y\": 0, \"width\": 200, \"height\": 50},\n              {\"id\": \"2\", \"type\": \"file\", \"file\": \"note.md\", \"subpath\": \"#heading\", \"x\": 250, \"y\": 0, \"width\": 200, \"height\": 100, \"color\": \"2\"},\n              {\"id\": \"3\", \"type\": \"group\", \"label\": \"Group\", \"x\": 0, \"y\": 100, \"width\": 300, \"height\": 150}\n            ],\n            \"edges\": [\n              {\"id\": \"e1-2\", \"fromNode\": \"1\", \"toNode\": \"2\", \"fromSide\": \"right\", \"toSide\": \"left\", \"color\": \"3\", \"label\": \"links to\"}\n            ]\n          }"
+          },
+          "confirmation": {
+            "type": "boolean",
+            "default": true,
+            "description": "(Optional) Whether to ask for change confirmation with preview UI before writing changes. Default: true. Set to false to skip preview and apply changes immediately."
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "replaceInFile",
+      "description": "Request to replace sections of content in an existing file using SEARCH/REPLACE blocks that define exact changes to specific parts of the file. This tool should be used when you need to make targeted changes to specific parts of a LARGE file.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "(Required) The path of the file to modify (relative to the root of the vault and include the file extension)."
+          },
+          "diff": {
+            "type": "string",
+            "description": "(Required) One or more SEARCH/REPLACE blocks. Each block MUST follow this exact format with these exact markers:\n\n------- SEARCH\n[exact content to find, including all whitespace and indentation]\n=======\n[new content to replace with]\n+++++++ REPLACE\n\nWHEN TO USE THIS TOOL vs writeToFile:\n- Use replaceInFile for: small edits, fixing typos, updating specific sections, targeted changes\n- Use writeToFile for: creating new files, major rewrites, when you can't identify specific text to replace\n\nCRITICAL RULES:\n1. SEARCH content must match EXACTLY - every character, space, and line break\n2. Use the exact markers: \"------- SEARCH\", \"=======\", \"+++++++ REPLACE\"\n3. For multiple changes, include multiple SEARCH/REPLACE blocks in order\n4. Keep blocks concise - include only the lines being changed plus minimal context\n\nCOMMON MISTAKES TO AVOID:\n- Wrong: Using different markers like \"---- SEARCH\" or \"SEARCH -------\"\n- Wrong: Including too many unchanged lines\n- Wrong: Not matching whitespace/indentation exactly"
+          }
+        },
+        "required": [
+          "path",
+          "diff"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "youtubeTranscription",
+      "description": "Get transcripts of YouTube videos when the user provides YouTube URLs",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "_userMessageContent": {
+            "type": "string",
+            "description": "Internal: user message content injected by the system"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "getFileTree",
+      "description": "Get the file tree as a nested structure of folders and files",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "getTagList",
+      "description": "Get the list of tags in the vault with occurrence statistics.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "includeInline": {
+            "type": "boolean",
+            "description": "Include inline tags in addition to frontmatter tags. Defaults to true."
+          },
+          "maxEntries": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5000,
+            "description": "Maximum number of tag entries to return, sorted by occurrences. Responses are capped at ~500KB."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Parameters for retrieving the tag list.",
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "updateMemory",
+      "description": "Update the user memory when the user explicitly asks to update the memory",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "statement": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The user statement for explicitly updating saved memories"
+          }
+        },
+        "required": [
+          "statement"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "baseInstructions": "Never use internal tools (shell/exec_command/apply_patch/update_plan/view_image). Request only dynamic tool calls provided by the client.",
+  "developerInstructions": "You are Obsidian Copilot, a helpful assistant that integrates AI to Obsidian note-taking.\n\nThis reference intentionally omits injected runtime context (active note contents, prior conversation summaries, and tool output traces) for privacy.\nOnly stable, reusable instructions belong in this field.",
+  "includeApplyPatchTool": false
+}
+```

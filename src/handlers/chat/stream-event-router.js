@@ -1,3 +1,5 @@
+import { buildToolCallDeltaFromDynamicRequest } from "../../lib/tools/dynamic-tools.js";
+
 export const createStreamEventRouter = ({
   parseStreamEventLine,
   extractMetadataFromPayload,
@@ -6,6 +8,7 @@ export const createStreamEventRouter = ({
   reqId,
   route = "/v1/chat/completions",
   mode = "chat_stream",
+  dynamicToolCallMode = "delta",
   handleParsedEvent,
   trackToolSignals,
   extractFinishReasonFromMessage,
@@ -54,6 +57,45 @@ export const createStreamEventRouter = ({
       if (finishCandidate && canTrackFinish) {
         trackFinishReason(finishCandidate, t || "event");
       }
+    }
+    if (t === "dynamic_tool_call_request") {
+      const toolCallDelta = buildToolCallDeltaFromDynamicRequest(messagePayload);
+      if (toolCallDelta && typeof trackToolSignals === "function") {
+        trackToolSignals(toolCallDelta);
+      }
+      if (toolCallDelta && typeof handleParsedEvent === "function") {
+        if (dynamicToolCallMode === "atomic") {
+          handleParsedEvent({
+            type: "dynamic_tool_call",
+            payload,
+            params,
+            messagePayload,
+            metadataInfo,
+            toolCallDelta,
+            baseChoiceIndex: parsed.baseChoiceIndex,
+          });
+        } else {
+          handleParsedEvent({
+            type: "agent_message_delta",
+            payload,
+            params,
+            messagePayload: { delta: toolCallDelta },
+            metadataInfo,
+            baseChoiceIndex: parsed.baseChoiceIndex,
+          });
+        }
+      }
+      if (dynamicToolCallMode === "atomic") {
+        if (canTrackFinish) {
+          trackFinishReason("tool_calls", "dynamic_tool_call");
+        }
+        if (typeof emitFinishChunk === "function") emitFinishChunk("tool_calls");
+        if (typeof finalizeStream === "function") {
+          finalizeStream({ reason: "tool_calls", trigger: "dynamic_tool_call" });
+        }
+        return { handled: true, stop: true };
+      }
+      return { handled: true };
     }
     if (
       t === "agent_message_content_delta" ||

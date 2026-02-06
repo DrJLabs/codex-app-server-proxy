@@ -1,5 +1,11 @@
 import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { RESPONSES_INTERNAL_TOOLS_INSTRUCTION } from "../../../../src/lib/prompts/internal-tools-instructions.js";
+import { TOOL_CHOICE_REQUIRED_INSTRUCTION } from "../../../../src/lib/prompts/tool-choice-required-instructions.js";
+
+const ORIGINAL_DISABLE_INTERNAL_TOOLS = process.env.PROXY_DISABLE_INTERNAL_TOOLS;
+const ORIGINAL_DISABLE_INTERNAL_TOOLS_CONFIG = process.env.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG;
+const ORIGINAL_DISABLE_INTERNAL_TOOLS_PROMPT = process.env.PROXY_DISABLE_INTERNAL_TOOLS_PROMPT;
 
 const logResponsesIngressRawMock = vi.fn();
 const summarizeResponsesIngressMock = vi.fn(() => ({}));
@@ -41,11 +47,12 @@ const normalizeResponsesRequestMock = vi.fn(() => ({
   instructions: "",
   inputItems: [{ type: "text", data: { text: "[user] hi" } }],
   responseFormat: undefined,
-  finalOutputJsonSchema: undefined,
+  outputSchema: undefined,
   tools: null,
   toolChoice: undefined,
   parallelToolCalls: undefined,
   maxOutputTokens: undefined,
+  toolOutputs: [],
 }));
 const runNativeResponsesMock = vi.fn(async ({ onEvent }) => {
   onEvent({ type: "text_delta", delta: "Hello", choiceIndex: 0 });
@@ -65,9 +72,31 @@ const createToolCallAggregatorMock = vi.fn(() => ({
 const appendUsageMock = vi.fn();
 const logSanitizerToggleMock = vi.fn();
 const logSanitizerSummaryMock = vi.fn();
+const transportMock = {
+  ensureHandshake: (...args) => ensureHandshakeMock(...args),
+  resolveThreadForToolOutputs: vi.fn(),
+};
 
 const ORIGINAL_RESPONSES_DEFAULT_MAX_TOKENS = process.env.PROXY_RESPONSES_DEFAULT_MAX_TOKENS;
 const ORIGINAL_MAX_CHAT_CHOICES = process.env.PROXY_MAX_CHAT_CHOICES;
+
+const restoreEnv = () => {
+  if (ORIGINAL_DISABLE_INTERNAL_TOOLS === undefined) {
+    delete process.env.PROXY_DISABLE_INTERNAL_TOOLS;
+  } else {
+    process.env.PROXY_DISABLE_INTERNAL_TOOLS = ORIGINAL_DISABLE_INTERNAL_TOOLS;
+  }
+  if (ORIGINAL_DISABLE_INTERNAL_TOOLS_CONFIG === undefined) {
+    delete process.env.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG;
+  } else {
+    process.env.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG = ORIGINAL_DISABLE_INTERNAL_TOOLS_CONFIG;
+  }
+  if (ORIGINAL_DISABLE_INTERNAL_TOOLS_PROMPT === undefined) {
+    delete process.env.PROXY_DISABLE_INTERNAL_TOOLS_PROMPT;
+  } else {
+    process.env.PROXY_DISABLE_INTERNAL_TOOLS_PROMPT = ORIGINAL_DISABLE_INTERNAL_TOOLS_PROMPT;
+  }
+};
 
 vi.mock("../../../../src/handlers/responses/ingress-logging.js", () => ({
   logResponsesIngressRaw: (...args) => logResponsesIngressRawMock(...args),
@@ -103,9 +132,7 @@ vi.mock("../../../../src/services/transport/index.js", async () => {
   const actual = await vi.importActual("../../../../src/services/transport/index.js");
   return {
     ...actual,
-    getJsonRpcTransport: () => ({
-      ensureHandshake: (...args) => ensureHandshakeMock(...args),
-    }),
+    getJsonRpcTransport: () => transportMock,
   };
 });
 
@@ -115,7 +142,12 @@ vi.mock("../../../../src/lib/tool-call-aggregator.js", () => ({
 
 vi.mock("../../../../src/services/logging/schema.js", () => ({
   logStructured: (...args) => logStructuredMock(...args),
-  sha256: (value) => `hash-${value}`,
+  sha256: (value) => {
+    if (typeof value !== "string") {
+      throw new Error("sha256 expects string");
+    }
+    return `hash-${value}`;
+  },
 }));
 
 vi.mock("../../../../src/lib/observability/transform-summary.js", () => ({
@@ -164,12 +196,15 @@ beforeEach(() => {
   createToolCallAggregatorMock.mockClear();
   buildResponsesEnvelopeMock.mockClear();
   ensureHandshakeMock.mockClear();
+  transportMock.resolveThreadForToolOutputs.mockReset();
   appendUsageMock.mockClear();
   logSanitizerToggleMock.mockClear();
   logSanitizerSummaryMock.mockClear();
+  restoreEnv();
 });
 
 afterEach(() => {
+  restoreEnv();
   if (ORIGINAL_RESPONSES_DEFAULT_MAX_TOKENS === undefined) {
     delete process.env.PROXY_RESPONSES_DEFAULT_MAX_TOKENS;
   } else {
@@ -194,6 +229,93 @@ describe("responses nonstream handler", () => {
     await postResponsesNonStream(req, res);
 
     expect(req.headers["x-proxy-output-mode"]).toBeUndefined();
+  });
+
+  it("preserves unmatched tool output lines in turn items", async () => {
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    normalizeResponsesRequestMock.mockReturnValueOnce({
+      instructions: "",
+      inputItems: [
+        {
+          type: "text",
+          data: {
+            text: [
+              "[user] hi",
+              '[function_call_output call_id=call_ok output="ok"]',
+              '[function_call_output call_id=call_stale output="stale"]',
+            ].join("\n"),
+          },
+        },
+      ],
+      responseFormat: undefined,
+      outputSchema: undefined,
+      tools: null,
+      toolChoice: undefined,
+      parallelToolCalls: undefined,
+      maxOutputTokens: undefined,
+      toolOutputs: [
+        { callId: "call_ok", output: "ok", success: true, toolName: null },
+        { callId: "call_stale", output: "stale", success: true, toolName: null },
+      ],
+    });
+    transportMock.resolveThreadForToolOutputs.mockReturnValueOnce({
+      threadId: "thread_1",
+      toolset: {},
+      hasUnmatched: true,
+      unmatchedCount: 1,
+    });
+    createJsonRpcChildAdapterMock.mockImplementationOnce(() => ({
+      stdin: { write: vi.fn() },
+      once: vi.fn(),
+      kill: vi.fn(),
+      transport: {
+        respondToToolCall: vi.fn((callId) => callId === "call_ok"),
+        hasShimToolCall: vi.fn(() => false),
+        consumeShimToolCall: vi.fn(() => null),
+      },
+    }));
+
+    await postResponsesNonStream(req, res);
+
+    const [{ normalizedRequest }] = createJsonRpcChildAdapterMock.mock.calls[0];
+    const text = normalizedRequest.turn.items[0].data.text;
+    expect(text).not.toContain("call_ok");
+    expect(text).toContain("call_stale");
+  });
+
+  it("rejects native tools explicitly", async () => {
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    normalizeResponsesRequestMock.mockReturnValueOnce({
+      instructions: "",
+      inputItems: [{ type: "text", data: { text: "[user] hi" } }],
+      responseFormat: undefined,
+      outputSchema: undefined,
+      tools: [{ type: "web_search" }],
+      toolChoice: undefined,
+      parallelToolCalls: undefined,
+      maxOutputTokens: undefined,
+      toolOutputs: [],
+    });
+
+    await postResponsesNonStream(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({ param: "tools", code: "native_tools_disabled" }),
+      })
+    );
+    expect(createJsonRpcChildAdapterMock).not.toHaveBeenCalled();
   });
 
   it("returns 400 when n is invalid", async () => {
@@ -225,6 +347,237 @@ describe("responses nonstream handler", () => {
       })
     );
     expect(createJsonRpcChildAdapterMock).not.toHaveBeenCalled();
+  });
+
+  it("injects internal tool guidance into baseInstructions when disabled", async () => {
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    expect(createJsonRpcChildAdapterMock).toHaveBeenCalled();
+    const [{ normalizedRequest }] = createJsonRpcChildAdapterMock.mock.calls[0];
+    expect(normalizedRequest.turn.baseInstructions).toBe(RESPONSES_INTERNAL_TOOLS_INSTRUCTION);
+    expect(normalizedRequest.turn.config).toMatchObject({
+      features: {
+        web_search_request: false,
+        shell_tool: false,
+        shell_snapshot: false,
+        exec_policy: false,
+        streamable_shell: false,
+        unified_exec: false,
+        view_image_tool: false,
+        apply_patch_freeform: false,
+      },
+      tools: {
+        web_search: false,
+        view_image: false,
+      },
+    });
+  });
+
+  it("skips baseInstructions when prompt flag is disabled", async () => {
+    process.env.PROXY_DISABLE_INTERNAL_TOOLS = "true";
+    process.env.PROXY_DISABLE_INTERNAL_TOOLS_PROMPT = "false";
+    process.env.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG = "true";
+
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    const [{ normalizedRequest }] = createJsonRpcChildAdapterMock.mock.calls[0];
+    expect(normalizedRequest.turn.baseInstructions).toBeUndefined();
+    expect(normalizedRequest.turn.config).toMatchObject({
+      features: {
+        web_search_request: false,
+        shell_tool: false,
+        shell_snapshot: false,
+        exec_policy: false,
+        streamable_shell: false,
+        unified_exec: false,
+        view_image_tool: false,
+        apply_patch_freeform: false,
+      },
+      tools: {
+        web_search: false,
+        view_image: false,
+      },
+    });
+  });
+
+  it("skips turn.config when config flag is disabled", async () => {
+    process.env.PROXY_DISABLE_INTERNAL_TOOLS = "true";
+    process.env.PROXY_DISABLE_INTERNAL_TOOLS_PROMPT = "true";
+    process.env.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG = "false";
+
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    const [{ normalizedRequest }] = createJsonRpcChildAdapterMock.mock.calls[0];
+    expect(normalizedRequest.turn.baseInstructions).toBe(RESPONSES_INTERNAL_TOOLS_INSTRUCTION);
+    expect(normalizedRequest.turn.config).toBeUndefined();
+  });
+
+  it("reuses threadId and tool manifest when tool outputs are present", async () => {
+    const toolset = {
+      dynamicTools: [{ name: "webSearch", description: "lookup", inputSchema: {} }],
+      requestTools: [{ type: "function", function: { name: "webSearch", parameters: {} } }],
+    };
+    transportMock.resolveThreadForToolOutputs.mockReturnValueOnce({
+      threadId: "thread-123",
+      toolset,
+    });
+    normalizeResponsesRequestMock.mockReturnValueOnce({
+      instructions: "",
+      inputItems: [{ type: "text", data: { text: "[user] hi" } }],
+      responseFormat: undefined,
+      outputSchema: undefined,
+      tools: [{ type: "function", function: { name: "getFileTree", parameters: {} } }],
+      toolChoice: "auto",
+      parallelToolCalls: undefined,
+      maxOutputTokens: undefined,
+      toolOutputs: [{ callId: "call_1", output: "ok", success: true }],
+    });
+
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    const [{ normalizedRequest }] = createJsonRpcChildAdapterMock.mock.calls[0];
+    expect(normalizedRequest.turn.threadId).toBe("thread-123");
+    expect(normalizedRequest.turn.dynamicTools).toEqual(toolset.dynamicTools);
+  });
+
+  it("does not fail when tool outputs include extra (unmatched) callIds", async () => {
+    const toolset = {
+      dynamicTools: [{ name: "webSearch", description: "lookup", inputSchema: {} }],
+      requestTools: [{ type: "function", function: { name: "webSearch", parameters: {} } }],
+    };
+    transportMock.resolveThreadForToolOutputs.mockReturnValueOnce({
+      threadId: "thread-123",
+      toolset,
+      hasUnmatched: true,
+      unmatchedCount: 1,
+    });
+    normalizeResponsesRequestMock.mockReturnValueOnce({
+      instructions: "",
+      inputItems: [{ type: "text", data: { text: "[user] hi" } }],
+      responseFormat: undefined,
+      outputSchema: undefined,
+      tools: null,
+      toolChoice: undefined,
+      parallelToolCalls: undefined,
+      maxOutputTokens: undefined,
+      toolOutputs: [{ callId: "call_1", output: "ok", success: true }],
+    });
+
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    expect(res.status).not.toHaveBeenCalledWith(400);
+    expect(createJsonRpcChildAdapterMock).toHaveBeenCalled();
+
+    const warning = logStructuredMock.mock.calls.find(
+      ([entry]) => entry?.event === "tool_outputs_unmatched"
+    );
+    expect(warning).toBeTruthy();
+    expect(warning[1]).toMatchObject({ thread_id: "thread-123", unmatched_count: 1 });
+  });
+
+  it("logs tool output summaries when provided", async () => {
+    transportMock.resolveThreadForToolOutputs.mockReturnValueOnce({
+      threadId: "thread-1",
+      toolset: null,
+    });
+    const transport = { respondToToolCall: vi.fn(() => true) };
+    createJsonRpcChildAdapterMock.mockReturnValueOnce({
+      stdin: { write: vi.fn() },
+      once: vi.fn(),
+      kill: vi.fn(),
+      transport,
+    });
+    normalizeResponsesRequestMock.mockReturnValueOnce({
+      instructions: "",
+      inputItems: [{ type: "text", data: { text: "[user] hi" } }],
+      responseFormat: undefined,
+      outputSchema: undefined,
+      tools: null,
+      toolChoice: undefined,
+      parallelToolCalls: undefined,
+      maxOutputTokens: undefined,
+      toolOutputs: [{ callId: "call_1", output: { ok: true }, success: true, toolName: "lookup" }],
+    });
+
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    expect(transport.respondToToolCall).toHaveBeenCalledWith("call_1", {
+      output: { ok: true },
+      success: true,
+    });
+
+    const toolLog = logStructuredMock.mock.calls.find(
+      ([entry]) => entry?.event === "tool_call_output"
+    );
+    expect(toolLog).toBeTruthy();
+    expect(toolLog[1].tool_call_id).toBe("call_1");
+    expect(toolLog[1].tool_name).toBe("lookup");
+    expect(toolLog[1].tool_output_hash).toBe('hash-{"ok":true}');
+  });
+
+  it("injects tool_choice required guidance into baseInstructions", async () => {
+    transportMock.resolveThreadForToolOutputs.mockReturnValueOnce({
+      threadId: "thread-1",
+      toolset: null,
+    });
+    normalizeResponsesRequestMock.mockReturnValueOnce({
+      instructions: "",
+      inputItems: [{ type: "text", data: { text: "[user] hi" } }],
+      responseFormat: undefined,
+      outputSchema: undefined,
+      tools: [{ type: "function", function: { name: "lookup", parameters: {} } }],
+      toolChoice: "required",
+      parallelToolCalls: undefined,
+      maxOutputTokens: undefined,
+      toolOutputs: [],
+    });
+
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2", tools: [{ type: "function" }] });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    const [{ normalizedRequest }] = createJsonRpcChildAdapterMock.mock.calls[0];
+    expect(normalizedRequest.turn.baseInstructions).toContain(TOOL_CHOICE_REQUIRED_INSTRUCTION);
   });
 
   it("returns 400 when model is missing", async () => {
@@ -270,7 +623,7 @@ describe("responses nonstream handler", () => {
       instructions: "",
       inputItems: [{ type: "text", data: { text: "[user] hi" } }],
       responseFormat: undefined,
-      finalOutputJsonSchema: undefined,
+      outputSchema: undefined,
       tools: [{ type: "function", function: { name: "lookup" } }],
       toolChoice: undefined,
       parallelToolCalls: undefined,
@@ -314,13 +667,13 @@ describe("responses nonstream handler", () => {
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ object: "response" }));
   });
 
-  it("forwards function tools to backend tool payload", async () => {
+  it("forwards function tools as dynamicTools on the turn payload", async () => {
     const definitions = [{ type: "function", function: { name: "lookup", parameters: {} } }];
     normalizeResponsesRequestMock.mockReturnValueOnce({
       instructions: "",
       inputItems: [{ type: "text", data: { text: "[user] hi" } }],
       responseFormat: undefined,
-      finalOutputJsonSchema: undefined,
+      outputSchema: undefined,
       tools: definitions,
       toolChoice: "auto",
       parallelToolCalls: true,
@@ -337,13 +690,11 @@ describe("responses nonstream handler", () => {
 
     expect(createJsonRpcChildAdapterMock).toHaveBeenCalled();
     const [{ normalizedRequest }] = createJsonRpcChildAdapterMock.mock.calls[0];
-    expect(normalizedRequest.turn.tools).toEqual(
-      expect.objectContaining({
-        definitions,
-        choice: "auto",
-        parallelToolCalls: true,
-      })
-    );
+    expect(normalizedRequest.turn.dynamicTools).toEqual([
+      { name: "lookup", description: "", inputSchema: {} },
+    ]);
+    expect(normalizedRequest.turn.tools).toEqual(definitions);
+    expect(normalizedRequest.message.tools).toBeUndefined();
   });
 
   it("strips <tool_call> blocks from output text and emits function calls", async () => {
@@ -356,7 +707,7 @@ describe("responses nonstream handler", () => {
       instructions: "",
       inputItems: [{ type: "text", data: { text: "[user] hi" } }],
       responseFormat: undefined,
-      finalOutputJsonSchema: undefined,
+      outputSchema: undefined,
       tools: [{ type: "function", function: { name: "search", parameters: {} } }],
       toolChoice: "auto",
       parallelToolCalls: undefined,
@@ -400,7 +751,7 @@ describe("responses nonstream handler", () => {
       instructions: "",
       inputItems: [{ type: "text", data: { text: "[user] hi" } }],
       responseFormat: undefined,
-      finalOutputJsonSchema: undefined,
+      outputSchema: undefined,
       tools: undefined,
       toolChoice: undefined,
       parallelToolCalls: undefined,
@@ -432,5 +783,65 @@ describe("responses nonstream handler", () => {
         function: { name: "search", arguments: '{"query":"x"}' },
       },
     ]);
+  });
+
+  it("requests atomic dynamic tool calls for nonstream responses", async () => {
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    const callArgs = runNativeResponsesMock.mock.calls[0]?.[0];
+    expect(callArgs?.dynamicToolCallMode).toBe("atomic");
+  });
+
+  it("ingests dynamic tool calls from atomic events", async () => {
+    const ingestMessage = vi.fn();
+    createToolCallAggregatorMock.mockReturnValueOnce({
+      ingestDelta: vi.fn(),
+      ingestMessage,
+      snapshot: vi.fn(() => []),
+    });
+    runNativeResponsesMock.mockImplementationOnce(async ({ onEvent }) => {
+      onEvent({
+        type: "dynamic_tool_call",
+        choiceIndex: 0,
+        messagePayload: { tool: "lookup", arguments: { id: 1 }, callId: "call_dyn_1" },
+        toolCallDelta: {
+          tool_calls: [
+            {
+              id: "call_dyn_1",
+              type: "function",
+              function: { name: "lookup", arguments: '{"id":1}' },
+            },
+          ],
+        },
+      });
+      onEvent({ type: "finish", reason: "tool_calls", trigger: "dynamic_tool_call" });
+    });
+
+    const { postResponsesNonStream } = await import(
+      "../../../../src/handlers/responses/nonstream.js"
+    );
+    const req = makeReq({ input: "hello", model: "gpt-5.2" });
+    const res = makeRes();
+
+    await postResponsesNonStream(req, res);
+
+    expect(ingestMessage).toHaveBeenCalledWith(
+      {
+        tool_calls: [
+          {
+            id: "call_dyn_1",
+            type: "function",
+            function: { name: "lookup", arguments: '{"id":1}' },
+          },
+        ],
+      },
+      { choiceIndex: 0, emitIfMissing: true }
+    );
   });
 });

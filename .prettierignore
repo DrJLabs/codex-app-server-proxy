@@ -12,6 +12,7 @@ docs/
 .serena/
 external/
 .codex-api/**
+.codev/AGENTS.md
 .codev/sessions/**
 .codev/rollouts/**
 .git

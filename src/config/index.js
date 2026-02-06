@@ -34,6 +34,17 @@ const resolveStopAfterToolsGraceMs = () => {
 };
 
 const resolveIgnoreClientSystemPrompt = () => bool("PROXY_IGNORE_CLIENT_SYSTEM_PROMPT", "true");
+const resolveDisableInternalToolsConfig = () =>
+  bool("PROXY_DISABLE_INTERNAL_TOOLS_CONFIG", process.env.PROXY_DISABLE_INTERNAL_TOOLS ?? "true");
+const resolveDisableInternalToolsPrompt = () =>
+  bool("PROXY_DISABLE_INTERNAL_TOOLS_PROMPT", process.env.PROXY_DISABLE_INTERNAL_TOOLS ?? "true");
+const resolveEnableInternalToolsShim = () => {
+  const enableRaw = process.env.PROXY_ENABLE_INTERNAL_TOOLS_SHIM;
+  if (enableRaw !== undefined && enableRaw !== "") return boolishTrue(enableRaw);
+  const disableRaw = process.env.PROXY_DISABLE_INTERNAL_TOOLS_SHIM;
+  if (disableRaw !== undefined && disableRaw !== "") return !boolishTrue(disableRaw);
+  return false;
+};
 
 const resolveTitleGenIntercept = () =>
   /^(1|true|yes)$/i.test(String(process.env.PROXY_TITLE_GEN_INTERCEPT ?? "true"));
@@ -84,6 +95,7 @@ export const config = {
   PROXY_DEFAULT_STREAM: bool("PROXY_DEFAULT_STREAM", "false"),
   PROXY_SSE_KEEPALIVE_MS: num("PROXY_SSE_KEEPALIVE_MS", 15000),
   PROXY_ENABLE_PARALLEL_TOOL_CALLS: bool("PROXY_ENABLE_PARALLEL_TOOL_CALLS", "false"),
+  PROXY_ENABLE_WEB_SEARCH_REQUEST: bool("PROXY_ENABLE_WEB_SEARCH_REQUEST", "false"),
   PROXY_STOP_AFTER_TOOLS: bool("PROXY_STOP_AFTER_TOOLS", ""),
   PROXY_STOP_AFTER_TOOLS_MODE: str("PROXY_STOP_AFTER_TOOLS_MODE", "burst").toLowerCase(),
   PROXY_STOP_AFTER_TOOLS_GRACE_MS: resolveStopAfterToolsGraceMs(),
@@ -96,6 +108,10 @@ export const config = {
   PROXY_RESPONSES_DEFAULT_MAX_TOKENS: num("PROXY_RESPONSES_DEFAULT_MAX_TOKENS", 0),
   PROXY_COPILOT_AUTO_DETECT: bool("PROXY_COPILOT_AUTO_DETECT", "false"),
   PROXY_APPROVAL_POLICY: resolveApprovalPolicy(),
+  PROXY_DISABLE_INTERNAL_TOOLS: bool("PROXY_DISABLE_INTERNAL_TOOLS", "true"),
+  PROXY_DISABLE_INTERNAL_TOOLS_CONFIG: resolveDisableInternalToolsConfig(),
+  PROXY_DISABLE_INTERNAL_TOOLS_PROMPT: resolveDisableInternalToolsPrompt(),
+  PROXY_ENABLE_INTERNAL_TOOLS_SHIM: resolveEnableInternalToolsShim(),
   PROXY_AUTH_LOGIN_URL: bool("PROXY_AUTH_LOGIN_URL", "false"),
   PROXY_AUTH_LOGIN_URL_MODE: resolveAuthLoginUrlMode(),
   PROXY_IGNORE_CLIENT_SYSTEM_PROMPT: resolveIgnoreClientSystemPrompt(),
@@ -135,6 +151,18 @@ export const config = {
     "PROXY_CAPTURE_RESPONSES_RAW_DIR",
     path.join(process.cwd(), "test-results", "responses-copilot", "raw-unredacted")
   ),
+  PROXY_CAPTURE_APP_SERVER_RAW: bool("PROXY_CAPTURE_APP_SERVER_RAW", "false"),
+  PROXY_CAPTURE_APP_SERVER_RAW_DIR: str(
+    "PROXY_CAPTURE_APP_SERVER_RAW_DIR",
+    path.join(process.cwd(), "test-results", "app-server", "raw")
+  ),
+  PROXY_CAPTURE_APP_SERVER_RAW_MAX_BYTES: num("PROXY_CAPTURE_APP_SERVER_RAW_MAX_BYTES", 262144),
+  PROXY_CAPTURE_THINKING_RAW: bool("PROXY_CAPTURE_THINKING_RAW", "false"),
+  PROXY_CAPTURE_THINKING_RAW_DIR: str(
+    "PROXY_CAPTURE_THINKING_RAW_DIR",
+    path.join(process.cwd(), "test-results", "responses-copilot", "raw-thinking")
+  ),
+  PROXY_CAPTURE_THINKING_RAW_MAX_BYTES: num("PROXY_CAPTURE_THINKING_RAW_MAX_BYTES", 262144),
   // Ingress safety: guardrails for client-provided memory/tool transcripts
   PROXY_INGRESS_GUARDRAIL: bool("PROXY_INGRESS_GUARDRAIL", "true"),
   // Worker supervisor

@@ -86,6 +86,18 @@ For production requirements (Traefik, Codex HOME, auth), see [docs/deployment/pr
 
 Full configuration and defaults: [docs/configuration.md](docs/configuration.md).
 
+By default:
+
+- **Default behavior:** internal Codex tools (`shell`, `apply_patch`, etc.) are disabled and only dynamic tool calls are allowed.
+- **Thread-scoped tools:** tool registries are thread-scoped in Codex; the proxy forwards request `tools[]` at `thread/start` and reuses the thread's canonical toolset/instructions when clients send `function_call_output` items.
+- **Configuration:** set `PROXY_DISABLE_INTERNAL_TOOLS_CONFIG=false` to keep internal tools enabled at the app-server level; set `PROXY_DISABLE_INTERNAL_TOOLS_PROMPT=false` to stop injecting the explicit "do not use internal tools" `baseInstructions`; the legacy `PROXY_DISABLE_INTERNAL_TOOLS` flag still sets the defaults for both.
+- **Collision avoidance:** to avoid collisions with Codex internal tool namespaces (notably client `webSearch`), the proxy rewrites reserved tool names (for example: `webSearch` -> `client_webSearch` inside app-server) and maps back at the HTTP boundary.
+- **Internal tool shim:** when internal tools are disabled via config, the proxy does not shim internal webSearch/fileChange notifications unless you opt in with `PROXY_ENABLE_INTERNAL_TOOLS_SHIM=true` (legacy inverse flag `PROXY_DISABLE_INTERNAL_TOOLS_SHIM=false`), and it carries unmatched tool outputs into follow-up turns.
+
+### Dev-only raw capture
+
+For deeper tracing in dev, enable `PROXY_CAPTURE_APP_SERVER_RAW=true` (app-server JSON-RPC) and/or `PROXY_CAPTURE_THINKING_RAW=true` (pre-sanitized deltas). See [docs/configuration.md](docs/configuration.md) and [docs/dev/logging-schema.md](docs/dev/logging-schema.md).
+
 ## Optional external references
 
 If you want local copies of upstream Codex or Obsidian Copilot for compatibility checks,

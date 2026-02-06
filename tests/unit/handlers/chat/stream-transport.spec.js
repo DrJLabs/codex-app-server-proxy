@@ -76,6 +76,45 @@ describe("stream transport", () => {
     expect(runtime.handleDelta).toHaveBeenCalled();
   });
 
+  it("forwards turn/completed to runtime result handler", () => {
+    const runtime = { handleResult: vi.fn() };
+    const { handleParsedEvent } = wireStreamTransport({ runtime });
+
+    const handled = handleParsedEvent({
+      type: "turn/completed",
+      params: {},
+      messagePayload: { turn: { status: "completed", finish_reason: "stop" } },
+      baseChoiceIndex: 0,
+    });
+
+    expect(handled).toBe(true);
+    expect(runtime.handleResult).toHaveBeenCalledWith(
+      expect.objectContaining({ finishReason: "stop" })
+    );
+  });
+
+  it("forwards turn/completed failures and error events to runtime error handler", () => {
+    const runtime = { handleError: vi.fn() };
+    const { handleParsedEvent } = wireStreamTransport({ runtime });
+
+    const failed = handleParsedEvent({
+      type: "turn/completed",
+      params: {},
+      messagePayload: { turn: { status: "failed", error: { message: "boom" } } },
+      baseChoiceIndex: 0,
+    });
+    const error = handleParsedEvent({
+      type: "error",
+      params: {},
+      messagePayload: { error: { message: "bad" } },
+      baseChoiceIndex: 0,
+    });
+
+    expect(failed).toBe(true);
+    expect(error).toBe(true);
+    expect(runtime.handleError).toHaveBeenCalledTimes(2);
+  });
+
   it("flushes buffered data on end", () => {
     const child = new EventEmitter();
     child.stdout = new EventEmitter();

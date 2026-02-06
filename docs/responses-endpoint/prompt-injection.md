@@ -1,198 +1,79 @@
-# Responses prompt injection matrix
+# Responses instruction injection matrix
 
-This document describes the exact tool-call prompt text injected by the proxy for `/v1/responses` and how it varies by tool configuration and tool choice.
+This document describes the instruction/config injected by the proxy for `POST /v1/responses`, with a focus on suppressing Codex internal tools and keeping client tool loops stable.
 
 Scope:
+
 - Endpoint: `/v1/responses`
-- Injection site: `src/handlers/responses/native/request.js`
-- Injection channel: `developerInstructions` passed to app-server on `newConversation`
-- Applies only when function tools are present
+- Injection sites:
+  - `baseInstructions` / `developerInstructions`: `src/handlers/responses/stream.js`, `src/handlers/responses/nonstream.js`
+  - App-server config toggles: `turn.config` (same handlers)
+  - Worker launch defaults: `src/services/worker/supervisor.js`
 
-## Injection trigger
+## Goals
 
-The proxy injects tool-call instructions only when the request includes at least one function tool. Function tools are detected from `tools[]` entries with `type: "function"`, using either the Responses shape (`name` at the top level) or the Chat Completions shape (`function.name`).
+- Ensure the model uses only client-provided dynamic tools (function tools).
+- Prevent Codex from calling its own internal tools (WebSearch, fileChange, exec, etc.), which this proxy blocks when internal tools are disabled.
+- Avoid collisions between client tool names and Codex internal tool namespaces.
 
-If no function tools are present, **no tool-call prompt is injected**.
+## Prompt injection: internal tools disabled
 
-## Base injected text (always included when function tools exist)
+### `PROXY_DISABLE_INTERNAL_TOOLS_PROMPT=true` (default)
 
-When function tools exist, the following lines are injected verbatim into `developerInstructions`:
+The proxy injects an explicit instruction block into Responses requests:
 
-```text
-Tool calling instructions:
-Only emit tool calls using <tool_call>...</tool_call>.
-Format: <tool_call>{"name":"TOOL_NAME","arguments":"{...}"}</tool_call>
-Inside <tool_call>...</tool_call>, output ONLY a JSON object with keys "name" and "arguments".
-Always emit <tool_call> blocks exactly as shown; the client executes them.
-Do NOT call internal tools directly (shell, apply_patch, web_search, view_image); only emit <tool_call>.
-Read-only sandbox or approval restrictions do NOT prevent emitting <tool_call> output.
-Use EXACT parameter names from the schema; do NOT invent or rename keys.
-Do not add any extra characters before or after the JSON (no trailing ">", no code fences).
-Use exactly one opening <tool_call> and one closing </tool_call> tag.
-Output must be valid JSON. Do not add extra braces or trailing characters.
-Do NOT wrap the JSON object in an array (no leading "[" or trailing "]").
-Bad: <tool_call>[{"name":"tool","arguments":"{...}"}]</tool_call>
-Never repeat the closing tag.
-Example (exact): <tool_call>{"name":"webSearch","arguments":"{\"query\":\"example\",\"chatHistory\":[]}"}</tool_call>
-The "arguments" field must be a JSON string.
-If a tool has no parameters, use arguments "{}".
-If no tool is needed, respond with plain text.
-```
+- `turn.baseInstructions` is set to `RESPONSES_INTERNAL_TOOLS_INSTRUCTION`.
+- `turn.developerInstructions` is prefixed with the same instruction block.
 
-After the base block, the proxy adds scenario-specific lines and the tool manifest (see below).
+Source:
 
-## Flow (request → injection → tools)
+- `src/lib/prompts/internal-tools-instructions.js` (`RESPONSES_INTERNAL_TOOLS_INSTRUCTION`)
 
-This section describes how tool prompt injection relates to the tool definitions and how both flow through the request lifecycle:
+This instruction names internal tool variants explicitly (for example: `WebSearch`, `webSearch`, `web_search_*`, `fileChange`, `commandExecution`, `exec_command_*`, `apply_patch`, `update_plan`) and tells the model to request only dynamic function tools.
 
-1) **Ingress normalization (`/v1/responses`)**
-   - `normalizeResponsesRequest` parses `tools` and `tool_choice` from the request.
-   - Only function tools (`type: "function"`) are used to build the injection block.
-   - Non-function tools are passed through but do **not** trigger tool-call injection text.
+### `PROXY_DISABLE_INTERNAL_TOOLS_PROMPT=false`
 
-2) **Injection generation (tool schema → developerInstructions)**
-   - The injection block is derived exclusively from the function tool list in the request:
-     - Base instructions
-     - Tool choice constraint line (if any)
-     - Tool schema manifest
-     - Per-tool examples
-   - The injection **does not modify** the tool list; it is advisory text only.
-   - Ordering inside `developerInstructions`:
-     1. tool injection block (when tools exist)
-     2. top-level `instructions`
-     3. `input` items with role `system` or `developer`
+No internal-tools instruction is injected; only request-provided `instructions` and system/developer `input` items contribute to `developerInstructions`.
 
-3) **Forwarding to app-server**
-   - The normalized tool list is forwarded to app-server as `turn.tools`:
-     - `definitions` = the (normalized) function tools
-     - `choice` = normalized `tool_choice` (`auto`, `none`, `required`, or forced name)
-     - `parallelToolCalls` = normalized `parallel_tool_calls`
-   - The tool injection text is sent via `developerInstructions`, separate from user transcript.
+## App-server config injection: internal tools disabled
 
-4) **Streaming parser configuration**
-   - The stream adapter uses the same request tool list to configure parsing:
-     - `allowedTools` = function tool names
-     - `strictTools`/`toolSchemas` = strict schema enforcement where requested
-     - If `tool_choice` is `none`, tool parsing is disabled.
+### `PROXY_DISABLE_INTERNAL_TOOLS_CONFIG=true` (default)
 
-In short: **tools define both the model-facing injection text and the parser/runtime tool constraints**, but the injection text itself is only a behavioral hint; tool execution depends on parsed `<tool_call>` output and the tool registry built from the request.
+The proxy passes `turn.config` to disable internal tools at the app-server level for the thread/turn, including:
 
-## Tool manifest
+- `features.web_search_request=false`
+- `features.shell_tool=false`
+- `features.shell_snapshot=false`
+- `features.exec_policy=false`
+- `features.unified_exec=false`
+- `features.streamable_shell=false`
+- `features.view_image_tool=false`
+- `features.apply_patch_freeform=false`
+- `tools.web_search=false`
+- `tools.view_image=false`
 
-The injection ends with a tool manifest, one line per function tool:
+In addition, the worker supervisor launches the Codex app-server with conservative defaults that keep built-in tools off.
 
-```text
-Available tools (schema):
-- tool_name_here: {"type":"object", ...}
-- another_tool: {"type":"object", ...}
-```
+### `PROXY_DISABLE_INTERNAL_TOOLS_CONFIG=false`
 
-The schema JSON is produced by `JSON.stringify(tool.parameters)`.
+No disablement config is injected. Codex internal tool calls may execute and will not be blocked by the proxy transport layer.
 
-If any tool has `strict: true`, the proxy inserts the following line before the manifest:
+## Tool calling path (primary)
 
-```text
-Strict tools: toolA, toolB. Arguments MUST conform exactly to schema.
-```
+- **Primary:** Codex app-server dynamic tools (`thread/start.dynamicTools` + JSON-RPC `item/tool/call`).
 
-## Per-tool guidance and examples
+## Tool name rewriting (collision avoidance)
 
-After the tool manifest, the proxy appends a per-tool guidance block with a schema-based example for each tool:
+Before `thread/start`, the proxy rewrites function-tool names that collide with internal tool namespaces and stores a per-thread bidirectional name map.
 
-```text
-Per-tool guidance and examples (schema-conformant):
-Tool: tool_name_here
-Description: ...
-Parameters:
-- paramA (required, string): description
-- paramB (optional, array): description
-Example tool_call:
-<tool_call>{"name":"tool_name_here","arguments":"{\"paramA\":\"example\"}"}</tool_call>
-```
+Example:
 
-Notes:
-- The `Description:` line is included only when the tool provides one.
-- `Parameters:` is derived from the tool's JSON schema (`properties`, `required`, and `type`).
-- The example `arguments` payload is generated from the schema (`default`, `example`, `examples`, `enum`, or type fallbacks).
+- Client tool name: `webSearch`
+- App-server tool name: `client_webSearch`
 
-## Tool choice variants
+Tool call requests and tool outputs are mapped back to the original client name at the HTTP boundary.
 
-The proxy varies the injected prompt based on the effective `tool_choice`:
+Implementation:
 
-### 1) No tool call requested (no tools)
-
-- Condition: `tools` omitted or contains no function tools.
-- Injection: **none** (no prompt added).
-
-### 2) No tool call requested (tool_choice: "none")
-
-When `tool_choice` is explicitly set to `"none"`, the following line is inserted before the manifest:
-
-```text
-Tool choice is none: never emit <tool_call>.
-```
-
-### 3) tool_choice: "required"
-
-When `tool_choice` is `"required"`, the following line is inserted before the manifest:
-
-```text
-Tool choice is required: you MUST emit at least one <tool_call>.
-```
-
-### 4) Forced tool choice (explicit)
-
-When `tool_choice` is a function selector (Responses or Chat Completions format), the following line is inserted before the manifest:
-
-```text
-Tool choice is forced: you MUST call "tool_name".
-```
-
-### 5) Default tool choice when omitted
-
-When `tool_choice` is omitted, the proxy defaults to `"auto"` whenever function tools are present.
-
-## Ordering
-
-`developerInstructions` is built from (in order):
-1. tool injection block (when tools exist)
-2. `instructions` (top-level request field)
-3. any `input` items with role `system` or `developer`
-
-## Example injection (tools present, tool_choice omitted)
-
-Given:
-- `tools` includes `getFileTree` and `writeToFile`
-- no explicit `tool_choice`
-- user input: "Create a new note named [[Example]]."
-
-Injected developer prompt (excerpt):
-
-```text
-Tool calling instructions:
-Only emit tool calls using <tool_call>...</tool_call>.
-Format: <tool_call>{"name":"TOOL_NAME","arguments":"{...}"}</tool_call>
-Inside <tool_call>...</tool_call>, output ONLY a JSON object with keys "name" and "arguments".
-...
-If a tool has no parameters, use arguments "{}".
-If no tool is needed, respond with plain text.
-Available tools (schema):
-- getFileTree: {"type":"object",...}
-- writeToFile: {"type":"object",...}
-Per-tool guidance and examples (schema-conformant):
-Tool: getFileTree
-Parameters:
-- (no parameters)
-Example tool_call:
-<tool_call>{"name":"getFileTree","arguments":"{}"}</tool_call>
-Tool: writeToFile
-Parameters:
-- path (required, string): ...
-- content (required, string): ...
-Example tool_call:
-<tool_call>{"name":"writeToFile","arguments":"{\"path\":\"example.md\",\"content\":\"example\"}"}</tool_call>
-```
-
-## Why tool calls can still be missing
-
-Even with tool instructions, models may ignore tool use unless `tool_choice` is set to `"required"` or a specific tool. For deterministic tool execution, set `tool_choice` explicitly in the request.
+- `src/lib/tools/tool-name-mapping.js`
+- `src/services/transport/index.js` (`rewriteDynamicToolsForAppServer`, per-thread `toolNameMap`)

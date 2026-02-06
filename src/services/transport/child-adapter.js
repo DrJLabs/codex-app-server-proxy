@@ -67,20 +67,17 @@ export class JsonRpcChildAdapter extends EventEmitter {
     try {
       const normalized = this.normalizedRequest || null;
       const turnPayload = normalized?.turn ? { ...normalized.turn } : undefined;
-      const messagePayload = normalized?.message ? { ...normalized.message } : {};
-      if (turnPayload && turnPayload.tools === undefined && messagePayload.tools !== undefined) {
+      const messagePayload = normalized?.message ? { ...normalized.message } : null;
+      if (turnPayload && turnPayload.tools === undefined && messagePayload?.tools !== undefined) {
         turnPayload.tools = messagePayload.tools;
-      } else if (
-        turnPayload &&
-        turnPayload.tools !== undefined &&
-        messagePayload.tools === undefined
-      ) {
-        messagePayload.tools = turnPayload.tools;
       }
       if (turnPayload) {
         turnPayload.items = normalizeInputItems(turnPayload.items, prompt);
         if (!Array.isArray(turnPayload.items) || turnPayload.items.length === 0) {
           turnPayload.items = [createUserMessageItem(prompt)];
+        }
+        if (Object.prototype.hasOwnProperty.call(turnPayload, "text")) {
+          delete turnPayload.text;
         }
       }
 
@@ -102,14 +99,6 @@ export class JsonRpcChildAdapter extends EventEmitter {
         return;
       }
       this.#wireContext(this.context);
-      messagePayload.items = normalizeInputItems(messagePayload.items, prompt);
-      if (!Array.isArray(messagePayload.items) || messagePayload.items.length === 0) {
-        messagePayload.items = [createUserMessageItem(prompt)];
-      }
-      if (Object.prototype.hasOwnProperty.call(messagePayload, "text")) {
-        delete messagePayload.text;
-      }
-      this.transport.sendUserMessage(this.context, messagePayload);
       await this.context.promise;
       this.#finalize(0);
     } catch (err) {
@@ -164,6 +153,18 @@ export class JsonRpcChildAdapter extends EventEmitter {
           errorInfo?.response_stream_disconnected?.httpStatusCode ??
           errorInfo?.response_stream_disconnected?.http_status_code ??
           null;
+        const additionalDetails =
+          errorPayload?.additionalDetails ??
+          params.additionalDetails ??
+          params.additional_details ??
+          null;
+        const rawCodexError = {
+          message: errorMessage || rawErrorMessage || null,
+          codexErrorInfo: errorInfo ?? codexErrorInfo ?? null,
+          additionalDetails,
+          httpStatusCode: statusCode,
+          willRetry: willRetry ?? null,
+        };
         const authRequiredSignal =
           codexErrorInfo === "unauthorized" ||
           statusCode === 401 ||
@@ -187,10 +188,12 @@ export class JsonRpcChildAdapter extends EventEmitter {
             }
           );
           const cancelWithAuth = (details = null) => {
+            const mergedDetails = details && typeof details === "object" ? { ...details } : {};
+            mergedDetails.raw_codex_error = rawCodexError;
             const authError = new TransportError("auth required", {
               code: "auth_required",
               retryable: false,
-              details,
+              details: mergedDetails,
             });
             this.transport.cancelContext?.(this.context, authError);
           };

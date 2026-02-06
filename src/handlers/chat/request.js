@@ -1,6 +1,7 @@
 import { invalidRequestBody } from "../../lib/errors.js";
 import { createUserMessageItem } from "../../lib/json-rpc/schema.ts";
 import { config as CFG } from "../../config/index.js";
+import { buildDynamicTools } from "../../lib/tools/dynamic-tools.js";
 
 class ChatJsonRpcNormalizationError extends Error {
   constructor(body, statusCode = 400) {
@@ -220,14 +221,6 @@ const normalizeLegacyFunctionCall = (rawChoice) => {
   return rawChoice;
 };
 
-const buildToolsPayload = ({ definitions, toolChoice, parallelToolCalls }) => {
-  const payload = {};
-  if (definitions) payload.definitions = definitions;
-  if (toolChoice !== undefined) payload.choice = toolChoice;
-  if (parallelToolCalls !== undefined) payload.parallelToolCalls = parallelToolCalls;
-  return Object.keys(payload).length ? payload : undefined;
-};
-
 const assertAllowedMessageRoles = (messages) => {
   if (!Array.isArray(messages)) return;
   for (const [idx, msg] of messages.entries()) {
@@ -245,6 +238,11 @@ const assertAllowedMessageRoles = (messages) => {
   }
 };
 
+const stripErrorChunks = (text) => {
+  if (!text) return "";
+  return text.replace(/<errorChunk>[\s\S]*?<\/errorChunk>/gi, "").trim();
+};
+
 const buildTranscriptFromMessages = (messages = []) => {
   const relevant = (messages || []).filter((msg) => {
     if (!msg) return false;
@@ -258,16 +256,18 @@ const buildTranscriptFromMessages = (messages = []) => {
   for (const msg of relevant) {
     const role = (msg?.role || "user").toString().toLowerCase();
     const raw = flattenMessageContent(msg?.content).trim();
-    if (!raw) continue;
+    const cleaned =
+      role === "assistant" || role === "tool" || role === "function" ? stripErrorChunks(raw) : raw;
+    if (!cleaned) continue;
     if (!needsRoleLabels && role === "user") {
-      lines.push(raw);
+      lines.push(cleaned);
       continue;
     }
     let label = role;
     if ((role === "tool" || role === "function") && msg.name) {
       label = `${role}:${String(msg.name).trim()}`;
     }
-    lines.push(`[${label}] ${raw}`);
+    lines.push(`[${label}] ${cleaned}`);
   }
   return lines.join("\n");
 };
@@ -311,8 +311,7 @@ const normalizeReasoningControls = (reasoningEffort, rawReasoning) => {
 };
 
 const normalizeResponseFormat = (responseFormat) => {
-  if (responseFormat === undefined)
-    return { responseFormat: undefined, finalOutputJsonSchema: undefined };
+  if (responseFormat === undefined) return { responseFormat: undefined, outputSchema: undefined };
   if (responseFormat === null) {
     throw new ChatJsonRpcNormalizationError(
       invalidRequestBody("response_format", "response_format must be an object when provided")
@@ -334,7 +333,7 @@ const normalizeResponseFormat = (responseFormat) => {
     );
   }
   if (type === "text" || type === "json_object") {
-    return { responseFormat: { ...responseFormat, type }, finalOutputJsonSchema: undefined };
+    return { responseFormat: { ...responseFormat, type }, outputSchema: undefined };
   }
   if (type !== "json_schema") {
     throw new ChatJsonRpcNormalizationError(
@@ -374,7 +373,7 @@ const normalizeResponseFormat = (responseFormat) => {
       type: "json_schema",
       json_schema: normalizedSchemaContainer,
     },
-    finalOutputJsonSchema: schema,
+    outputSchema: schema,
   };
 };
 
@@ -477,16 +476,31 @@ export const normalizeChatJsonRpcRequest = ({
   const combinedText = transcript || fallbackText;
   const turnItems = [createUserMessageItem(combinedText)];
   const messageItems = turnItems.map((item) => ({ ...item }));
-  const { responseFormat, finalOutputJsonSchema } = normalizeResponseFormat(body.response_format);
-  const toolsPayload = buildToolsPayload({
-    definitions,
-    toolChoice,
-    parallelToolCalls,
-  });
+  const { responseFormat, outputSchema } = normalizeResponseFormat(body.response_format);
+  const dynamicTools = buildDynamicTools(definitions, toolChoice);
   const { turnEffort, reasoningPayload } = normalizeReasoningControls(
     reasoningEffort,
     body.reasoning
   );
+  const disableInternalTools = CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG;
+  const appServerConfig = disableInternalTools
+    ? {
+        features: {
+          web_search_request: false,
+          shell_tool: false,
+          shell_snapshot: false,
+          exec_policy: false,
+          streamable_shell: false,
+          unified_exec: false,
+          view_image_tool: false,
+          apply_patch_freeform: false,
+        },
+        tools: {
+          web_search: false,
+          view_image: false,
+        },
+      }
+    : undefined;
 
   const turn = {
     model: effectiveModel,
@@ -497,8 +511,11 @@ export const normalizeChatJsonRpcRequest = ({
     effort: turnEffort,
     summary: "auto",
     stream: !!stream,
-    includeApplyPatchTool: true,
   };
+
+  if (appServerConfig) {
+    turn.config = appServerConfig;
+  }
 
   if (Number.isInteger(choiceCount) && choiceCount > 0) {
     turn.choiceCount = choiceCount;
@@ -508,12 +525,12 @@ export const normalizeChatJsonRpcRequest = ({
     turn.baseInstructions = baseInstructions;
   }
 
-  if (toolsPayload) {
-    turn.tools = toolsPayload;
+  if (dynamicTools !== undefined) {
+    turn.dynamicTools = dynamicTools;
   }
 
-  if (finalOutputJsonSchema !== undefined) {
-    turn.finalOutputJsonSchema = finalOutputJsonSchema;
+  if (outputSchema !== undefined) {
+    turn.outputSchema = outputSchema;
   }
 
   const messagePayload = {
@@ -521,20 +538,21 @@ export const normalizeChatJsonRpcRequest = ({
     includeUsage,
   };
 
+  if (stream) {
+    messagePayload.stream = true;
+  }
+
   if (temperature !== undefined) messagePayload.temperature = temperature;
   if (topP !== undefined) messagePayload.topP = topP;
   if (maxOutputTokens !== undefined) messagePayload.maxOutputTokens = maxOutputTokens;
-  if (toolsPayload) {
-    messagePayload.tools = toolsPayload;
-  }
   if (responseFormat !== undefined) {
     messagePayload.responseFormat = responseFormat;
   }
   if (reasoningPayload !== undefined) {
     messagePayload.reasoning = reasoningPayload;
   }
-  if (finalOutputJsonSchema !== undefined) {
-    messagePayload.finalOutputJsonSchema = finalOutputJsonSchema;
+  if (outputSchema !== undefined) {
+    messagePayload.outputSchema = outputSchema;
   }
 
   return { turn, message: messagePayload };
