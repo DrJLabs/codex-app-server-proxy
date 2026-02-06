@@ -32,10 +32,10 @@ Update the proxy’s JSON-RPC client initialization request (sent by the transpo
 
 ### Important compatibility detail (repo-specific)
 
-`buildInitializeParams()` intentionally emits **camelCase + snake_case mirrors** for compatibility with multiple worker versions:
+`buildInitializeParams()` emits **camelCase keys** (no snake_case mirrors):
 
-- `clientInfo` **and** `client_info`
-- `protocolVersion` **and** `protocol_version` (when provided)
+- `clientInfo`
+- `protocolVersion` (when provided)
 
 This is implemented in `src/lib/json-rpc/schema.ts` inside `buildInitializeParams()`.
 

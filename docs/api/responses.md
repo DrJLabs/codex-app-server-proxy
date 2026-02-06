@@ -71,7 +71,7 @@ Clients that echo `function_call` items back in `input` are accepted.
 When a client submits `function_call_output` items, the proxy resolves the originating app-server thread and reuses its canonical tool manifest and instructions.
 
 - If **none** of the tool outputs map to an active tool call, the request is rejected with `tool_outputs_unmatched`.
-- If some outputs match and others do not, the unmatched outputs are carried forward into the next turn transcript so the model can reconcile them without starting a new thread.
+- If some outputs match and others do not, the request is accepted. Unmatched outputs are left in the next turn transcript and the proxy logs `tool_outputs_unmatched` with a count.
 
 ## Tool name rewriting (internal collision avoidance)
 
@@ -86,7 +86,7 @@ When `PROXY_DISABLE_INTERNAL_TOOLS_CONFIG=true`, internal app-server tool notifi
 - Internal `webSearch` events -> dynamic tool `webSearch` (ensures `chatHistory: []`).
 - Internal `fileChange` events -> dynamic tool `writeToFile` or `replaceInFile` (based on presence of `diff`).
 
-If a follow-up request sends a tool output that does not match a pending tool call, the proxy appends a `[function_call_output ...]` text line to the next turn so the model can continue.
+When the shim recognizes a tool output for a shimmed internal tool call, the proxy appends a `[function_call_output ...]` text line to the next turn so the model can continue.
 
 This shim requires the client tool names above to exist; other internal tool types (for example: `commandExecution`) still fail when internal tools are disabled.
 
