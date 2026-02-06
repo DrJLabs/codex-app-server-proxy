@@ -642,7 +642,8 @@ export async function postResponsesNonStream(req, res) {
 
   const requestTools = resolvedThread?.toolset?.requestTools ?? normalized.tools;
   if (requestTools !== undefined) {
-    turn.requestTools = requestTools;
+    // Persist the original OpenAI tools manifest so tool-output follow-ups can reuse it.
+    turn.tools = requestTools;
   }
 
   const toolChoiceMode = normalizeToolChoiceMode(normalized.toolChoice);

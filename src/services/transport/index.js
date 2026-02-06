@@ -572,7 +572,9 @@ class JsonRpcTransport {
         dynamicTools: dynamicTools ?? null,
         baseInstructions: basePayload.baseInstructions ?? null,
         developerInstructions: basePayload.developerInstructions ?? null,
-        requestTools: basePayload.requestTools ?? null,
+        // OpenAI `tools` manifest: used by the proxy (stream adapter) on tool-output follow-ups,
+        // and intentionally not forwarded to the app-server JSON-RPC params.
+        requestTools: basePayload.tools ?? null,
         toolNameMap,
       });
       return context.conversationId;
@@ -623,7 +625,9 @@ class JsonRpcTransport {
       dynamicTools,
       baseInstructions: basePayload.baseInstructions ?? null,
       developerInstructions: basePayload.developerInstructions ?? null,
-      requestTools: basePayload.requestTools ?? null,
+      // OpenAI `tools` manifest: used by the proxy (stream adapter) on tool-output follow-ups,
+      // and intentionally not forwarded to the app-server JSON-RPC params.
+      requestTools: basePayload.tools ?? null,
       toolNameMap,
     });
 
@@ -1321,11 +1325,6 @@ class JsonRpcTransport {
         logBackendNotification(context.trace, { method: message.method, params });
       } catch {}
     }
-    try {
-      context.emitter.emit("notification", message);
-    } catch (err) {
-      console.warn(`${LOG_PREFIX} failed to emit notification`, err);
-    }
     const method = normalizeNotificationMethod(message.method);
     const payload = params.msg && typeof params.msg === "object" ? params.msg : params;
     if (CFG.PROXY_DISABLE_INTERNAL_TOOLS_CONFIG) {
@@ -1369,6 +1368,11 @@ class JsonRpcTransport {
         );
         return;
       }
+    }
+    try {
+      context.emitter.emit("notification", message);
+    } catch (err) {
+      console.warn(`${LOG_PREFIX} failed to emit notification`, err);
     }
     switch (method) {
       case "thread/tokenUsage/updated": {

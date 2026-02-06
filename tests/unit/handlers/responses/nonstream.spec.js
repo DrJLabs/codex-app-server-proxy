@@ -693,7 +693,7 @@ describe("responses nonstream handler", () => {
     expect(normalizedRequest.turn.dynamicTools).toEqual([
       { name: "lookup", description: "", inputSchema: {} },
     ]);
-    expect(normalizedRequest.turn.tools).toBeUndefined();
+    expect(normalizedRequest.turn.tools).toEqual(definitions);
     expect(normalizedRequest.message.tools).toBeUndefined();
   });
 

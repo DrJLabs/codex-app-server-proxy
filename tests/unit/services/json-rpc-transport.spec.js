@@ -1189,6 +1189,9 @@ describe("JsonRpcTransport request lifecycle", () => {
 
     expect(errors.some((err) => err?.code === "internal_tools_disabled")).toBe(true);
     expect(
+      notifications.some((payload) => payload?.method === "codex/event/web_search_started")
+    ).toBe(false);
+    expect(
       notifications.some((payload) => payload?.method === "codex/event/dynamic_tool_call_request")
     ).toBe(false);
 
@@ -1232,6 +1235,9 @@ describe("JsonRpcTransport request lifecycle", () => {
     await flushAsync();
 
     expect(errors.some((err) => err?.code === "internal_tools_disabled")).toBe(false);
+    expect(
+      notifications.some((payload) => payload?.method === "codex/event/web_search_started")
+    ).toBe(false);
     expect(
       notifications.some((payload) => payload?.method === "codex/event/dynamic_tool_call_request")
     ).toBe(true);
