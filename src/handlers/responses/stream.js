@@ -98,8 +98,20 @@ const respondToToolOutputs = (child, toolOutputs, { reqId, route, mode } = {}) =
     if (!callId) return;
     const callIdKey = String(callId);
     handledCallIds.add(callIdKey);
-    const outputText = toolOutput?.output ?? "";
-    const outputBytes = Buffer.byteLength(String(outputText), "utf8");
+    const outputValue = toolOutput?.output;
+    // toolOutput.output can be non-string (objects, arrays). Keep the raw value for respondToToolCall,
+    // but coerce to a stable string for hashing/logging to avoid sha256 exceptions.
+    let outputText = "";
+    if (typeof outputValue === "string") {
+      outputText = outputValue;
+    } else {
+      try {
+        outputText = JSON.stringify(outputValue);
+      } catch {
+        outputText = String(outputValue ?? "");
+      }
+    }
+    const outputBytes = Buffer.byteLength(outputText, "utf8");
     logStructured(
       {
         component: "responses",
@@ -527,11 +539,14 @@ export async function postResponsesStream(req, res) {
     if (typeof persistedBaseInstructions === "string" && persistedBaseInstructions.trim()) {
       turn.baseInstructions = persistedBaseInstructions;
     }
-    if (
-      resolvedThread.toolset?.developerInstructions !== null &&
-      resolvedThread.toolset?.developerInstructions !== undefined
-    ) {
-      turn.developerInstructions = resolvedThread.toolset.developerInstructions;
+    const persistedDeveloperInstructions = resolvedThread.toolset?.developerInstructions;
+    if (persistedDeveloperInstructions !== null && persistedDeveloperInstructions !== undefined) {
+      if (
+        typeof persistedDeveloperInstructions !== "string" ||
+        persistedDeveloperInstructions.trim() !== ""
+      ) {
+        turn.developerInstructions = persistedDeveloperInstructions;
+      }
     }
   }
 

@@ -256,7 +256,8 @@ const buildTranscriptFromMessages = (messages = []) => {
   for (const msg of relevant) {
     const role = (msg?.role || "user").toString().toLowerCase();
     const raw = flattenMessageContent(msg?.content).trim();
-    const cleaned = stripErrorChunks(raw);
+    const cleaned =
+      role === "assistant" || role === "tool" || role === "function" ? stripErrorChunks(raw) : raw;
     if (!cleaned) continue;
     if (!needsRoleLabels && role === "user") {
       lines.push(cleaned);

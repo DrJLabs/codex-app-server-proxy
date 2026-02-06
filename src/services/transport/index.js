@@ -63,18 +63,15 @@ const extractShimArgs = (payload) => {
 };
 
 const resolveShimToolName = ({ toolType, method, args }) => {
-  if (
-    toolType === "webSearch" ||
-    method.startsWith("web_search_") ||
-    method.startsWith("webSearch")
-  ) {
+  const m = typeof method === "string" ? method : "";
+  if (toolType === "webSearch" || m.startsWith("web_search_") || m.startsWith("webSearch")) {
     return { name: "webSearch", args };
   }
   if (
     toolType === "fileChange" ||
-    method.startsWith("item/fileChange") ||
-    method.startsWith("fileChange_") ||
-    method.startsWith("file_change_")
+    m.startsWith("item/fileChange") ||
+    m.startsWith("fileChange_") ||
+    m.startsWith("file_change_")
   ) {
     if (Object.prototype.hasOwnProperty.call(args, "diff")) {
       return { name: "replaceInFile", args };
@@ -98,15 +95,16 @@ const resolveShimCallId = (payload) => {
 };
 
 const shouldShimInternalTool = ({ toolType, method, payload }) => {
-  if (toolType === "webSearch" || method.startsWith("web_search_")) return true;
-  if (toolType === "fileChange" || method.startsWith("item/fileChange")) return true;
-  if (toolType === "commandExecution" || method.startsWith("item/commandExecution")) return true;
-  if (toolType === "mcpToolCall" || method.startsWith("mcpToolCall")) return true;
+  const m = typeof method === "string" ? method : "";
+  if (toolType === "webSearch" || m.startsWith("web_search_")) return true;
+  if (toolType === "fileChange" || m.startsWith("item/fileChange")) return true;
+  if (toolType === "commandExecution" || m.startsWith("item/commandExecution")) return true;
+  if (toolType === "mcpToolCall" || m.startsWith("mcpToolCall")) return true;
   const status =
     payload?.item?.status ?? payload?.status ?? payload?.item?.state ?? payload?.state ?? null;
   const normalized = typeof status === "string" ? status.toLowerCase() : "";
   if (normalized && (normalized === "started" || normalized === "begin")) return true;
-  return method.includes("begin") || method.includes("started");
+  return m.includes("begin") || m.includes("started");
 };
 
 const summarizeTurnParamsForLog = (params) => {
@@ -1243,8 +1241,9 @@ class JsonRpcTransport {
       console.warn(`${LOG_PREFIX} failed to emit shim tool request`, err);
       return false;
     }
-    console.warn(
-      `${LOG_PREFIX} shimmed internal tool ${toolType ?? "unknown"} -> ${resolved.name} (${method})`
+    logStructured(
+      { component: "json_rpc", event: "internal_tool_shimmed", level: "info" },
+      { tool_type: toolType ?? "unknown", resolved_name: resolved.name, method }
     );
     return true;
   }

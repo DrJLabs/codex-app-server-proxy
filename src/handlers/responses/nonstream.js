@@ -595,11 +595,14 @@ export async function postResponsesNonStream(req, res) {
     if (typeof persistedBaseInstructions === "string" && persistedBaseInstructions.trim()) {
       turn.baseInstructions = persistedBaseInstructions;
     }
-    if (
-      resolvedThread.toolset?.developerInstructions !== null &&
-      resolvedThread.toolset?.developerInstructions !== undefined
-    ) {
-      turn.developerInstructions = resolvedThread.toolset.developerInstructions;
+    const persistedDeveloperInstructions = resolvedThread.toolset?.developerInstructions;
+    if (persistedDeveloperInstructions !== null && persistedDeveloperInstructions !== undefined) {
+      if (
+        typeof persistedDeveloperInstructions !== "string" ||
+        persistedDeveloperInstructions.trim() !== ""
+      ) {
+        turn.developerInstructions = persistedDeveloperInstructions;
+      }
     }
   }
 

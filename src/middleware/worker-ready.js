@@ -5,6 +5,7 @@ import {
 } from "../services/backend-mode.js";
 import { isWorkerSupervisorReady, getWorkerStatus } from "../services/worker/supervisor.js";
 import { getJsonRpcTransport } from "../services/transport/index.js";
+import { logStructured } from "../services/logging/schema.js";
 import { applyCors as applyCorsUtil } from "../utils.js";
 import { config as CFG } from "../config/index.js";
 
@@ -13,10 +14,17 @@ const CORS_ALLOWED = CFG.PROXY_CORS_ALLOWED_ORIGINS;
 
 export async function requireWorkerReady(req, res, next) {
   try {
+    const reqId = res?.locals?.req_id ?? null;
     const backendMode = selectBackendMode();
     if (backendMode === BACKEND_DISABLED) {
-      console.warn(
-        "[proxy][worker-supervisor] app-server disabled; returning 503 backend_unavailable"
+      logStructured(
+        {
+          component: "worker_supervisor",
+          event: "worker_gate",
+          level: "warn",
+          req_id: reqId,
+        },
+        { status: "app_server_disabled" }
       );
       applyCorsUtil(req, res, CORS_ENABLED, CORS_ALLOWED);
       return res.status(503).json({
@@ -56,13 +64,26 @@ export async function requireWorkerReady(req, res, next) {
         message: err instanceof Error ? err.message : String(err || "unknown error"),
         code: err && typeof err === "object" ? err.code : undefined,
       };
-      console.warn(
-        "[proxy][worker-supervisor] handshake attempt failed; returning 503 backend_unavailable",
-        safe
+      logStructured(
+        {
+          component: "worker_supervisor",
+          event: "worker_gate",
+          level: "warn",
+          req_id: reqId,
+        },
+        { status: "handshake_failed", error: safe }
       );
     }
 
-    console.warn("[proxy][worker-supervisor] worker not ready; returning 503 backend_unavailable");
+    logStructured(
+      {
+        component: "worker_supervisor",
+        event: "worker_gate",
+        level: "warn",
+        req_id: reqId,
+      },
+      { status: "not_ready" }
+    );
     applyCorsUtil(req, res, CORS_ENABLED, CORS_ALLOWED);
     return res.status(503).json({
       error: {

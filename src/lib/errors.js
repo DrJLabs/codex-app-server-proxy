@@ -112,16 +112,15 @@ const extractCodexErrorFields = (input) => {
   const message = typeof base.message === "string" ? base.message : undefined;
   const codexErrorInfo = base.codexErrorInfo ?? base.codex_error_info ?? undefined;
   const additionalDetails = base.additionalDetails ?? base.additional_details ?? undefined;
+  const rawCode = base.code;
+  const codeString = typeof rawCode === "string" ? rawCode.trim() : "";
+  const parsedCode = codeString ? Number(codeString) : NaN;
   const jsonRpcCode =
-    typeof base.code === "number"
-      ? base.code
-      : typeof base.code === "string" && base.code.trim()
-        ? Number(base.code)
-        : undefined;
+    typeof rawCode === "number" ? rawCode : Number.isFinite(parsedCode) ? parsedCode : undefined;
   const infoType =
     codexErrorInfo && typeof codexErrorInfo === "object"
       ? (codexErrorInfo.type ?? codexErrorInfo.name ?? codexErrorInfo.code)
-      : codexErrorInfo;
+      : (codexErrorInfo ?? (codeString && !Number.isFinite(parsedCode) ? codeString : undefined));
   const httpStatusCode =
     base.httpStatusCode ??
     base.http_status_code ??
