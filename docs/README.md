@@ -53,11 +53,9 @@ This folder is the canonical index for repository documentation. Update this fil
 - [`api-v2-migration/client-to-app-server.md`](api-v2-migration/client-to-app-server.md) — `/v1/responses` openai-json ingress -> JSON-RPC handoff trace
 - [`api-v2-migration/app-server-to-client.md`](api-v2-migration/app-server-to-client.md) — app-server tool request/output -> client response reverse trace
 
-## Plans (working drafts)
+## Plans
 
-- [`plans/2026-01-25-obsidian-tool-call-simulation-v2.md`](plans/2026-01-25-obsidian-tool-call-simulation-v2.md) — Responses tool-call simulation v2 implementation plan
-- [`plans/2026-01-29-logging-gaps-full-tracing-design.md`](plans/2026-01-29-logging-gaps-full-tracing-design.md) — Dev-only raw capture design for `/v1/responses`
-- [`plans/2026-01-29-logging-gaps-full-tracing-plan.md`](plans/2026-01-29-logging-gaps-full-tracing-plan.md) — Implementation plan for full tracing gaps
+The repository keeps dated implementation plans in `docs/_archive/plans/`. These are useful for historical context but are not maintained as canonical docs.
 
 ## Internal docs (not published)
 
@@ -65,7 +63,7 @@ This folder is the canonical index for repository documentation. Update this fil
 
 ## Archive
 
-- `docs/_archive/` (gitignored) — local-only historical root snapshots; not authoritative for current setup.
+- `docs/_archive/` (mostly gitignored) — historical snapshots and dated notes; not authoritative for current setup.
 
 ## Doc hygiene
 
