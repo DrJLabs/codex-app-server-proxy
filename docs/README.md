@@ -5,10 +5,17 @@ This folder is the canonical index for repository documentation. Update this fil
 ## Start here
 
 - [`../README.md`](../README.md) — overview + quickstart
-- [`README-root.md`](README-root.md) — snapshot of the repository README for doc-local reference
+- [`README-root.md`](README-root.md) — generated snapshot of the repository README for doc-local reference
 - [`getting-started.md`](getting-started.md) — first-run walkthrough
 - [`configuration.md`](configuration.md) — environment variables and defaults (authoritative)
 - [`architecture.md`](architecture.md) — architecture entry point (canonical links)
+
+## Docs policy
+
+- Canonical docs: `docs/api/*`, `docs/configuration.md`, `docs/deployment/*`, `docs/ops/*`, `docs/observability.md`, `docs/troubleshooting.md`
+- Reference captures: `docs/reference/*`, `docs/references/*` (source material, may be verbose)
+- Archive: `docs/_archive/*` (historical context; not kept current)
+- `docs/README-root.md` is generated from `README.md` via `npm run docs:sync-readme-root`
 
 ## Development
 
@@ -63,7 +70,7 @@ The repository keeps dated implementation plans in `docs/_archive/plans/`. These
 
 ## Archive
 
-- `docs/_archive/` (mostly gitignored) — historical snapshots and dated notes; not authoritative for current setup.
+- `docs/_archive/` (tracked) — historical snapshots and dated notes; not authoritative for current setup.
 
 ## Doc hygiene
 

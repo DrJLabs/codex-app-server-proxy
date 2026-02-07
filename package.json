@@ -20,6 +20,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "lint:runbooks": "prettier -c docs/runbooks docs/ops/runbooks.md",
+    "docs:sync-readme-root": "node scripts/sync-readme-root.mjs",
     "format": "prettier -w .",
     "format:check": "prettier -c .",
     "secret-scan": "node scripts/secret-scan-staged.mjs",

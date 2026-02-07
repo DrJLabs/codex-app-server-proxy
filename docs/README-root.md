@@ -1,3 +1,9 @@
+<!-- GENERATED: README-root
+This file is generated from ../README.md.
+Run: npm run docs:sync-readme-root
+Generated at: 2026-02-07T02:01:59.352Z
+-->
+
 # Codex App-Server Proxy - OpenAI Responses-first proxy for Codex CLI
 
 Goal: let any OpenAI Responses client (SDKs, IDEs, curl) talk to Codex CLI as if it were a standard model API. `/v1/responses` is the primary endpoint; `/v1/chat/completions` remains for compatibility (especially Obsidian Copilot). The proxy exposes `/v1/models`, `/v1/responses`, and `/v1/chat/completions`, streams with SSE, and keeps output shaping minimal so existing tools work without changes.
@@ -71,7 +77,7 @@ For production requirements (Traefik, Codex HOME, auth), see [docs/deployment/pr
 ## Choose your client path
 
 - Standard Responses clients: use `/v1/responses` and keep the default `openai-json` output mode. See [docs/api/responses.md](api/responses.md) and [docs/api/overview.md](api/overview.md).
-- Obsidian Copilot: Copilot chooses the endpoint based on the selected model. With current ChatGPT-login Codex support (gpt-5*), it uses `/v1/responses`. If you select a chat-completions model, it uses `/v1/chat/completions` with streaming enabled and expects tool blocks as text (`obsidian-xml`). See [docs/api/chat-completions.md](api/chat-completions.md) and [docs/getting-started.md](getting-started.md).
+- Obsidian Copilot: Copilot chooses the endpoint based on the selected model. With current ChatGPT-login Codex support (gpt-5\*), it uses `/v1/responses`. If you select a chat-completions model, it uses `/v1/chat/completions` with streaming enabled and expects tool blocks as text (`obsidian-xml`). See [docs/api/chat-completions.md](api/chat-completions.md) and [docs/getting-started.md](getting-started.md).
 
 ## Minimal configuration
 
@@ -115,28 +121,11 @@ See [external/README.md](../external/README.md) for details.
 - [docs/getting-started.md](getting-started.md) - first run walkthroughs
 - [docs/local-development.md](local-development.md) - local workflows (Node vs shim vs compose)
 - [docs/api/overview.md](api/overview.md) - endpoint overview + curl examples
-- [docs/api/responses.md](api/responses.md) - `/v1/responses` usage notes
-- [docs/api/chat-completions.md](api/chat-completions.md) - `/v1/chat/completions` usage notes
 - [docs/configuration.md](configuration.md) - environment variables and defaults
-- [docs/deployment/dev-stack.md](deployment/dev-stack.md) - dev stack compose
 - [docs/deployment/production.md](deployment/production.md) - production compose + Traefik
 - [docs/ops/runbooks.md](ops/runbooks.md) - smoke, snapshot, rollback, backup
 - [docs/observability.md](observability.md) - logs, metrics, tracing
-- [docs/reference/config-matrix.md](reference/config-matrix.md) - environment/mount matrix
 - [docs/troubleshooting.md](troubleshooting.md) - common issues
-- [docs/openai-endpoint-golden-parity.md](openai-endpoint-golden-parity.md) - parity contract
-- [docs/responses-endpoint/overview.md](responses-endpoint/overview.md) - `/v1/responses` implementation notes
-- [docs/responses-endpoint/app-server-tools.md](responses-endpoint/app-server-tools.md) - tool manifest limitations
-- [docs/responses-endpoint/prompt-injection.md](responses-endpoint/prompt-injection.md) - responses tool-call prompt injection matrix
-- [docs/reference/obsidian-tool-manifest.md](reference/obsidian-tool-manifest.md) - Obsidian Copilot tool manifest capture
-- [docs/reference/obsidian-developer-prompt-5-tools.md](reference/obsidian-developer-prompt-5-tools.md) - Obsidian Copilot developer prompt capture (short tools)
-- [docs/reference/obsidian-developer-prompt-13-tools.md](reference/obsidian-developer-prompt-13-tools.md) - Obsidian Copilot developer prompt capture (full tools)
-- [docs/reference/app-server-protocol.schema.json](reference/app-server-protocol.schema.json) - JSON-RPC schema bundle
-- [docs/reference/app-server-schema-0.89-tools.md](reference/app-server-schema-0.89-tools.md) - app-server tools schema
-- [docs/logging-gaps/README.md](logging-gaps/README.md) - observability gap tracker
-- [docs/api-v2-migration/client-to-app-server.md](api-v2-migration/client-to-app-server.md) - `/v1/responses` openai-json ingress -> JSON-RPC handoff trace
-- [docs/api-v2-migration/app-server-to-client.md](api-v2-migration/app-server-to-client.md) - app-server tool request/output -> client response reverse trace
-- Dated implementation plans are archived under [docs/_archive/plans/](./_archive/plans/).
 
 ## Contributing
 
@@ -144,4 +133,4 @@ See `CONTRIBUTING.md` for local setup and workflow expectations.
 
 ## License
 
-This project is released under the [MIT License](LICENSE).
+This project is released under the [MIT License](../LICENSE).

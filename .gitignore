@@ -18,12 +18,13 @@ bmad-bak/
 .bmad-core/
 .bmad-infrastructure-devops/
 .bmad-ephemeral/
-# Local archives (not authoritative)
-docs/_archive/
-!docs/_archive/v4-backup/.bmad-core/
-!docs/_archive/v4-backup/.bmad-core/**
-!docs/_archive/v4-backup/.bmad-infrastructure-devops/
-!docs/_archive/v4-backup/.bmad-infrastructure-devops/**
+# Docs archive is tracked (historical reference; not authoritative for current setup).
+# Keep local-only scratch notes outside of `docs/_archive/`.
+docs/_archive/app-server-migration/
+docs/_archive/bmad/
+docs/_archive/responses-api/
+docs/_archive/responses-endpoint/
+docs/_archive/root-snapshots/
 .serena/
 .worktrees/
 external/*
