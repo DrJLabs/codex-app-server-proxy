@@ -59,6 +59,13 @@ npm run dev:shim
   docker compose up -d
   ```
 
+- Optional: a separate `app-responses` service exists in `docker-compose.yml` for hosting `/v1/responses` on a
+  dedicated domain with its own Codex home directory. It is disabled by default, but can be enabled with:
+
+  ```bash
+  docker compose --profile responses up -d
+  ```
+
 - Local build:
 
   ```bash

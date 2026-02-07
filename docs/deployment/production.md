@@ -39,6 +39,20 @@ http:
 docker compose up -d --pull always --force-recreate
 ```
 
+### Optional: Dedicated Responses Host (compose profile)
+
+`docker-compose.yml` contains an optional `app-responses` service that can host `/v1/responses` on a dedicated
+domain (separate Traefik routers) and with a separate Codex home directory (`.codex-responses-api/`).
+
+This service is disabled by default and is only started when the `responses` profile is enabled:
+
+```bash
+docker compose --profile responses up -d --pull always --force-recreate
+```
+
+If you enable it, set `RESPONSES_DOMAIN` (and optionally `RESPONSES_CORS_ALLOWED_ORIGINS`, `RESPONSES_HOST_PORT`,
+and `RESPONSES_PORT`) and provision `./.codex-responses-api/` with Codex credentials (mirrors `.codex-api/`).
+
 If you need a local build instead of GHCR, set `IMAGE` explicitly or use the local compose example ([`../../infra/compose/docker-compose.local.example.yml`](../../infra/compose/docker-compose.local.example.yml)).
 
 ## Verify

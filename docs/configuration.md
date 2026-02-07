@@ -8,6 +8,30 @@ This proxy is configured via environment variables. Defaults live in [`../src/co
 - Dev stack (`infra/compose/compose.dev.stack.yml`) loads `.env.dev`.
 - Prod compose (`docker-compose.yml`) loads `.env` on the host.
 
+## Compose-only settings (optional services)
+
+Some settings exist only to control optional services in `docker-compose.yml` (they are not required for the
+default single-service deployment).
+
+### Dedicated Responses Host (`app-responses` profile)
+
+`docker-compose.yml` includes an optional `app-responses` service which can host `/v1/responses` on a dedicated
+`RESPONSES_DOMAIN` and with a separate Codex home directory (`.codex-responses-api/`).
+
+This service is disabled by default and only starts when you enable the Compose `responses` profile:
+
+```bash
+docker compose --profile responses up -d
+```
+
+When enabling it, set:
+
+- `RESPONSES_DOMAIN` (required for correct Traefik routing)
+- `RESPONSES_CORS_ALLOWED_ORIGINS` (optional; defaults in compose)
+- `RESPONSES_HOST_PORT` / `RESPONSES_PORT` (optional)
+
+And provision `./.codex-responses-api/` similarly to `./.codex-api/`.
+
 ## Core settings
 
 | Variable | Default | Purpose |

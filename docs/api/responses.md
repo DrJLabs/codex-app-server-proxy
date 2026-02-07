@@ -2,6 +2,18 @@
 
 This endpoint aims to match the OpenAI Responses API closely and uses a native responses pipeline (no chat wrapper).
 
+## Optional: Dedicated Responses Host (compose profile)
+
+In production compose (`docker-compose.yml`), `/v1/responses` is served on the main `DOMAIN` by default.
+
+An optional `app-responses` service exists for hosting `/v1/responses` on a dedicated `RESPONSES_DOMAIN` with its
+own Codex home directory (`.codex-responses-api/`). This service is disabled by default and only starts when the
+Compose `responses` profile is enabled:
+
+```bash
+docker compose --profile responses up -d
+```
+
 ## Intended clients
 
 - Standard OpenAI Responses clients should use this endpoint.
