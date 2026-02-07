@@ -109,6 +109,9 @@ services:
     restart: unless-stopped
 
   app-responses:
+    # Disabled by default: this service is only started when the "responses" profile
+    # is enabled (e.g. `docker compose --profile responses up -d`).
+    profiles: ["responses"]
     image: ${IMAGE:-ghcr.io/drjlabs/codex-app-server-proxy:latest}
     environment:
       - PORT=${RESPONSES_PORT:-11435}
