@@ -120,6 +120,7 @@ compose.dev.stack.yml
 docker-compose.local.example.yml
 docker-compose.local.yml
 docker-compose.dev.yml
+docker-compose.override.yml
 # Allow structured logging schema module under src
 !src/services/logging/
 !src/services/logging/**

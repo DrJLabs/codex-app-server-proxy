@@ -25,6 +25,7 @@ and the Traefik `labels` list) live only in the override file to avoid accidenta
 ```bash
 npm run dev:stack:up
 npm run dev:stack:logs
+npm run dev:stack:config
 ```
 
 The stack defaults to `http://127.0.0.1:18010/v1`.

@@ -41,6 +41,7 @@ This folder is the canonical index for repository documentation. Update this fil
 
 - [`observability.md`](observability.md) — logs, request IDs, metrics, tracing
 - [`reference/config-matrix.md`](reference/config-matrix.md) — environment/mount matrix + ForwardAuth notes
+- [`reference/compose-layout.md`](reference/compose-layout.md) — compose file map (prod, dev overlays, local examples)
 
 ## API contracts (canonical)
 

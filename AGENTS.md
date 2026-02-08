@@ -7,6 +7,7 @@
 - **Key directories:**
   - `src/` core proxy logic (app wiring, routes, handlers, services) used by `server.js`.
   - `auth/` Traefik ForwardAuth microservice.
+  - `compose/` Compose templates for dev overlays and local examples (production compose remains `docker-compose.yml`).
   - `scripts/` dev/ops helpers (dev.sh, smoke, stack snapshot/rollback, port sync).
   - `tests/` unit, integration, parity, and Playwright suites plus fixtures.
   - `docs/` schema exports and runbooks (read only when relevant to the task).
@@ -27,6 +28,14 @@
 - ForwardAuth shares the same `PROXY_API_KEY` as the proxy; Traefik calls `/verify` on loopback (`127.0.0.1`) before routing to the app.
 - Dev stack (`npm run dev:stack:up`) brings up Traefik + auth + proxy on the deterministic JSON-RPC shim unless you point `CODEX_BIN` at a real Codex CLI.
 - CI/e2e rely on the deterministic shim (`scripts/fake-codex-jsonrpc.js`); changing stream shape or schema requires updating fixtures under `tests/`.
+
+## Compose layout (canonical)
+
+- Production: `docker-compose.yml` (used by `npm run prod:stack:*`).
+- Dev stack: `compose/dev-stack.base.yml` + `compose/dev-stack.override.yml` (used by `npm run dev:stack:*`).
+  - Edit ports and Traefik labels in `compose/dev-stack.override.yml` (lists merge by concatenation across overlays).
+  - Edit env/mounts/worker knobs in `compose/dev-stack.base.yml`.
+- Local build template: `compose/docker-compose.local.example.yml` (copy to `docker-compose.local.yml`, ignored by git).
 
 ## Architecture style (why layered here)
 

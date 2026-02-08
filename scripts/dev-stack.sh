@@ -26,8 +26,11 @@ case "$action" in
   logs)
     docker compose "${compose_args[@]}" logs -f --tail=200 "$@"
     ;;
+  config)
+    docker compose "${compose_args[@]}" config "$@"
+    ;;
   *)
-    echo "Usage: $0 {up|down|logs} [args...]" >&2
+    echo "Usage: $0 {up|down|logs|config} [args...]" >&2
     exit 1
     ;;
 esac

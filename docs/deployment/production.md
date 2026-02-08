@@ -47,6 +47,7 @@ If you are deploying from a checkout of this repository on the production host, 
 npm run prod:stack:up
 npm run prod:stack:down
 npm run prod:stack:logs
+npm run prod:stack:config
 npm run prod:stack:rebuild
 ```
 

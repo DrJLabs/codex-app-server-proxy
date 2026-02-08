@@ -27,6 +27,7 @@ This document focuses on running the proxy locally for development and debugging
   ```bash
   npm run dev:stack:up
   npm run dev:stack:logs
+  npm run dev:stack:config
   npm run dev:stack:down
   ```
 

@@ -39,13 +39,16 @@ case "$action" in
   logs)
     docker compose "${compose_args[@]}" logs -f --tail=200 "$@"
     ;;
+  config)
+    docker compose "${compose_args[@]}" config "$@"
+    ;;
   rebuild)
     docker compose "${compose_args[@]}" down --remove-orphans
     docker compose "${compose_args[@]}" up -d --pull always --force-recreate "$@"
     ;;
   *)
     cat >&2 <<'TXT'
-Usage: bash scripts/prod-stack.sh {up|down|logs|rebuild} [args...]
+Usage: bash scripts/prod-stack.sh {up|down|logs|config|rebuild} [args...]
 
 Env:
   PROD_PROJECT=codex-prod          # optional compose project name (otherwise default)
@@ -54,4 +57,3 @@ TXT
     exit 1
     ;;
 esac
-
