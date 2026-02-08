@@ -12,11 +12,12 @@ This repository historically kept a detailed dev→prod playbook under `docs/pri
 3. Sync non-secret Codex config:
    - `npm run port:sync-config` (copies `.codev/{config.toml,AGENTS.md}` → `.codex-api/`, does not copy `auth.json`)
 4. Deploy on the production host:
-   - `docker compose up -d --build --force-recreate`
+   - `docker compose up -d --pull always --force-recreate`
 5. Verify:
    - `DOMAIN=<domain> KEY=<key> npm run smoke:prod`
    - Ensure `PROXY_METRICS_TOKEN` is set (or pass `METRICS_TOKEN=...`) when metrics are enabled, otherwise the smoke check will 403 on `/metrics`.
-   - Tool-call smoke targets `/v1/responses` with textual `<use_tool>` by default; override with `TOOL_SMOKE_ENDPOINT=chat TOOL_SMOKE_MODES=structured` when validating structured tool_calls.
+   - Tool-call smoke is disabled by default; enable only when tool calling is enabled in that environment:
+     - `SMOKE_TOOL_CALLS=1 DOMAIN=<domain> KEY=<key> npm run smoke:prod`
 
 ## References
 

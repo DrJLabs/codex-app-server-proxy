@@ -39,6 +39,23 @@ http:
 docker compose up -d --pull always --force-recreate
 ```
 
+### Optional: Use Repo Scripts
+
+If you are deploying from a checkout of this repository on the production host, you can use:
+
+```bash
+npm run prod:stack:up
+npm run prod:stack:down
+npm run prod:stack:logs
+npm run prod:stack:rebuild
+```
+
+By default, this does not start the optional `app-responses` compose profile. To include it:
+
+```bash
+PROD_ENABLE_RESPONSES=1 npm run prod:stack:up
+```
+
 ### Optional: Dedicated Responses Host (compose profile)
 
 `docker-compose.yml` contains an optional `app-responses` service that can host `/v1/responses` on a dedicated
@@ -59,6 +76,7 @@ If you need a local build instead of GHCR, set `IMAGE` explicitly or use the loc
 
 - Health (origin): `curl -s 127.0.0.1:11435/healthz | jq .`
 - Smoke script (origin + edge): `DOMAIN=<your-domain> KEY=<your-key> npm run smoke:prod`
+- Optional tool smoke (only if tool calling is enabled): `SMOKE_TOOL_CALLS=1 DOMAIN=<your-domain> KEY=<your-key> npm run smoke:prod`
 - Optional live E2E: `LIVE_BASE_URL=https://<your-domain> KEY=<your-key> npm run test:live`
 
 ## Notes

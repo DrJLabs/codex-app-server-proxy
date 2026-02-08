@@ -7,6 +7,7 @@ set -Eeuo pipefail
 # Optional:
 #   ORIGIN_HOST=127.0.0.1   # IP/host where Traefik listens (default 127.0.0.1)
 #   SKIP_ORIGIN=1            # only test via public domain
+#   SMOKE_TOOL_CALLS=1       # enable tool-call streaming smoke (disabled by default)
 
 # Load env quietly from repo `.env` if present to populate KEY/PROXY_API_KEY
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -22,6 +23,7 @@ STREAM_TIMEOUT="${SMOKE_STREAM_TIMEOUT:-120}"
 METRICS_ENDPOINT="${METRICS_ENDPOINT:-http://127.0.0.1:11435/metrics}"
 METRICS_TOKEN="${METRICS_TOKEN:-${PROXY_METRICS_TOKEN:-}}"
 METRICS_PAYLOAD=""
+SMOKE_TOOL_CALLS="${SMOKE_TOOL_CALLS:-0}"
 
 pass() { printf "[PASS] %s\n" "$*"; }
 fail() { printf "[FAIL] %s\n" "$*"; exit 1; }
@@ -121,50 +123,55 @@ if [[ -n "$KEY" ]]; then
   fi
   rm -f "$SSE_OUT"
 
-  # Tool-call streaming smoke (structured + optional modes)
-  TOOL_SMOKE_MODEL="${TOOL_SMOKE_MODEL:-codex-5}"
-  TOOL_SMOKE_TIMEOUT_MS="${TOOL_SMOKE_TIMEOUT_MS:-30000}"
-  TOOL_SMOKE_ENDPOINT="${TOOL_SMOKE_ENDPOINT:-responses}"
-  TOOL_SMOKE_MODES="${TOOL_SMOKE_MODES:-structured}"
-  run_tool_smoke() {
-    local mode="$1"; shift
-    local flags=("$@")
-    local out
-    out=$(mktemp)
-    if BASE_URL="$BASE_CF" MODEL="$TOOL_SMOKE_MODEL" KEY="$KEY" TIMEOUT_MS="$TOOL_SMOKE_TIMEOUT_MS" \
-      TOOL_SMOKE_ENDPOINT="$TOOL_SMOKE_ENDPOINT" \
-      node "$ROOT_DIR/scripts/smoke/stream-tool-call.js" "${flags[@]}" >"$out" 2>&1; then
-      pass "cf tool-call smoke (${mode})"
-      cat "$out"
-    else
-      echo "--- tool-call smoke output (${mode}) ---"; cat "$out"; echo "------------------------------------"
+  if [[ "$SMOKE_TOOL_CALLS" == "1" ]]; then
+    # Tool-call streaming smoke (structured + optional modes). Disabled by default since many prod
+    # deployments run with tool calling blocked/suppressed.
+    TOOL_SMOKE_MODEL="${TOOL_SMOKE_MODEL:-codex-5}"
+    TOOL_SMOKE_TIMEOUT_MS="${TOOL_SMOKE_TIMEOUT_MS:-30000}"
+    TOOL_SMOKE_ENDPOINT="${TOOL_SMOKE_ENDPOINT:-responses}"
+    TOOL_SMOKE_MODES="${TOOL_SMOKE_MODES:-structured}"
+    run_tool_smoke() {
+      local mode="$1"; shift
+      local flags=("$@")
+      local out
+      out=$(mktemp)
+      if BASE_URL="$BASE_CF" MODEL="$TOOL_SMOKE_MODEL" KEY="$KEY" TIMEOUT_MS="$TOOL_SMOKE_TIMEOUT_MS" \
+        TOOL_SMOKE_ENDPOINT="$TOOL_SMOKE_ENDPOINT" \
+        node "$ROOT_DIR/scripts/smoke/stream-tool-call.js" "${flags[@]}" >"$out" 2>&1; then
+        pass "cf tool-call smoke (${mode})"
+        cat "$out"
+      else
+        echo "--- tool-call smoke output (${mode}) ---"; cat "$out"; echo "------------------------------------"
+        rm -f "$out"
+        fail "cf tool-call smoke (${mode})"
+      fi
       rm -f "$out"
-      fail "cf tool-call smoke (${mode})"
-    fi
-    rm -f "$out"
-  }
+    }
 
-  IFS=',' read -ra MODES <<<"$TOOL_SMOKE_MODES"
-  for mode in "${MODES[@]}"; do
-    case "$mode" in
-      structured|"")
-        run_tool_smoke "structured" ${TOOL_SMOKE_FLAGS:-}
-        ;;
-      disconnect)
-        if [[ "$TOOL_SMOKE_ENDPOINT" == "responses" ]]; then
-          echo "(Skipping tool-call disconnect mode for responses endpoint)"
-          continue
-        fi
-        run_tool_smoke "disconnect" --disconnect-after-first-tool --allow-single ${TOOL_SMOKE_FLAGS:-}
-        ;;
-      textual)
-        run_tool_smoke "textual" --expect-xml --allow-single ${TOOL_SMOKE_FLAGS:-}
-        ;;
-      *)
-        echo "(Skipping unknown tool-call smoke mode: $mode)"
-        ;;
-    esac
-  done
+    IFS=',' read -ra MODES <<<"$TOOL_SMOKE_MODES"
+    for mode in "${MODES[@]}"; do
+      case "$mode" in
+        structured|"")
+          run_tool_smoke "structured" ${TOOL_SMOKE_FLAGS:-}
+          ;;
+        disconnect)
+          if [[ "$TOOL_SMOKE_ENDPOINT" == "responses" ]]; then
+            echo "(Skipping tool-call disconnect mode for responses endpoint)"
+            continue
+          fi
+          run_tool_smoke "disconnect" --disconnect-after-first-tool --allow-single ${TOOL_SMOKE_FLAGS:-}
+          ;;
+        textual)
+          run_tool_smoke "textual" --expect-xml --allow-single ${TOOL_SMOKE_FLAGS:-}
+          ;;
+        *)
+          echo "(Skipping unknown tool-call smoke mode: $mode)"
+          ;;
+      esac
+    done
+  else
+    echo "(Skipping tool-call smoke; set SMOKE_TOOL_CALLS=1 to enable)"
+  fi
 else
   echo "(Skipping auth chat tests; set KEY=...)"
 fi

@@ -6,10 +6,8 @@ This repo includes scripts for common operator workflows (snapshot, rollback, ba
 
 - Dev: `npm run smoke:dev`
 - Prod: `DOMAIN=<domain> KEY=<key> npm run smoke:prod`
-- Tool-call smoke defaults to `/v1/responses`:
-  - Dev smoke uses `TOOL_SMOKE_MODES=textual`.
-  - Prod smoke defaults to `TOOL_SMOKE_MODES=structured`.
-  - Override: `TOOL_SMOKE_ENDPOINT=chat TOOL_SMOKE_MODES=structured` to assert structured tool_calls on chat completions.
+- Tool-call smoke is disabled by default (many environments block/suppress tool calling). Enable it only when needed:
+  - `SMOKE_TOOL_CALLS=1 DOMAIN=<domain> KEY=<key> npm run smoke:prod`
 - If `PROXY_ENABLE_METRICS=true`, set `PROXY_METRICS_TOKEN` in `.env`/`.env.dev` (or pass `METRICS_TOKEN=...` when running smoke) to avoid 403s from `/metrics`.
 
 ## Snapshot (release bundle)
