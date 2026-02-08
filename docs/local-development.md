@@ -21,8 +21,8 @@ This document focuses on running the proxy locally for development and debugging
 
 ## Docker workflows
 
-- Local compose example: [`../infra/compose/docker-compose.local.example.yml`](../infra/compose/docker-compose.local.example.yml) (copy to `docker-compose.local.yml`)
-- Dev stack: [`../infra/compose/compose.dev.stack.yml`](../infra/compose/compose.dev.stack.yml) via:
+- Local compose example: [`../compose/docker-compose.local.example.yml`](../compose/docker-compose.local.example.yml) (copy to `docker-compose.local.yml`)
+- Dev stack: [`../compose/dev-stack.yml`](../compose/dev-stack.yml) via:
 
   ```bash
   npm run dev:stack:up

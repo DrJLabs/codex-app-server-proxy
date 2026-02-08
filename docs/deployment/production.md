@@ -70,7 +70,7 @@ docker compose --profile responses up -d --pull always --force-recreate
 If you enable it, set `RESPONSES_DOMAIN` (and optionally `RESPONSES_CORS_ALLOWED_ORIGINS`, `RESPONSES_HOST_PORT`,
 and `RESPONSES_PORT`) and provision `./.codex-responses-api/` with Codex credentials (mirrors `.codex-api/`).
 
-If you need a local build instead of GHCR, set `IMAGE` explicitly or use the local compose example ([`../../infra/compose/docker-compose.local.example.yml`](../../infra/compose/docker-compose.local.example.yml)).
+If you need a local build instead of GHCR, set `IMAGE` explicitly or use the local compose example ([`../../compose/docker-compose.local.example.yml`](../../compose/docker-compose.local.example.yml)).
 
 ## Verify
 

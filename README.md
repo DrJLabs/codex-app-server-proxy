@@ -69,7 +69,7 @@ npm run dev:shim
 - Local build:
 
   ```bash
-  cp infra/compose/docker-compose.local.example.yml docker-compose.local.yml
+  cp compose/docker-compose.local.example.yml docker-compose.local.yml
   PROXY_API_KEY=codex-local-secret docker compose -f docker-compose.local.yml up --build
   ```
 
