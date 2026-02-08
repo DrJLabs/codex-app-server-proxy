@@ -4,7 +4,6 @@ services:
       context: .
       dockerfile: Dockerfile
     image: codex-app-server-proxy:dev
-    network_mode: host
     environment:
       - PORT=${DEV_PORT:-18010}
       - PROXY_ENV=dev
@@ -77,6 +76,11 @@ services:
       - ./scripts:/app/scripts:ro
       # Persist Copilot capture artifacts
       - ./test-results:/app/test-results
+    networks:
+      - traefik
+    # Keep a direct loopback port for local scripts and debugging (prod-style publish).
+    ports:
+      - "127.0.0.1:${DEV_PORT:-18010}:${DEV_PORT:-18010}"
     restart: unless-stopped
     labels:
       - traefik.enable=true

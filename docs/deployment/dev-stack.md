@@ -32,4 +32,6 @@ curl -s http://127.0.0.1:18010/v1/models | jq .
 ## Notes
 
 - ForwardAuth in the dev stack uses `http://127.0.0.1:18081/verify`.
+- The dev stack uses bridged Docker networking (no `network_mode: host`) and publishes the app port to loopback
+  (`127.0.0.1:${DEV_PORT:-18010}`) for local scripts, matching the production-style port publishing pattern.
 - By default the stack uses the real Codex CLI if mounted; you can point `CODEX_BIN` at a shim for offline testing.
