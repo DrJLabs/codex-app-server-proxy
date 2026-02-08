@@ -6,7 +6,7 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROD_COMPOSE="${PROD_COMPOSE:-$ROOT_DIR/docker-compose.yml}"
-DEV_COMPOSE="${DEV_COMPOSE:-$ROOT_DIR/infra/compose/compose.dev.stack.yml}"
+DEV_COMPOSE="${DEV_COMPOSE:-$ROOT_DIR/compose/dev-stack.yml}"
 BACKUP_DIR="${BACKUP_DIR:-$HOME/.cache/codex-backups}"
 APP_IMAGE_BASENAME="codex-app-server-proxy"
 

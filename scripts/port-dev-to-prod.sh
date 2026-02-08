@@ -59,8 +59,8 @@ need docker
 need yq
 
 # 1) Basic repo sanity
-if [[ ! -f docker-compose.yml ]] || [[ ! -f infra/compose/compose.dev.stack.yml ]]; then
-  echo "Error: missing compose files (expected docker-compose.yml and infra/compose/compose.dev.stack.yml)" >&2
+if [[ ! -f docker-compose.yml ]] || [[ ! -f compose/dev-stack.yml ]]; then
+  echo "Error: missing compose files (expected docker-compose.yml and compose/dev-stack.yml)" >&2
   exit 2
 fi
 
