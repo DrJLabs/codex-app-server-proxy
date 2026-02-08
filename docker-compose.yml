@@ -24,6 +24,8 @@ services:
       - PROXY_SSE_KEEPALIVE_MS=${PROXY_SSE_KEEPALIVE_MS:-15000}
       - PROXY_SSE_MAX_CONCURRENCY=${PROXY_SSE_MAX_CONCURRENCY:-20}
       - PROXY_MAX_CHAT_CHOICES=${PROXY_MAX_CHAT_CHOICES:-20}
+      # Align with dev: avoid defaulting to 4 (src/config/index.js) which can trip "worker at capacity".
+      - WORKER_MAX_CONCURRENCY=${WORKER_MAX_CONCURRENCY:-8}
       - CODEX_BIN=${CODEX_BIN:-/usr/local/lib/codex-cli/bin/codex.js}
       - PROXY_STOP_AFTER_TOOLS=${PROXY_STOP_AFTER_TOOLS:-}
       - PROXY_STOP_AFTER_TOOLS_MODE=${PROXY_STOP_AFTER_TOOLS_MODE:-burst}
@@ -138,6 +140,8 @@ services:
       - PROXY_SSE_KEEPALIVE_MS=${PROXY_SSE_KEEPALIVE_MS:-15000}
       - PROXY_SSE_MAX_CONCURRENCY=${PROXY_SSE_MAX_CONCURRENCY:-20}
       - PROXY_MAX_CHAT_CHOICES=${PROXY_MAX_CHAT_CHOICES:-20}
+      # Align with dev: avoid defaulting to 4 (src/config/index.js) which can trip "worker at capacity".
+      - WORKER_MAX_CONCURRENCY=${WORKER_MAX_CONCURRENCY:-8}
       - CODEX_BIN=${CODEX_BIN:-/usr/local/lib/codex-cli/bin/codex.js}
       - PROXY_STOP_AFTER_TOOLS=${PROXY_STOP_AFTER_TOOLS:-}
       - PROXY_STOP_AFTER_TOOLS_MODE=${PROXY_STOP_AFTER_TOOLS_MODE:-burst}

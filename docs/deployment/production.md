@@ -14,6 +14,10 @@
 2. Provision `./.codex-api/` on the production host with at least:
    - `config.toml`
    - `auth.json` (and any other Codex credentials needed at runtime)
+3. Worker concurrency:
+   - `WORKER_MAX_CONCURRENCY` controls how many in-flight app-server requests a single proxy instance will allow.
+   - In production, `docker-compose.yml` defaults this to `8` to avoid tripping `app-server worker at capacity` (the code default is `4`).
+   - You can override it via `.env` if needed.
 
 ## Optional: Copilot trace header injection
 
