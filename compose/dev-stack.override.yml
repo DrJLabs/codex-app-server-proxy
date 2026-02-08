@@ -1,0 +1,79 @@
+services:
+  app-dev:
+    # Keep a direct loopback port for local scripts and debugging (prod-style publish).
+    ports:
+      - "127.0.0.1:${DEV_PORT:-18010}:${DEV_PORT:-18010}"
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik
+
+      # Backend service port inside the container
+      - traefik.http.services.codex-dev-api.loadbalancer.server.port=${DEV_PORT:-18010}
+
+      # Protected API router (dev)
+      - traefik.http.routers.codex-dev-api.rule=Host(`${DEV_DOMAIN?set DEV_DOMAIN}`) && PathPrefix(`/v1`)
+      - traefik.http.routers.codex-dev-api.entrypoints=websecure
+      - traefik.http.routers.codex-dev-api.tls=true
+      - traefik.http.routers.codex-dev-api.middlewares=codex-dev-cors,codex-dev-headers,codex-dev-ratelimit,codex-dev-forwardauth
+
+      # CORS preflight (OPTIONS): bypass ForwardAuth entirely; Traefik responds with headers
+      - traefik.http.routers.codex-dev-preflight.rule=Host(`${DEV_DOMAIN?set DEV_DOMAIN}`) && PathPrefix(`/v1`) && Method(`OPTIONS`)
+      - traefik.http.routers.codex-dev-preflight.entrypoints=websecure
+      - traefik.http.routers.codex-dev-preflight.tls=true
+      - traefik.http.routers.codex-dev-preflight.priority=10000
+      - traefik.http.routers.codex-dev-preflight.middlewares=codex-dev-cors,codex-dev-headers,codex-dev-ratelimit
+      - traefik.http.routers.codex-dev-preflight.service=noop@internal
+
+      # ForwardAuth middleware (edge bearer auth)
+      - traefik.http.middlewares.codex-dev-forwardauth.forwardauth.address=http://127.0.0.1:18081/verify
+      - traefik.http.middlewares.codex-dev-forwardauth.forwardauth.trustForwardHeader=true
+      - traefik.http.middlewares.codex-dev-forwardauth.forwardauth.authRequestHeaders=Authorization
+
+      # Public models router (no auth): allow clients to discover available models
+      - traefik.http.routers.codex-dev-models.rule=Host(`${DEV_DOMAIN?set DEV_DOMAIN}`) && (Path(`/v1/models`) || Path(`/v1/models/`))
+      - traefik.http.routers.codex-dev-models.entrypoints=websecure
+      - traefik.http.routers.codex-dev-models.tls=true
+      - traefik.http.routers.codex-dev-models.priority=9000
+      - traefik.http.routers.codex-dev-models.middlewares=codex-dev-cors,codex-dev-headers,codex-dev-ratelimit
+      - traefik.http.routers.codex-dev-models.service=codex-dev-api
+
+      # CORS middleware (edge)
+      - traefik.http.middlewares.codex-dev-cors.headers.accessControlAllowMethods=GET,POST,HEAD,OPTIONS
+      - traefik.http.middlewares.codex-dev-cors.headers.accessControlAllowHeaders=Authorization,Content-Type,Accept,OpenAI-Organization,OpenAI-Beta,OpenAI-Version,OpenAI-Project,X-Requested-With,X-Stainless-OS,X-Stainless-Lang,X-Stainless-Arch,X-Stainless-Runtime,X-Stainless-Runtime-Version,X-Stainless-Package-Version,X-Stainless-Timeout,X-Stainless-Retry-Count,dangerously-allow-browser
+      - traefik.http.middlewares.codex-dev-cors.headers.accessControlAllowOriginList=${PROXY_CORS_ALLOWED_ORIGINS?set PROXY_CORS_ALLOWED_ORIGINS}
+      - traefik.http.middlewares.codex-dev-cors.headers.accessControlAllowCredentials=true
+      - traefik.http.middlewares.codex-dev-cors.headers.accessControlMaxAge=600
+      - traefik.http.middlewares.codex-dev-cors.headers.accessControlExposeHeaders=Content-Type
+      - traefik.http.middlewares.codex-dev-cors.headers.addVaryHeader=true
+
+      # Security headers middleware (edge)
+      - traefik.http.middlewares.codex-dev-headers.headers.stsSeconds=31536000
+      - traefik.http.middlewares.codex-dev-headers.headers.stsIncludeSubdomains=true
+      - traefik.http.middlewares.codex-dev-headers.headers.stsPreload=true
+      - traefik.http.middlewares.codex-dev-headers.headers.frameDeny=true
+      - traefik.http.middlewares.codex-dev-headers.headers.contentTypeNosniff=true
+      - traefik.http.middlewares.codex-dev-headers.headers.referrerPolicy=no-referrer
+      - traefik.http.middlewares.codex-dev-headers.headers.permissionsPolicy=camera=(), microphone=(), geolocation=(), interest-cohort=()
+      - traefik.http.middlewares.codex-dev-headers.headers.customResponseHeaders.X-DNS-Prefetch-Control=off
+
+      # Rate limit middleware
+      - traefik.http.middlewares.codex-dev-ratelimit.ratelimit.average=${DEV_RATE_LIMIT_AVG:-2000}
+      - traefik.http.middlewares.codex-dev-ratelimit.ratelimit.burst=${DEV_RATE_LIMIT_BURST:-4000}
+
+      # Public health router (no auth)
+      - traefik.http.routers.codex-dev-health.rule=Host(`${DEV_DOMAIN?set DEV_DOMAIN}`) && Path(`/healthz`)
+      - traefik.http.routers.codex-dev-health.entrypoints=websecure
+      - traefik.http.routers.codex-dev-health.tls=true
+      - traefik.http.routers.codex-dev-health.service=codex-dev-api
+      - traefik.http.routers.codex-dev-health.middlewares=codex-dev-headers
+
+      # Public readiness/liveness router (no auth)
+      - traefik.http.routers.codex-dev-readyz.rule=Host(`${DEV_DOMAIN?set DEV_DOMAIN}`) && (Path(`/readyz`) || Path(`/livez`))
+      - traefik.http.routers.codex-dev-readyz.entrypoints=websecure
+      - traefik.http.routers.codex-dev-readyz.tls=true
+      - traefik.http.routers.codex-dev-readyz.service=codex-dev-api
+      - traefik.http.routers.codex-dev-readyz.middlewares=codex-dev-headers
+
+  auth-dev:
+    ports:
+      - 127.0.0.1:18081:8080

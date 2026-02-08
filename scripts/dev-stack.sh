@@ -10,7 +10,8 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 compose_args=(
   --project-directory "$REPO_ROOT"
   -p codex-dev
-  -f "$REPO_ROOT/compose/dev-stack.yml"
+  -f "$REPO_ROOT/compose/dev-stack.base.yml"
+  -f "$REPO_ROOT/compose/dev-stack.override.yml"
   --env-file "$REPO_ROOT/.env.dev"
 )
 

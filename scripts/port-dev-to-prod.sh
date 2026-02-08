@@ -59,8 +59,8 @@ need docker
 need yq
 
 # 1) Basic repo sanity
-if [[ ! -f docker-compose.yml ]] || [[ ! -f compose/dev-stack.yml ]]; then
-  echo "Error: missing compose files (expected docker-compose.yml and compose/dev-stack.yml)" >&2
+if [[ ! -f docker-compose.yml ]] || [[ ! -f compose/dev-stack.base.yml ]] || [[ ! -f compose/dev-stack.override.yml ]]; then
+  echo "Error: missing compose files (expected docker-compose.yml, compose/dev-stack.base.yml, and compose/dev-stack.override.yml)" >&2
   exit 2
 fi
 

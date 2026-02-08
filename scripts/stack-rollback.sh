@@ -6,7 +6,8 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROD_COMPOSE="${PROD_COMPOSE:-$ROOT_DIR/docker-compose.yml}"
-DEV_COMPOSE="${DEV_COMPOSE:-$ROOT_DIR/compose/dev-stack.yml}"
+DEV_COMPOSE_BASE="${DEV_COMPOSE_BASE:-$ROOT_DIR/compose/dev-stack.base.yml}"
+DEV_COMPOSE_OVERRIDE="${DEV_COMPOSE_OVERRIDE:-$ROOT_DIR/compose/dev-stack.override.yml}"
 BACKUP_DIR="${BACKUP_DIR:-$HOME/.cache/codex-backups}"
 APP_IMAGE_BASENAME="codex-app-server-proxy"
 
@@ -192,7 +193,8 @@ retag_and_redeploy() {
     service=app
   else
     base_tag="$APP_IMAGE_BASENAME:dev"
-    compose_file="$DEV_COMPOSE"
+    compose_file_base="$DEV_COMPOSE_BASE"
+    compose_file_override="$DEV_COMPOSE_OVERRIDE"
     service=app-dev
   fi
 
@@ -204,7 +206,7 @@ retag_and_redeploy() {
   docker tag "$iid" "$base_tag"
   log "$env: redeploying with compose (no build)"
   if [[ "$env" == "dev" ]]; then
-    docker compose -p codex-dev --env-file .env.dev -f "$compose_file" up -d --no-build "$service"
+    docker compose -p codex-dev --env-file .env.dev -f "$compose_file_base" -f "$compose_file_override" up -d --no-build "$service"
   else
     docker compose -f "$compose_file" up -d --no-build "$service"
   fi
