@@ -8,6 +8,9 @@ This repository keeps production Compose at the repo root and dev/local Compose 
   - Production compose source of truth (Traefik labels, external `traefik` network, `.codex-api` mount).
   - Optional `app-responses` service is behind the `responses` profile.
   - Used by: `npm run prod:stack:*`, `docker compose up ...` on the production host.
+- `prod.local-build.override.yml`
+  - Optional production override that adds `build:` so you can build from a repo checkout.
+  - Enable with: `PROD_LOCAL_BUILD=1 npm run prod:stack:up`.
 - `dev-stack.base.yml`
   - Dev stack base (services, env, mounts, networks). Does not contain list fields that are easy to accidentally duplicate.
 - `dev-stack.override.yml`
@@ -29,6 +32,7 @@ This repository keeps production Compose at the repo root and dev/local Compose 
   - `npm run prod:stack:down`
   - `npm run prod:stack:logs`
   - `npm run prod:stack:rebuild`
+  - `PROD_LOCAL_BUILD=1 npm run prod:stack:up`
   - `npm run prod:stack:config` (render merged config)
 
 ## Where To Edit

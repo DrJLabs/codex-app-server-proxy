@@ -57,6 +57,21 @@ By default, this does not start the optional `app-responses` compose profile. To
 PROD_ENABLE_RESPONSES=1 npm run prod:stack:up
 ```
 
+### Optional: Local Build on the Production Host
+
+By default, production pulls a published image from GHCR. If you need to build locally from this repo checkout
+(for example, to test an un-pushed Dockerfile change), you can enable the local-build override:
+
+```bash
+PROD_LOCAL_BUILD=1 npm run prod:stack:up
+```
+
+Optionally tag the built image:
+
+```bash
+PROD_LOCAL_BUILD=1 PROD_LOCAL_IMAGE=codex-app-server-proxy:local-test npm run prod:stack:up
+```
+
 ### Optional: Dedicated Responses Host (compose profile)
 
 `docker-compose.yml` contains an optional `app-responses` service that can host `/v1/responses` on a dedicated

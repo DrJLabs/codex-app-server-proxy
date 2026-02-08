@@ -1,0 +1,15 @@
+services:
+  app:
+    # Optional override: build the production service locally instead of pulling from GHCR.
+    # When both `build` and `image` are set, Compose builds and tags the image.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${PROD_LOCAL_IMAGE:-codex-app-server-proxy:local}
+
+  # Keep the optional responses service consistent when the profile is enabled.
+  app-responses:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${PROD_LOCAL_IMAGE:-codex-app-server-proxy:local}
