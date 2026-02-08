@@ -1,6 +1,14 @@
-# Dev Stack ([../../compose/dev-stack.yml](../../compose/dev-stack.yml))
+# Dev Stack ([../../compose/dev-stack.base.yml](../../compose/dev-stack.base.yml) + [../../compose/dev-stack.override.yml](../../compose/dev-stack.override.yml))
 
 The dev stack mirrors production behind Traefik and a ForwardAuth service, but runs as a local compose project.
+
+This stack is intentionally split into:
+
+- `compose/dev-stack.base.yml` (core services, env, mounts)
+- `compose/dev-stack.override.yml` (ports + Traefik labels)
+
+Docker Compose merges lists by concatenation when multiple files are used, so env-specific list fields (like `ports`
+and the Traefik `labels` list) live only in the override file to avoid accidental duplication.
 
 ## Configure
 

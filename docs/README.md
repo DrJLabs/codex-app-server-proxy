@@ -33,7 +33,7 @@ This folder is the canonical index for repository documentation. Update this fil
 
 ## Deployment and ops
 
-- [`deployment/dev-stack.md`](deployment/dev-stack.md) — dev stack (`compose/dev-stack.yml`)
+- [`deployment/dev-stack.md`](deployment/dev-stack.md) — dev stack (`compose/dev-stack.base.yml` + `compose/dev-stack.override.yml`)
 - [`deployment/production.md`](deployment/production.md) — production compose (`docker-compose.yml`)
 - [`ops/runbooks.md`](ops/runbooks.md) — snapshot/rollback/backup/smoke workflows
 

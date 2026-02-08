@@ -5,7 +5,7 @@ This proxy is configured via environment variables. Defaults live in [`../src/co
 ## Where config is loaded from
 
 - Local Node dev (`npm run dev` / `npm run dev:shim`) loads `.env` via `scripts/dev.sh`.
-- Dev stack (`compose/dev-stack.yml`) loads `.env.dev`.
+- Dev stack (`compose/dev-stack.base.yml` + `compose/dev-stack.override.yml`) loads `.env.dev`.
 - Prod compose (`docker-compose.yml`) loads `.env` on the host.
 
 ## Compose-only settings (optional services)
