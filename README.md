@@ -56,14 +56,14 @@ npm run dev:shim
   DOMAIN=example.com \
   PROXY_CORS_ALLOWED_ORIGINS=https://example.com \
   PROXY_API_KEY=codex-local-secret \
-  docker compose up -d
+  docker compose up -d --pull always --force-recreate
   ```
 
 - Optional: a separate `app-responses` service exists in `docker-compose.yml` for hosting `/v1/responses` on a
   dedicated domain with its own Codex home directory. It is disabled by default, but can be enabled with:
 
   ```bash
-  docker compose --profile responses up -d
+  docker compose --profile responses up -d --pull always --force-recreate
   ```
 
 - Local build:
