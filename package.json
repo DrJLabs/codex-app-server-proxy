@@ -64,7 +64,7 @@
     "@opentelemetry/exporter-trace-otlp-http": "^0.52.1",
     "@opentelemetry/resources": "^1.9.0",
     "@opentelemetry/sdk-trace-base": "^1.9.0",
-    "express": "^4.21.2",
+    "express": "^4.22.1",
     "nanoid": "^5.1.6",
     "prom-client": "^15.1.3"
   },
